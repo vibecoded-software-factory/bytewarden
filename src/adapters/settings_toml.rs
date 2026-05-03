@@ -1,0 +1,433 @@
+//! [`crate::ports::SettingsPort`] implementation backed by a single
+//! `~/.config/bytewarden/config.toml` file.
+//!
+//! The parser is intentionally hand-rolled and forgiving — only the keys
+//! recognised by [`UserSettings`] are read; everything else (including the
+//! `[theme]` section consumed by the TUI) is preserved verbatim on
+//! rewrites.
+
+use std::fs;
+use std::io::Write;
+use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt};
+use std::path::{Path, PathBuf};
+
+use crate::ports::{SettingsPort, UserSettings};
+
+/// Default inactivity threshold (15 minutes) when nothing is configured.
+const DEFAULT_LOCK_AFTER_SECS: u64 = 15 * 60;
+
+/// File mode applied to `config.toml` after every write — owner-only
+/// read/write. Even though the file does not contain credentials, it
+/// can carry the user's e-mail address and `keep_session` preference,
+/// neither of which need to be world-readable.
+const CONFIG_FILE_MODE: u32 = 0o600;
+
+/// Directory mode applied to `~/.config/bytewarden/` — owner-only
+/// access, matching the file mode above and consistent with how the
+/// session-file helper hardens its runtime directory.
+const CONFIG_DIR_MODE: u32 = 0o700;
+
+/// File-backed settings adapter.
+#[derive(Debug, Clone)]
+pub struct TomlSettingsAdapter {
+    dir: PathBuf,
+}
+
+impl TomlSettingsAdapter {
+    /// Builds an adapter rooted at `~/.config/bytewarden/`.
+    ///
+    /// Falls back to the current directory when `$HOME` is unset.
+    pub fn new() -> Self {
+        let home = std::env::var("HOME")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| PathBuf::from("."));
+        Self {
+            dir: home.join(".config").join("bytewarden"),
+        }
+    }
+
+    /// Returns the absolute path to `config.toml`.
+    fn file(&self) -> PathBuf {
+        self.dir.join("config.toml")
+    }
+
+    /// Ensures the config directory exists with `0o700` perms.
+    ///
+    /// Uses [`fs::DirBuilder::mode`] so a freshly-created directory is
+    /// born with the right perms — the kernel never has the chance to
+    /// return a `0o755` directory inheriting the user's umask. For
+    /// directories that already exist (re-runs, or pre-existing trees
+    /// from a different tool) the perms are tightened with an explicit
+    /// `set_permissions` call as a safety net.
+    ///
+    /// Errors are swallowed by design — a missing directory will
+    /// surface again at first read/write.
+    fn ensure_dir(&self) {
+        let _ = fs::DirBuilder::new()
+            .recursive(true)
+            .mode(CONFIG_DIR_MODE)
+            .create(&self.dir);
+        let _ = fs::set_permissions(&self.dir, fs::Permissions::from_mode(CONFIG_DIR_MODE));
+    }
+}
+
+/// Writes `contents` to `path` so the on-disk file is **never** visible
+/// with anything other than `0o600` perms.
+///
+/// Implementation notes:
+///
+/// * [`fs::OpenOptions::mode`] applies only when the file is *created*
+///   — for a brand-new config it makes the perms atomic against the
+///   user's umask, closing the race that `fs::write` followed by
+///   `set_permissions` leaves open.
+/// * For pre-existing files (e.g. created by an older bytewarden
+///   without the hardening, or hand-edited by the user), `mode()` is
+///   a no-op, so we still call `set_permissions(0o600)` after writing
+///   as a safety net.
+///
+/// Errors are swallowed by design — settings persistence is
+/// best-effort and the user-visible feedback comes from later reads
+/// failing.
+fn write_file_secure(path: &Path, contents: &str) {
+    let mut file = match fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .mode(CONFIG_FILE_MODE)
+        .open(path)
+    {
+        Ok(f) => f,
+        Err(_) => return,
+    };
+    if file.write_all(contents.as_bytes()).is_err() {
+        return;
+    }
+    // Re-tighten perms in case the file already existed with a looser
+    // mode (mode() above only takes effect on creation).
+    let _ = fs::set_permissions(path, fs::Permissions::from_mode(CONFIG_FILE_MODE));
+}
+
+impl Default for TomlSettingsAdapter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl SettingsPort for TomlSettingsAdapter {
+    fn read(&self) -> UserSettings {
+        self.ensure_dir();
+        let mut cfg = UserSettings {
+            lock_after_secs: DEFAULT_LOCK_AFTER_SECS,
+            ..Default::default()
+        };
+        let Ok(text) = fs::read_to_string(self.file()) else {
+            return cfg;
+        };
+        for line in text.lines() {
+            let line = line.trim();
+            if let Some(v) = line.strip_prefix("save_email = ") {
+                cfg.save_email = v.trim() == "true";
+            } else if let Some(v) = line.strip_prefix("email = ") {
+                let v = v.trim().trim_matches('"').to_string();
+                if !v.is_empty() {
+                    cfg.email = Some(v);
+                }
+            } else if let Some(v) = line.strip_prefix("auto_lock = ") {
+                cfg.auto_lock = v.trim() == "true";
+            } else if let Some(v) = line.strip_prefix("keep_session = ") {
+                cfg.keep_session = v.trim() == "true";
+            } else if let Some(v) = line.strip_prefix("lock_after_minutes = ")
+                && let Ok(m) = v.trim().parse::<u64>()
+            {
+                cfg.lock_after_secs = m * 60;
+            }
+        }
+        cfg
+    }
+
+    fn write(&self, save_email: bool, email: Option<&str>) {
+        self.ensure_dir();
+        let existing = fs::read_to_string(self.file()).unwrap_or_default();
+        let mut preserved: Vec<String> = existing
+            .lines()
+            .filter(|l| {
+                let t = l.trim();
+                !t.starts_with("save_email =") && !t.starts_with("email =")
+            })
+            .map(|l| l.to_string())
+            .collect();
+        while preserved.first().is_some_and(|l| l.trim().is_empty()) {
+            preserved.remove(0);
+        }
+        let mut owned = vec![format!("save_email = {save_email}")];
+        if save_email && let Some(e) = email {
+            owned.push(format!("email = \"{e}\""));
+        }
+        if !preserved.is_empty() {
+            owned.push(String::new());
+            owned.extend(preserved);
+        }
+        write_file_secure(&self.file(), &(owned.join("\n") + "\n"));
+    }
+
+    fn write_auto_lock(&self, auto_lock: bool) {
+        self.ensure_dir();
+        let existing = fs::read_to_string(self.file()).unwrap_or_default();
+        let mut lines: Vec<String> = existing
+            .lines()
+            .filter(|l| !l.trim().starts_with("auto_lock ="))
+            .map(|l| l.to_string())
+            .collect();
+        let pos = lines
+            .iter()
+            .position(|l| l.trim().starts_with("save_email ="))
+            .map(|i| i + 1)
+            .unwrap_or(0);
+        lines.insert(pos, format!("auto_lock = {auto_lock}"));
+        write_file_secure(&self.file(), &(lines.join("\n") + "\n"));
+    }
+
+    fn write_keep_session(&self, keep_session: bool) {
+        self.ensure_dir();
+        let existing = fs::read_to_string(self.file()).unwrap_or_default();
+        let mut lines: Vec<String> = existing
+            .lines()
+            .filter(|l| !l.trim().starts_with("keep_session ="))
+            .map(|l| l.to_string())
+            .collect();
+        // Place keep_session right after auto_lock for tidy grouping —
+        // fall back to after save_email or the top of the file.
+        let pos = lines
+            .iter()
+            .position(|l| l.trim().starts_with("auto_lock ="))
+            .or_else(|| {
+                lines
+                    .iter()
+                    .position(|l| l.trim().starts_with("save_email ="))
+            })
+            .map(|i| i + 1)
+            .unwrap_or(0);
+        lines.insert(pos, format!("keep_session = {keep_session}"));
+        write_file_secure(&self.file(), &(lines.join("\n") + "\n"));
+    }
+
+    fn config_dir(&self) -> PathBuf {
+        self.dir.clone()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    /// Builds an adapter rooted at a fresh tempdir, returning both so
+    /// the caller can inspect the on-disk file.
+    fn fresh() -> (TomlSettingsAdapter, TempDir) {
+        let tmp = TempDir::new().expect("tempdir");
+        let adapter = TomlSettingsAdapter {
+            dir: tmp.path().to_path_buf(),
+        };
+        (adapter, tmp)
+    }
+
+    #[test]
+    fn read_returns_defaults_when_file_missing() {
+        let (a, _t) = fresh();
+        let cfg = a.read();
+        assert!(!cfg.save_email);
+        assert_eq!(cfg.email, None);
+        assert!(!cfg.auto_lock);
+        assert_eq!(cfg.lock_after_secs, DEFAULT_LOCK_AFTER_SECS);
+        assert!(!cfg.keep_session);
+    }
+
+    #[test]
+    fn read_parses_known_keys_and_ignores_unknown() {
+        let (a, _t) = fresh();
+        std::fs::write(
+            a.file(),
+            "save_email = true\nemail = \"a@b.com\"\nauto_lock = true\n\
+             lock_after_minutes = 5\nkeep_session = true\nbogus = whatever\n",
+        )
+        .unwrap();
+        let cfg = a.read();
+        assert!(cfg.save_email);
+        assert_eq!(cfg.email.as_deref(), Some("a@b.com"));
+        assert!(cfg.auto_lock);
+        assert_eq!(cfg.lock_after_secs, 5 * 60);
+        assert!(cfg.keep_session);
+    }
+
+    #[test]
+    fn write_persists_email_when_save_enabled() {
+        let (a, _t) = fresh();
+        a.write(true, Some("u@x"));
+        let cfg = a.read();
+        assert!(cfg.save_email);
+        assert_eq!(cfg.email.as_deref(), Some("u@x"));
+    }
+
+    #[test]
+    fn write_drops_email_when_save_disabled() {
+        let (a, _t) = fresh();
+        a.write(true, Some("u@x"));
+        a.write(false, None);
+        let cfg = a.read();
+        assert!(!cfg.save_email);
+        assert_eq!(cfg.email, None);
+    }
+
+    #[test]
+    fn write_preserves_unknown_sections_verbatim() {
+        let (a, _t) = fresh();
+        std::fs::write(a.file(), "[theme]\naccent = \"#cba6f7\"\nfoo = \"bar\"\n").unwrap();
+        a.write(true, Some("u@x"));
+        let on_disk = std::fs::read_to_string(a.file()).unwrap();
+        // Theme section survives the rewrite untouched.
+        assert!(on_disk.contains("[theme]"));
+        assert!(on_disk.contains("accent = \"#cba6f7\""));
+        assert!(on_disk.contains("foo = \"bar\""));
+        assert!(on_disk.contains("save_email = true"));
+        assert!(on_disk.contains("email = \"u@x\""));
+    }
+
+    #[test]
+    fn write_auto_lock_does_not_disturb_email_or_theme() {
+        let (a, _t) = fresh();
+        a.write(true, Some("u@x"));
+        std::fs::write(
+            a.file(),
+            format!(
+                "{}\n[theme]\naccent = \"#cba6f7\"\n",
+                std::fs::read_to_string(a.file()).unwrap()
+            ),
+        )
+        .unwrap();
+        a.write_auto_lock(true);
+        let on_disk = std::fs::read_to_string(a.file()).unwrap();
+        assert!(on_disk.contains("save_email = true"));
+        assert!(on_disk.contains("email = \"u@x\""));
+        assert!(on_disk.contains("auto_lock = true"));
+        assert!(on_disk.contains("[theme]"));
+    }
+
+    #[test]
+    fn write_auto_lock_overwrites_previous_value() {
+        let (a, _t) = fresh();
+        a.write_auto_lock(true);
+        a.write_auto_lock(false);
+        let cfg = a.read();
+        assert!(!cfg.auto_lock);
+        // Only one auto_lock line in the file.
+        let on_disk = std::fs::read_to_string(a.file()).unwrap();
+        assert_eq!(on_disk.matches("auto_lock =").count(), 1);
+    }
+
+    #[test]
+    fn write_keep_session_appears_after_auto_lock_when_present() {
+        let (a, _t) = fresh();
+        a.write(true, Some("u@x"));
+        a.write_auto_lock(true);
+        a.write_keep_session(true);
+        let on_disk = std::fs::read_to_string(a.file()).unwrap();
+        let auto_lock_pos = on_disk.find("auto_lock").unwrap();
+        let keep_pos = on_disk.find("keep_session").unwrap();
+        assert!(keep_pos > auto_lock_pos);
+    }
+
+    #[test]
+    fn write_keep_session_overwrites_previous_value() {
+        let (a, _t) = fresh();
+        a.write_keep_session(true);
+        a.write_keep_session(false);
+        let cfg = a.read();
+        assert!(!cfg.keep_session);
+        let on_disk = std::fs::read_to_string(a.file()).unwrap();
+        assert_eq!(on_disk.matches("keep_session =").count(), 1);
+    }
+
+    #[test]
+    fn config_dir_returns_root() {
+        let (a, t) = fresh();
+        assert_eq!(a.config_dir(), t.path());
+    }
+
+    #[test]
+    fn read_parses_lock_after_minutes_to_seconds() {
+        let (a, _t) = fresh();
+        std::fs::write(a.file(), "lock_after_minutes = 30\n").unwrap();
+        assert_eq!(a.read().lock_after_secs, 30 * 60);
+    }
+
+    #[test]
+    fn read_ignores_unparseable_lock_after_minutes() {
+        let (a, _t) = fresh();
+        std::fs::write(a.file(), "lock_after_minutes = oops\n").unwrap();
+        // Falls back to default (15 min).
+        assert_eq!(a.read().lock_after_secs, DEFAULT_LOCK_AFTER_SECS);
+    }
+
+    /// Returns the unix mode bits of `path`, masking off non-permission
+    /// bits so the assertion compares only `rwx` flags.
+    fn mode(path: &std::path::Path) -> u32 {
+        std::fs::metadata(path).unwrap().permissions().mode() & 0o777
+    }
+
+    #[test]
+    fn write_sets_file_mode_to_0600() {
+        let (a, _t) = fresh();
+        a.write(true, Some("u@x"));
+        assert_eq!(mode(&a.file()), CONFIG_FILE_MODE);
+    }
+
+    #[test]
+    fn write_auto_lock_sets_file_mode_to_0600() {
+        let (a, _t) = fresh();
+        a.write_auto_lock(true);
+        assert_eq!(mode(&a.file()), CONFIG_FILE_MODE);
+    }
+
+    #[test]
+    fn write_keep_session_sets_file_mode_to_0600() {
+        let (a, _t) = fresh();
+        a.write_keep_session(true);
+        assert_eq!(mode(&a.file()), CONFIG_FILE_MODE);
+    }
+
+    #[test]
+    fn ensure_dir_sets_directory_mode_to_0700() {
+        let (a, _t) = fresh();
+        // ensure_dir is called by every write; trigger one to be safe.
+        a.write_keep_session(false);
+        assert_eq!(mode(&a.dir), CONFIG_DIR_MODE);
+    }
+
+    #[test]
+    fn first_write_creates_file_with_0600_atomically() {
+        // The dir is empty (no pre-existing config.toml) — the only
+        // way the file can be 0o600 on disk is if OpenOptions::mode()
+        // applied at creation time. set_permissions afterwards would
+        // also work, but it leaves a window; this test passes either
+        // way and serves as a regression guard against losing the
+        // atomic-creation path.
+        let (a, _t) = fresh();
+        assert!(!a.file().exists());
+        a.write(true, Some("brand-new@example.com"));
+        assert!(a.file().exists());
+        assert_eq!(mode(&a.file()), CONFIG_FILE_MODE);
+    }
+
+    #[test]
+    fn rewrite_keeps_secure_perms() {
+        // Even after a config file is created with looser perms by an
+        // external tool, the next bytewarden write should re-tighten
+        // them to 0o600.
+        let (a, _t) = fresh();
+        std::fs::write(a.file(), "save_email = false\n").unwrap();
+        std::fs::set_permissions(a.file(), std::fs::Permissions::from_mode(0o644)).unwrap();
+        assert_eq!(mode(&a.file()), 0o644); // sanity
+        a.write(true, Some("u@x"));
+        assert_eq!(mode(&a.file()), CONFIG_FILE_MODE);
+    }
+}

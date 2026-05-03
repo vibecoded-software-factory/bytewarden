@@ -1,0 +1,132 @@
+//! Crossterm event dispatching.
+//!
+//! [`handle_events`] is the single entry point called from the run loop.
+//! It first handles global keys (Ctrl+C → quit) and then routes to a
+//! per-screen handler.
+
+pub mod attachment_download;
+pub mod attachment_upload;
+pub mod confirm;
+pub mod confirm_delete_attachment;
+pub mod create;
+pub mod detail;
+pub mod export;
+pub mod folder_delete_confirm;
+pub mod folder_name;
+pub mod generator;
+pub mod import;
+pub mod login;
+pub mod logout_confirm;
+pub mod memberships;
+pub mod mouse;
+pub mod nav;
+pub mod rename_field;
+pub mod send_create;
+pub mod vault;
+
+use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+
+use crate::tui::app::App;
+use crate::tui::screens::Screen;
+
+/// Returns `true` when the key was pressed with the Alt modifier.
+///
+/// On Linux, AltGr arrives as `ALT | CONTROL`; we accept any modifier
+/// set that *contains* `ALT` so AltGr-only keyboards still work.
+#[inline]
+pub fn is_alt(key: &KeyEvent) -> bool {
+    key.modifiers.contains(KeyModifiers::ALT)
+}
+
+/// Per-axis step constants for help-popup scrolling.
+const HELP_PAGE_ROWS: u16 = 8;
+const HELP_PAGE_COLS: u16 = 16;
+
+/// Key handler for the help popup itself. Only Esc and F1 close it —
+/// any other navigation key scrolls the popup so it can show content
+/// taller or wider than its viewport.
+fn handle_help(app: &mut App, key: KeyEvent) {
+    let (y, x) = app.help_scroll;
+    match key.code {
+        KeyCode::Esc | KeyCode::F(1) | KeyCode::Char('q') => app.go_back(),
+        KeyCode::Char('j') | KeyCode::Down => app.help_scroll.0 = y.saturating_add(1),
+        KeyCode::Char('k') | KeyCode::Up => app.help_scroll.0 = y.saturating_sub(1),
+        KeyCode::Char('h') | KeyCode::Left => app.help_scroll.1 = x.saturating_sub(2),
+        KeyCode::Char('l') | KeyCode::Right => app.help_scroll.1 = x.saturating_add(2),
+        KeyCode::PageDown => app.help_scroll.0 = y.saturating_add(HELP_PAGE_ROWS),
+        KeyCode::PageUp => app.help_scroll.0 = y.saturating_sub(HELP_PAGE_ROWS),
+        KeyCode::Home => app.help_scroll = (0, 0),
+        KeyCode::End => app.help_scroll.0 = u16::MAX, // renderer clamps
+        // Shift+Left / Shift+Right page horizontally.
+        _ if key.modifiers.contains(KeyModifiers::SHIFT) => match key.code {
+            KeyCode::Char('H') => app.help_scroll.1 = x.saturating_sub(HELP_PAGE_COLS),
+            KeyCode::Char('L') => app.help_scroll.1 = x.saturating_add(HELP_PAGE_COLS),
+            _ => {}
+        },
+        _ => {}
+    }
+}
+
+/// Returns the screens where pressing F1 should open the help popup.
+///
+/// Popups (Generator, Export, RenameField, …) are deliberately excluded:
+/// each carries its own self-contained instructions and overlaying yet
+/// another popup on top would lose the user's in-progress state. The
+/// user must Esc out of any popup first.
+fn f1_opens_help(screen: &Screen) -> bool {
+    matches!(
+        screen,
+        Screen::Vault | Screen::Login | Screen::Detail | Screen::Create
+    )
+}
+
+/// Dispatches a pre-read crossterm event to the right per-screen handler.
+pub fn handle_events(app: &mut App, ev: Event) {
+    match ev {
+        Event::Key(key) => {
+            if key.kind != KeyEventKind::Press {
+                return;
+            }
+            // Global quit shortcut.
+            if key.code == KeyCode::Char('c') && key.modifiers == KeyModifiers::CONTROL {
+                app.should_quit = true;
+                return;
+            }
+            // Global help shortcut — F1 opens the help popup from any
+            // main screen. From the help screen itself it closes (any
+            // key does), and from popups it falls through (the popup
+            // handler decides). The originating screen is stashed so
+            // the help renderer can show the correct background and
+            // scope its content.
+            if key.code == KeyCode::F(1) && f1_opens_help(&app.screen) {
+                app.help_from = Some(app.screen.clone());
+                app.help_scroll = (0, 0);
+                app.screen = Screen::Help;
+                return;
+            }
+            match app.screen.clone() {
+                Screen::Splash => {}
+                Screen::Login => login::handle(app, key),
+                Screen::Vault => vault::handle(app, key),
+                Screen::Detail => detail::handle(app, key),
+                Screen::Help => handle_help(app, key),
+                Screen::Create => create::handle(app, key),
+                Screen::ConfirmDelete => confirm::handle(app, key),
+                Screen::ConfirmLogout => logout_confirm::handle(app, key),
+                Screen::Generator => generator::handle(app, key),
+                Screen::RenameField => rename_field::handle(app, key),
+                Screen::FolderName => folder_name::handle(app, key),
+                Screen::ConfirmDeleteFolder => folder_delete_confirm::handle(app, key),
+                Screen::Export => export::handle(app, key),
+                Screen::Import => import::handle(app, key),
+                Screen::AttachmentUpload => attachment_upload::handle(app, key),
+                Screen::AttachmentDownload => attachment_download::handle(app, key),
+                Screen::ConfirmDeleteAttachment => confirm_delete_attachment::handle(app, key),
+                Screen::SendCreate => send_create::handle(app, key),
+                Screen::Memberships => memberships::handle(app, key),
+            }
+        }
+        Event::Mouse(mouse) => mouse::handle(app, mouse),
+        _ => {}
+    }
+}

@@ -1,0 +1,21 @@
+# Rust build artifacts
+/target/
+
+# Cargo lock is kept for binaries (remove this line if it's a library)
+# Cargo.lock
+
+# Environment variables / secrets
+.env
+.env.*
+
+# Editor directories and files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+.claude
