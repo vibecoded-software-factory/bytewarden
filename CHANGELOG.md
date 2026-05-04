@@ -64,7 +64,14 @@ First public release.
 - 190 unit tests + 4 doctests passing.
 - ~95 % line coverage on the testable layer (domain, port-pure adapters, TUI
   helpers, validation, session-file).
-- `cargo clippy -D warnings` and `cargo fmt --check` clean.
-- GitHub Actions CI on every push and PR.
+- `cargo clippy -D warnings` and `cargo fmt --check` clean on Rust 1.95.
+- Rust toolchain pinned to 1.95.0 via `rust-toolchain.toml` — local
+  development and CI share the same compiler / clippy / rustfmt versions,
+  so a stable bump cannot silently break the gate. Bumping the channel
+  in the file is the single source of truth (honoured by `rustup`
+  locally and by the CI install step), and the cargo cache key hashes
+  the file so a toolchain bump auto-invalidates the cache.
+- GitHub Actions CI on every push and pull request against `main` and
+  `dev`.
 
-[1.0.0]: https://github.com/51lv3str1/bytewarden/releases/tag/v1.0.0
+[1.0.0]: https://github.com/vibecoded-software-factory/bytewarden/releases/tag/v1.0.0
