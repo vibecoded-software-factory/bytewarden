@@ -257,6 +257,33 @@ pub fn attachment_at(item: &Item, detail_idx: usize) -> Option<&Attachment> {
     item.attachments.as_ref().and_then(|a| a.get(att_offset))
 }
 
+/// Pushes a [`DetailField`] from an `Option<String>`, skipping when
+/// `None` or empty.
+fn push_opt_field(
+    fields: &mut Vec<DetailField>,
+    label: &str,
+    val: &Option<String>,
+    is_hidden: bool,
+    show: bool,
+    reveal_idx: usize,
+) {
+    if let Some(v) = val
+        && !v.is_empty()
+    {
+        let rev = show && reveal_idx == fields.len();
+        let hid = is_hidden && !rev;
+        fields.push(DetailField {
+            label: label.to_string(),
+            value: if hid {
+                "●".repeat(v.chars().count().max(4))
+            } else {
+                v.clone()
+            },
+            hidden: hid,
+        });
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -556,32 +583,5 @@ mod tests {
     fn attachment_at_returns_none_for_out_of_range() {
         let item = empty_item(2);
         assert!(attachment_at(&item, 999).is_none());
-    }
-}
-
-/// Pushes a [`DetailField`] from an `Option<String>`, skipping when
-/// `None` or empty.
-fn push_opt_field(
-    fields: &mut Vec<DetailField>,
-    label: &str,
-    val: &Option<String>,
-    is_hidden: bool,
-    show: bool,
-    reveal_idx: usize,
-) {
-    if let Some(v) = val
-        && !v.is_empty()
-    {
-        let rev = show && reveal_idx == fields.len();
-        let hid = is_hidden && !rev;
-        fields.push(DetailField {
-            label: label.to_string(),
-            value: if hid {
-                "●".repeat(v.chars().count().max(4))
-            } else {
-                v.clone()
-            },
-            hidden: hid,
-        });
     }
 }

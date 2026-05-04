@@ -381,6 +381,57 @@ pub fn build_edit_fields_with_folders(
     fields
 }
 
+/// Builds the empty field set for the "create new item" form.
+pub fn build_create_fields(item_type: &CreateItemType) -> Vec<EditField> {
+    let ef = |label: &str, hidden: bool| EditField::new(label, "", hidden);
+    match item_type {
+        CreateItemType::Login => vec![
+            ef("Name", false),
+            ef("Username", false),
+            ef("Password", true),
+            ef("URL", false),
+            // Empty = use bw default ("Domain"). Accepts label
+            // ("Domain"/"Host"/"Starts With"/"Exact"/"Regex"/"Never")
+            // or digit 0-5.
+            ef("URL Match", false),
+            ef("Notes", false),
+        ],
+        CreateItemType::SecureNote => vec![ef("Name", false), ef("Notes", false)],
+        CreateItemType::Card => vec![
+            ef("Name", false),
+            ef("Cardholder", false),
+            ef("Brand", false),
+            ef("Number", true),
+            ef("Exp Month", false),
+            ef("Exp Year", false),
+            ef("CVV", true),
+            ef("Notes", false),
+        ],
+        CreateItemType::Identity => vec![
+            ef("Name", false),
+            ef("First Name", false),
+            ef("Last Name", false),
+            ef("Email", false),
+            ef("Phone", false),
+            ef("Company", false),
+            ef("Address", false),
+            ef("City", false),
+            ef("State", false),
+            ef("ZIP", false),
+            ef("Country", false),
+            ef("Notes", false),
+        ],
+        // The fingerprint is computed by `bw` from the private key, so
+        // the create form doesn't accept it.
+        CreateItemType::SshKey => vec![
+            ef("Name", false),
+            ef("Private Key", true),
+            ef("Public Key", false),
+            ef("Notes", false),
+        ],
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -732,56 +783,5 @@ mod tests {
         let login = build_create_fields(&CreateItemType::Login);
         let pw = login.iter().find(|f| f.label == "Password").unwrap();
         assert!(pw.hidden);
-    }
-}
-
-/// Builds the empty field set for the "create new item" form.
-pub fn build_create_fields(item_type: &CreateItemType) -> Vec<EditField> {
-    let ef = |label: &str, hidden: bool| EditField::new(label, "", hidden);
-    match item_type {
-        CreateItemType::Login => vec![
-            ef("Name", false),
-            ef("Username", false),
-            ef("Password", true),
-            ef("URL", false),
-            // Empty = use bw default ("Domain"). Accepts label
-            // ("Domain"/"Host"/"Starts With"/"Exact"/"Regex"/"Never")
-            // or digit 0-5.
-            ef("URL Match", false),
-            ef("Notes", false),
-        ],
-        CreateItemType::SecureNote => vec![ef("Name", false), ef("Notes", false)],
-        CreateItemType::Card => vec![
-            ef("Name", false),
-            ef("Cardholder", false),
-            ef("Brand", false),
-            ef("Number", true),
-            ef("Exp Month", false),
-            ef("Exp Year", false),
-            ef("CVV", true),
-            ef("Notes", false),
-        ],
-        CreateItemType::Identity => vec![
-            ef("Name", false),
-            ef("First Name", false),
-            ef("Last Name", false),
-            ef("Email", false),
-            ef("Phone", false),
-            ef("Company", false),
-            ef("Address", false),
-            ef("City", false),
-            ef("State", false),
-            ef("ZIP", false),
-            ef("Country", false),
-            ef("Notes", false),
-        ],
-        // The fingerprint is computed by `bw` from the private key, so
-        // the create form doesn't accept it.
-        CreateItemType::SshKey => vec![
-            ef("Name", false),
-            ef("Private Key", true),
-            ef("Public Key", false),
-            ef("Notes", false),
-        ],
     }
 }

@@ -115,11 +115,9 @@ pub fn handle(app: &mut App, key: KeyEvent) {
             KeyCode::Char('k') | KeyCode::Up => app.move_up(),
             KeyCode::PageDown => app.move_down_page(),
             KeyCode::PageUp => app.move_up_page(),
-            KeyCode::Enter => {
-                if !app.filtered_items().is_empty() {
-                    app.screen = Screen::Detail;
-                    app.show_password = false;
-                }
+            KeyCode::Enter if !app.filtered_items().is_empty() => {
+                app.screen = Screen::Detail;
+                app.show_password = false;
             }
             KeyCode::Backspace => {
                 app.search_query.pop();

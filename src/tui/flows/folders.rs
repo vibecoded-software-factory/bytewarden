@@ -44,7 +44,7 @@ pub fn refresh_folders_silent(app: &mut App) -> bool {
 }
 
 fn sorted(mut folders: Vec<Folder>) -> Vec<Folder> {
-    folders.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    folders.sort_by_key(|f| f.name.to_lowercase());
     folders
 }
 

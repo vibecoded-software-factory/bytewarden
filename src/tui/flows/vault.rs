@@ -69,7 +69,7 @@ pub fn refresh_trash_silent(app: &mut App) -> bool {
         Ok(items) => {
             let count = items.len();
             let mut sorted = items;
-            sorted.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+            sorted.sort_by_key(|i| i.name.to_lowercase());
             app.trashed_items = sorted;
             app.push_cmd(&cmd, true, &format!("{count} trashed items loaded"));
             true

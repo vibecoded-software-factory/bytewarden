@@ -89,33 +89,6 @@ fn draw_too_small(frame: &mut Frame, theme: &Theme) {
     frame.render_widget(Paragraph::new(lines), area);
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn typical_terminal_is_not_too_small() {
-        // 80×24 is the classic VT100 default — must always render.
-        assert!(!is_terminal_too_small(80, 24));
-        // Comfortable modern default.
-        assert!(!is_terminal_too_small(120, 40));
-        // Right at the threshold.
-        assert!(!is_terminal_too_small(MIN_TERM_WIDTH, MIN_TERM_HEIGHT));
-    }
-
-    #[test]
-    fn tiny_terminal_is_too_small() {
-        assert!(is_terminal_too_small(5, 10));
-        assert!(is_terminal_too_small(0, 0));
-    }
-
-    #[test]
-    fn either_dimension_below_floor_triggers_fallback() {
-        assert!(is_terminal_too_small(MIN_TERM_WIDTH - 1, 50));
-        assert!(is_terminal_too_small(200, MIN_TERM_HEIGHT - 1));
-    }
-}
-
 /// Top-level frame router — invoked once per terminal redraw.
 pub fn draw(frame: &mut Frame, app: &mut App) {
     if is_terminal_too_small(frame.area().width, frame.area().height) {
@@ -191,5 +164,32 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
             vault::draw(frame, app);
             memberships::draw_popup(frame, frame.area(), app);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn typical_terminal_is_not_too_small() {
+        // 80×24 is the classic VT100 default — must always render.
+        assert!(!is_terminal_too_small(80, 24));
+        // Comfortable modern default.
+        assert!(!is_terminal_too_small(120, 40));
+        // Right at the threshold.
+        assert!(!is_terminal_too_small(MIN_TERM_WIDTH, MIN_TERM_HEIGHT));
+    }
+
+    #[test]
+    fn tiny_terminal_is_too_small() {
+        assert!(is_terminal_too_small(5, 10));
+        assert!(is_terminal_too_small(0, 0));
+    }
+
+    #[test]
+    fn either_dimension_below_floor_triggers_fallback() {
+        assert!(is_terminal_too_small(MIN_TERM_WIDTH - 1, 50));
+        assert!(is_terminal_too_small(200, MIN_TERM_HEIGHT - 1));
     }
 }

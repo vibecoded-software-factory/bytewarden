@@ -99,15 +99,14 @@ pub fn handle(app: &mut App, key: KeyEvent) {
             app.clear_login_error();
             app.delete_char_before();
         }
-        KeyCode::Char(c) => {
-            // Char input only meaningful on text fields.
+        KeyCode::Char(c)
             if app.active_field != LoginField::SaveEmail
                 && app.active_field != LoginField::AutoLock
-                && app.active_field != LoginField::KeepSession
-            {
-                app.clear_login_error();
-                app.insert_char(c);
-            }
+                && app.active_field != LoginField::KeepSession =>
+        {
+            // Char input only meaningful on text fields.
+            app.clear_login_error();
+            app.insert_char(c);
         }
         _ => {}
     }

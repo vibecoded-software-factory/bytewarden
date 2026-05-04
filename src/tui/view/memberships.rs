@@ -55,7 +55,7 @@ pub fn draw_popup(frame: &mut Frame, area: Rect, app: &App) {
                 .iter()
                 .filter(|c| c.organization_id.as_deref() == Some(org.id.as_str()))
                 .collect();
-            org_collections.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+            org_collections.sort_by_key(|c| c.name.to_lowercase());
             if org_collections.is_empty() {
                 lines.push(Line::from(Span::styled(
                     "      (no collections visible to you)",

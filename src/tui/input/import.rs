@@ -27,38 +27,30 @@ pub fn handle(app: &mut App, key: KeyEvent) {
     };
 
     match key.code {
-        KeyCode::Left => {
-            if *cursor > 0 {
-                *cursor -= 1;
-            }
+        KeyCode::Left if *cursor > 0 => {
+            *cursor -= 1;
         }
-        KeyCode::Right => {
-            if *cursor < input.chars().count() {
-                *cursor += 1;
-            }
+        KeyCode::Right if *cursor < input.chars().count() => {
+            *cursor += 1;
         }
         KeyCode::Home => *cursor = 0,
         KeyCode::End => *cursor = input.chars().count(),
-        KeyCode::Backspace => {
-            if *cursor > 0 {
-                let byte = input
-                    .char_indices()
-                    .nth(*cursor - 1)
-                    .map(|(b, _)| b)
-                    .unwrap_or(0);
-                input.remove(byte);
-                *cursor -= 1;
-            }
+        KeyCode::Backspace if *cursor > 0 => {
+            let byte = input
+                .char_indices()
+                .nth(*cursor - 1)
+                .map(|(b, _)| b)
+                .unwrap_or(0);
+            input.remove(byte);
+            *cursor -= 1;
         }
-        KeyCode::Delete => {
-            if *cursor < input.chars().count() {
-                let byte = input
-                    .char_indices()
-                    .nth(*cursor)
-                    .map(|(b, _)| b)
-                    .unwrap_or(0);
-                input.remove(byte);
-            }
+        KeyCode::Delete if *cursor < input.chars().count() => {
+            let byte = input
+                .char_indices()
+                .nth(*cursor)
+                .map(|(b, _)| b)
+                .unwrap_or(0);
+            input.remove(byte);
         }
         KeyCode::Char(c) => {
             let byte = input

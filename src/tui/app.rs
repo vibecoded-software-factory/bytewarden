@@ -434,7 +434,7 @@ impl App {
                 if s > 0 { Some((s, item)) } else { None }
             })
             .collect();
-        scored.sort_by(|a, b| b.0.cmp(&a.0));
+        scored.sort_by_key(|s| std::cmp::Reverse(s.0));
         scored.into_iter().map(|(_, i)| i).collect()
     }
 
@@ -707,8 +707,7 @@ impl App {
 
     /// Sorts the in-memory vault list alphabetically (case-insensitive).
     pub fn sort_items(&mut self) {
-        self.items
-            .sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+        self.items.sort_by_key(|i| i.name.to_lowercase());
     }
 
     /// Returns the current session key for log redaction (or `***` when

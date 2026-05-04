@@ -30,40 +30,32 @@ pub fn handle(app: &mut App, key: KeyEvent) {
             // a flow function (not an issue here since we never call
             // it from this branch — keeping the comment as a hint).
             match key.code {
-                KeyCode::Left => {
-                    if state.path_cursor > 0 {
-                        state.path_cursor -= 1;
-                    }
+                KeyCode::Left if state.path_cursor > 0 => {
+                    state.path_cursor -= 1;
                 }
-                KeyCode::Right => {
-                    if state.path_cursor < state.path.chars().count() {
-                        state.path_cursor += 1;
-                    }
+                KeyCode::Right if state.path_cursor < state.path.chars().count() => {
+                    state.path_cursor += 1;
                 }
                 KeyCode::Home => state.path_cursor = 0,
                 KeyCode::End => state.path_cursor = state.path.chars().count(),
-                KeyCode::Backspace => {
-                    if state.path_cursor > 0 {
-                        let byte = state
-                            .path
-                            .char_indices()
-                            .nth(state.path_cursor - 1)
-                            .map(|(b, _)| b)
-                            .unwrap_or(0);
-                        state.path.remove(byte);
-                        state.path_cursor -= 1;
-                    }
+                KeyCode::Backspace if state.path_cursor > 0 => {
+                    let byte = state
+                        .path
+                        .char_indices()
+                        .nth(state.path_cursor - 1)
+                        .map(|(b, _)| b)
+                        .unwrap_or(0);
+                    state.path.remove(byte);
+                    state.path_cursor -= 1;
                 }
-                KeyCode::Delete => {
-                    if state.path_cursor < state.path.chars().count() {
-                        let byte = state
-                            .path
-                            .char_indices()
-                            .nth(state.path_cursor)
-                            .map(|(b, _)| b)
-                            .unwrap_or(0);
-                        state.path.remove(byte);
-                    }
+                KeyCode::Delete if state.path_cursor < state.path.chars().count() => {
+                    let byte = state
+                        .path
+                        .char_indices()
+                        .nth(state.path_cursor)
+                        .map(|(b, _)| b)
+                        .unwrap_or(0);
+                    state.path.remove(byte);
                 }
                 KeyCode::Char(c) => {
                     let byte = state
