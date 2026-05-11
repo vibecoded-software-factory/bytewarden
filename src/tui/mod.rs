@@ -14,6 +14,7 @@
 
 pub mod action;
 pub mod app;
+pub mod assign_collections;
 pub mod debug_log;
 pub mod detail_fields;
 pub mod edit_field;
@@ -24,6 +25,7 @@ pub mod generator;
 pub mod import;
 pub mod input;
 pub mod mouse_areas;
+pub mod reprompt;
 pub mod screens;
 pub mod send;
 pub mod session_file;

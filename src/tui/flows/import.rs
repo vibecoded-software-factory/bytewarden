@@ -5,9 +5,10 @@ use crate::tui::app::App;
 use crate::tui::import::{ImportFocus, ImportState};
 use crate::tui::screens::Screen;
 
-/// Opens the import popup with default values.
+/// Opens the import popup, populating the format dropdown from the
+/// cached `bw import --formats` list (loaded once at login).
 pub fn open(app: &mut App) {
-    app.import = Some(ImportState::new());
+    app.import = Some(ImportState::new(&app.import_formats));
     app.screen = Screen::Import;
 }
 
@@ -37,12 +38,8 @@ pub fn commit(app: &mut App) {
     let Some(state) = app.import.as_ref() else {
         return;
     };
-    let format = state.format.trim().to_string();
+    let format = state.current_format().to_string();
     let path = state.path.trim().to_string();
-    if format.is_empty() {
-        app.set_action(ActionState::Error("Format cannot be empty.".into()));
-        return;
-    }
     if path.is_empty() {
         app.set_action(ActionState::Error("Input path cannot be empty.".into()));
         return;

@@ -31,7 +31,7 @@ pub fn handle(app: &mut App, key: KeyEvent) {
                 LoginField::Server => LoginField::Email,
                 LoginField::Email => LoginField::Password,
                 LoginField::Password => {
-                    if app.otp_required {
+                    if app.awaiting_code() {
                         LoginField::Otp
                     } else {
                         LoginField::SaveEmail
@@ -52,7 +52,7 @@ pub fn handle(app: &mut App, key: KeyEvent) {
                 LoginField::KeepSession => LoginField::AutoLock,
                 LoginField::AutoLock => LoginField::SaveEmail,
                 LoginField::SaveEmail => {
-                    if app.otp_required {
+                    if app.awaiting_code() {
                         LoginField::Otp
                     } else {
                         LoginField::Password
@@ -87,6 +87,15 @@ pub fn handle(app: &mut App, key: KeyEvent) {
             }
         }
         KeyCode::F(2) => app.login_password_visible = !app.login_password_visible,
+        // ← → on the Otp field cycles the 2FA method when in 2FA
+        // mode (Authenticator / Email / YubiKey). On any other text
+        // field they keep their normal cursor-movement role.
+        KeyCode::Left if app.two_factor_required && app.active_field == LoginField::Otp => {
+            app.two_factor_method = app.two_factor_method.prev();
+        }
+        KeyCode::Right if app.two_factor_required && app.active_field == LoginField::Otp => {
+            app.two_factor_method = app.two_factor_method.next();
+        }
         KeyCode::Left => app.cursor_left(),
         KeyCode::Right => app.cursor_right(),
         KeyCode::Home => app.cursor_home(),

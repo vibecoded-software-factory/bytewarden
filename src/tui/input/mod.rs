@@ -4,6 +4,7 @@
 //! It first handles global keys (Ctrl+C → quit) and then routes to a
 //! per-screen handler.
 
+pub mod assign_collections;
 pub mod attachment_download;
 pub mod attachment_upload;
 pub mod confirm;
@@ -21,6 +22,7 @@ pub mod memberships;
 pub mod mouse;
 pub mod nav;
 pub mod rename_field;
+pub mod reprompt;
 pub mod send_create;
 pub mod vault;
 
@@ -124,6 +126,8 @@ pub fn handle_events(app: &mut App, ev: Event) {
                 Screen::ConfirmDeleteAttachment => confirm_delete_attachment::handle(app, key),
                 Screen::SendCreate => send_create::handle(app, key),
                 Screen::Memberships => memberships::handle(app, key),
+                Screen::RepromptUnlock => reprompt::handle(app, key),
+                Screen::AssignCollections => assign_collections::handle(app, key),
             }
         }
         Event::Mouse(mouse) => mouse::handle(app, mouse),

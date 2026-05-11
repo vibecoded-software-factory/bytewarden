@@ -1,4 +1,17 @@
 //! Single-line editable field used in the create + edit forms.
+//!
+//! ## In-memory hygiene
+//!
+//! [`EditField::value`] is wrapped in [`zeroize::Zeroizing`] so the
+//! buffer is overwritten with zeroes when the field drops. This
+//! matters most for hidden fields (passwords, TOTP seeds, SSH
+//! private keys, card CVVs) but applies to every row uniformly —
+//! choosing per-row protection would clutter the API and break the
+//! straight-through `Deref` to `String` that the cursor logic relies
+//! on. Non-secret rows pay a few microseconds of zeroing on drop and
+//! the hidden ones are protected by default.
+
+use zeroize::Zeroizing;
 
 use crate::domain::filter::CreateItemType;
 use crate::domain::item::{Item, item_type_label};
@@ -22,6 +35,18 @@ pub enum EditFieldKind {
     /// `uris[]` array (0-based); `role` says whether this row is the
     /// URL itself or its match-detection type.
     Uri { index: usize, role: UriRole },
+    /// Read-only summary row that drives `collectionIds[]` on save.
+    /// The actual UUIDs live in [`EditField::collection_ids`]; the
+    /// `value` field carries a comma-joined display name. The kind is
+    /// kept payload-free so [`EditFieldKind`] can stay `Copy`.
+    Collections,
+    /// Cyclable picker for the create form: `Personal` or one of the
+    /// user's organisations. Surfaced only when the user has at
+    /// least one org membership. The `value` field carries the
+    /// display name (`Personal` / `Acme` / …); the resolved UUID
+    /// lives in [`EditField::organization_id`] (`None` for
+    /// Personal). [`EditFieldKind`] stays `Copy`.
+    Organization,
 }
 
 /// Which half of a URI row this is.
@@ -45,7 +70,12 @@ pub struct EditField {
     pub label: String,
 
     /// Current value of the field.
-    pub value: String,
+    ///
+    /// Wrapped in [`Zeroizing`] so the buffer is overwritten on drop
+    /// — see the module doc for the rationale. The wrapper transparently
+    /// derefs to `&String`/`&mut String`, so all the cursor logic
+    /// below treats it as a plain `String`.
+    pub value: Zeroizing<String>,
 
     /// Whether this field is rendered masked unless [`Self::revealed`] is
     /// `true`.
@@ -65,6 +95,20 @@ pub struct EditField {
     /// Whether this row maps to a built-in schema field or to a row
     /// of `item.fields[]`. See [`EditFieldKind`].
     pub kind: EditFieldKind,
+
+    /// Collection UUIDs assigned to the item, only meaningful when
+    /// `kind == EditFieldKind::Collections`. Owned by `EditField`
+    /// rather than the kind variant so `EditFieldKind` can stay
+    /// `Copy`. The display string is rebuilt from the ids + the
+    /// owning organisation's collection list at popup-commit time.
+    pub collection_ids: Vec<String>,
+
+    /// Resolved organisation UUID, only meaningful when
+    /// `kind == EditFieldKind::Organization`. `None` represents
+    /// "Personal" (i.e. no shared org). Same rationale as
+    /// [`Self::collection_ids`] for keeping the payload outside
+    /// the kind variant.
+    pub organization_id: Option<String>,
 }
 
 impl EditField {
@@ -72,13 +116,51 @@ impl EditField {
     pub fn new(label: &str, value: &str, hidden: bool) -> Self {
         Self {
             label: label.to_string(),
-            value: value.to_string(),
+            value: Zeroizing::new(value.to_string()),
             hidden,
             revealed: false,
             cursor: value.chars().count(),
             read_only: false,
             kind: EditFieldKind::BuiltIn,
+            collection_ids: Vec::new(),
+            organization_id: None,
         }
+    }
+
+    /// Builds the cyclable "Organization" row for the create form.
+    /// `display` is the user-visible name (typically `"Personal"`
+    /// or the org's name); `id` is `None` for Personal.
+    pub fn organization(display: &str, id: Option<String>) -> Self {
+        Self {
+            read_only: true,
+            kind: EditFieldKind::Organization,
+            organization_id: id,
+            ..Self::new("Organization", display, false)
+        }
+    }
+
+    /// `true` when this row is the Organization picker.
+    pub fn is_organization(&self) -> bool {
+        matches!(self.kind, EditFieldKind::Organization)
+    }
+
+    /// Builds the read-only "Collections" row used on items that
+    /// belong to an organisation. `display` is the user-visible label
+    /// summary (typically `"Eng, Ops"`); `ids` carries the actual
+    /// collection UUIDs that the patcher writes back into
+    /// `collectionIds[]` on save.
+    pub fn collections(display: &str, ids: Vec<String>) -> Self {
+        Self {
+            read_only: true,
+            kind: EditFieldKind::Collections,
+            collection_ids: ids,
+            ..Self::new("Collections", display, false)
+        }
+    }
+
+    /// `true` when this row is the special "Collections" summary.
+    pub fn is_collections(&self) -> bool {
+        matches!(self.kind, EditFieldKind::Collections)
     }
 
     /// Builds a read-only built-in "field" used to display computed
@@ -137,11 +219,14 @@ impl EditField {
     }
 
     /// Returns the bw `field_type` for a custom row, or `None` for
-    /// any other row kind (built-in or URI).
+    /// any other row kind (built-in / URI / Collections / Organization).
     pub fn custom_type(&self) -> Option<u8> {
         match self.kind {
             EditFieldKind::Custom(t) => Some(t),
-            EditFieldKind::BuiltIn | EditFieldKind::Uri { .. } => None,
+            EditFieldKind::BuiltIn
+            | EditFieldKind::Uri { .. }
+            | EditFieldKind::Collections
+            | EditFieldKind::Organization => None,
         }
     }
 
@@ -359,15 +444,21 @@ pub fn build_edit_fields(item: &Item) -> Vec<EditField> {
 }
 
 /// Builds the edit-form field set for `item`, with the "Folder" row
-/// pre-populated to the folder name (looked up by id) when possible.
+/// pre-populated to the folder name (looked up by id) when possible
+/// and a "Collections" read-only summary row when the item belongs
+/// to an organisation.
 ///
-/// This is a thin wrapper around [`build_edit_fields`] used by the
-/// edit-mode entry flow — it knows the folder list and so can show
-/// the human-readable name. The patcher writes `folder_id` back by
-/// name lookup at save time.
+/// The collections row is only emitted for org-owned items because
+/// personal-vault items can't have collections. For org items we
+/// look up each `collection_ids` entry against the supplied
+/// `collections` slice and join the matched names with `, `; entries
+/// whose collection isn't visible (e.g. removed since the last sync)
+/// are skipped from the display string but kept inside
+/// `EditField::collection_ids` so they survive a round-trip.
 pub fn build_edit_fields_with_folders(
     item: &Item,
     folders: &[crate::domain::Folder],
+    collections: &[crate::domain::Collection],
 ) -> Vec<EditField> {
     let mut fields = build_edit_fields(item);
     let folder_name = item
@@ -378,6 +469,25 @@ pub fn build_edit_fields_with_folders(
     // Insert "Folder" right after "Notes" so it stays out of the way
     // for the common edit cases.
     fields.push(EditField::new("Folder", &folder_name, false));
+
+    if item.organization_id.is_some() {
+        let display: String = item
+            .collection_ids
+            .iter()
+            .filter_map(|id| {
+                collections
+                    .iter()
+                    .find(|c| &c.id == id)
+                    .map(|c| c.name.as_str())
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+        fields.push(EditField::collections(
+            &display,
+            item.collection_ids.clone(),
+        ));
+    }
+
     fields
 }
 
@@ -432,6 +542,27 @@ pub fn build_create_fields(item_type: &CreateItemType) -> Vec<EditField> {
     }
 }
 
+/// Builds the create-form field set, adding the cyclable
+/// "Organization" row at the end when the user has at least one
+/// organisation membership.
+///
+/// The row defaults to `Personal` (no `organization_id`). The user
+/// cycles it with `← →` when it's focused. Switching to a real org
+/// from the input handler also injects a sibling "Collections" row
+/// just below — that lifecycle is owned by the input handler, not by
+/// this builder, so we leave it unset here and the form starts with
+/// `Personal` selected.
+pub fn build_create_fields_with_orgs(
+    item_type: &CreateItemType,
+    organizations: &[crate::domain::Organization],
+) -> Vec<EditField> {
+    let mut fields = build_create_fields(item_type);
+    if !organizations.is_empty() {
+        fields.push(EditField::organization("Personal", None));
+    }
+    fields
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -450,9 +581,12 @@ mod tests {
             ssh_key: None,
             notes: None,
             folder_id: None,
+            organization_id: None,
+            collection_ids: Vec::new(),
             favorite: false,
             fields: vec![],
             attachments: None,
+            reprompt: 0,
         }
     }
 
@@ -471,7 +605,7 @@ mod tests {
         f.insert('x');
         f.delete_at();
         f.delete_before();
-        assert_eq!(f.value, "Login");
+        assert_eq!(f.value.as_str(), "Login");
     }
 
     #[test]
@@ -481,7 +615,7 @@ mod tests {
         assert_eq!(f.cursor, 2);
         f.cursor_home();
         f.insert('Z');
-        assert_eq!(f.value, "Zñé");
+        assert_eq!(f.value.as_str(), "Zñé");
         assert_eq!(f.cursor, 1);
     }
 
@@ -490,15 +624,15 @@ mod tests {
         let mut f = EditField::new("v", "ñé", false);
         // Cursor at end. delete_before removes 'é'.
         f.delete_before();
-        assert_eq!(f.value, "ñ");
+        assert_eq!(f.value.as_str(), "ñ");
         assert_eq!(f.cursor, 1);
         // delete_at at end is a no-op.
         f.delete_at();
-        assert_eq!(f.value, "ñ");
+        assert_eq!(f.value.as_str(), "ñ");
         // Move home and delete_at removes 'ñ'.
         f.cursor_home();
         f.delete_at();
-        assert_eq!(f.value, "");
+        assert_eq!(f.value.as_str(), "");
     }
 
     #[test]
@@ -721,6 +855,128 @@ mod tests {
     }
 
     #[test]
+    fn organization_constructor_marks_row_correctly() {
+        let f = EditField::organization("Acme", Some("o1".into()));
+        assert!(f.is_organization());
+        assert!(f.read_only);
+        assert_eq!(f.label, "Organization");
+        assert_eq!(f.value.as_str(), "Acme");
+        assert_eq!(f.organization_id.as_deref(), Some("o1"));
+        assert!(!f.is_collections());
+        assert!(!f.is_custom());
+        assert!(!f.is_uri());
+    }
+
+    #[test]
+    fn organization_personal_has_no_id() {
+        let f = EditField::organization("Personal", None);
+        assert!(f.is_organization());
+        assert_eq!(f.value.as_str(), "Personal");
+        assert!(f.organization_id.is_none());
+    }
+
+    #[test]
+    fn build_create_fields_with_orgs_skips_row_when_no_memberships() {
+        let fields = build_create_fields_with_orgs(&CreateItemType::Login, &[]);
+        assert!(!fields.iter().any(|f| f.is_organization()));
+    }
+
+    #[test]
+    fn build_create_fields_with_orgs_appends_personal_default_when_orgs_present() {
+        let orgs = vec![crate::domain::Organization {
+            id: "o1".into(),
+            name: "Acme".into(),
+        }];
+        let fields = build_create_fields_with_orgs(&CreateItemType::Login, &orgs);
+        let org_row = fields
+            .iter()
+            .find(|f| f.is_organization())
+            .expect("organization row");
+        assert_eq!(org_row.value.as_str(), "Personal");
+        assert!(org_row.organization_id.is_none());
+        // Should be the last row.
+        assert!(fields.last().is_some_and(|f| f.is_organization()));
+    }
+
+    #[test]
+    fn collections_constructor_marks_row_correctly() {
+        let f = EditField::collections("Eng, Ops", vec!["c1".into(), "c2".into()]);
+        assert!(f.is_collections());
+        assert!(f.read_only);
+        assert_eq!(f.label, "Collections");
+        assert_eq!(f.value.as_str(), "Eng, Ops");
+        assert_eq!(f.collection_ids, vec!["c1".to_string(), "c2".to_string()]);
+        // Custom-type lookup must report `None` so existing
+        // type-cycle / rename guards don't accidentally pick up
+        // the row.
+        assert!(f.custom_type().is_none());
+        assert!(!f.is_custom());
+        assert!(!f.is_uri());
+    }
+
+    #[test]
+    fn build_edit_fields_with_folders_emits_collections_for_org_items() {
+        let mut item = empty_item(1);
+        item.organization_id = Some("o1".into());
+        item.collection_ids = vec!["c1".into(), "c2".into()];
+        let collections = vec![
+            crate::domain::Collection {
+                id: "c1".into(),
+                name: "Engineering".into(),
+                organization_id: Some("o1".into()),
+            },
+            crate::domain::Collection {
+                id: "c2".into(),
+                name: "Ops".into(),
+                organization_id: Some("o1".into()),
+            },
+        ];
+        let fields = build_edit_fields_with_folders(&item, &[], &collections);
+        let row = fields
+            .iter()
+            .find(|f| f.is_collections())
+            .expect("collections row present for org item");
+        assert_eq!(row.value.as_str(), "Engineering, Ops");
+        assert_eq!(row.collection_ids, vec!["c1".to_string(), "c2".to_string()]);
+        assert!(row.read_only);
+    }
+
+    #[test]
+    fn build_edit_fields_with_folders_skips_collections_for_personal_items() {
+        let item = empty_item(1);
+        // No organization_id — personal item.
+        let fields = build_edit_fields_with_folders(&item, &[], &[]);
+        assert!(!fields.iter().any(|f| f.is_collections()));
+    }
+
+    #[test]
+    fn build_edit_fields_with_folders_keeps_unknown_collection_id_in_payload() {
+        // The user might be a member of an org but not see one of the
+        // collections an item has been previously assigned to (e.g. a
+        // restricted collection). The display name skips that entry,
+        // but the id must survive a save round-trip — otherwise
+        // "edit favourite" would silently drop the assignment.
+        let mut item = empty_item(1);
+        item.organization_id = Some("o1".into());
+        item.collection_ids = vec!["visible".into(), "hidden".into()];
+        let collections = vec![crate::domain::Collection {
+            id: "visible".into(),
+            name: "Engineering".into(),
+            organization_id: Some("o1".into()),
+        }];
+        let fields = build_edit_fields_with_folders(&item, &[], &collections);
+        let row = fields
+            .iter()
+            .find(|f| f.is_collections())
+            .expect("collections row");
+        assert_eq!(row.value.as_str(), "Engineering");
+        assert_eq!(
+            row.collection_ids,
+            vec!["visible".to_string(), "hidden".to_string()]
+        );
+    }
+
+    #[test]
     fn build_edit_fields_with_folders_resolves_id_to_name() {
         let mut item = empty_item(2);
         item.folder_id = Some("f1".into());
@@ -728,12 +984,12 @@ mod tests {
             id: "f1".into(),
             name: "Work".into(),
         }];
-        let fields = build_edit_fields_with_folders(&item, &folders);
+        let fields = build_edit_fields_with_folders(&item, &folders, &[]);
         let folder_row = fields
             .iter()
             .find(|f| f.label == "Folder")
             .expect("folder row");
-        assert_eq!(folder_row.value, "Work");
+        assert_eq!(folder_row.value.as_str(), "Work");
     }
 
     #[test]
@@ -741,12 +997,12 @@ mod tests {
         let mut item = empty_item(2);
         item.folder_id = Some("missing".into());
         let folders: Vec<crate::domain::Folder> = vec![];
-        let fields = build_edit_fields_with_folders(&item, &folders);
+        let fields = build_edit_fields_with_folders(&item, &folders, &[]);
         let folder_row = fields
             .iter()
             .find(|f| f.label == "Folder")
             .expect("folder row");
-        assert_eq!(folder_row.value, "");
+        assert_eq!(folder_row.value.as_str(), "");
     }
 
     #[test]

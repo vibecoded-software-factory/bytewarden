@@ -3,6 +3,7 @@
 use crate::domain::identity::{build_full_name, identity_fields};
 use crate::tui::action::{ActionState, PendingAction};
 use crate::tui::app::App;
+use crate::tui::reprompt::ProtectedAction;
 
 /// Queues a copy action with a "Running…" label.
 fn queue(app: &mut App, action: PendingAction, msg: &str) {
@@ -20,21 +21,51 @@ pub fn copy_username_to_clipboard(app: &mut App) {
 }
 
 /// Queues a copy of the selected item's password.
+///
+/// If the item carries the Bitwarden `reprompt` flag the request is
+/// deferred behind a master-password popup; the popup re-enters this
+/// function once verification succeeds (the flag has been verified
+/// for this single action, not cached).
 pub fn copy_password_to_clipboard(app: &mut App) {
-    if app.selected_item().is_some() {
-        queue(app, PendingAction::CopyPassword, "Copying pass…");
+    if app.selected_item().is_none() {
+        return;
     }
+    if super::reprompt::maybe_open(app, ProtectedAction::CopyPassword) {
+        return;
+    }
+    queue(app, PendingAction::CopyPassword, "Copying pass…");
 }
 
 /// Selects which field to copy based on the detail view's row cursor.
 ///
 /// The function walks the same field order as the detail renderer so
-/// the cursor index stays in sync with what the user sees.
+/// the cursor index stays in sync with what the user sees. If the
+/// item carries the `reprompt` flag *and* the focused row is a
+/// hidden field (password / TOTP / hidden custom field), the request
+/// is deferred behind the reverify popup. Non-secret rows (name,
+/// username, URL, …) on the same item are not gated — copying a
+/// username from a reprompt-protected item is no more sensitive
+/// than viewing the item itself.
 pub fn copy_selected_field(app: &mut App) {
     let item = match app.selected_item() {
         Some(i) => i.clone(),
         None => return,
     };
+
+    // Decide reprompt before walking the field list. We build the
+    // detail-row view once (with `show_password = true` so the
+    // hidden flag is the only signal we read) and read the focused
+    // row's `hidden` boolean.
+    if item.needs_reprompt() {
+        let rows = crate::tui::detail_fields::build_detail_fields(&item, true, 0);
+        let focused_is_secret = rows.get(app.detail_field).is_some_and(|f| f.hidden);
+        if focused_is_secret
+            && super::reprompt::maybe_open(app, ProtectedAction::CopySelectedDetailField)
+        {
+            return;
+        }
+    }
+
     let mut idx = 0usize;
 
     if app.detail_field == idx {
@@ -239,16 +270,34 @@ pub fn copy_selected_field(app: &mut App) {
 // ── Pending-action executors ──────────────────────────────────────────────
 
 /// Performs the actual clipboard write and updates the action state.
+///
+/// Uses [`crate::ports::ClipboardPort::write_with_clear`] so the
+/// secret is wiped after `app.clipboard_clear_secs` seconds (default
+/// 30; `0` disables the auto-clear). The clear is contingent on the
+/// clipboard still holding the value we wrote — if the user copied
+/// something else in the meantime we leave their selection alone.
 fn write_clipboard(app: &mut App, text: String, success_msg: &str) {
-    match app.clipboard.write(&text) {
+    let ttl = app.clipboard_clear_secs;
+    match app.clipboard.write_with_clear(&text, ttl) {
         Ok(()) => {
             app.push_cmd("clipboard", true, success_msg);
-            app.set_action(ActionState::Done("Copied ✓".into()));
+            app.set_action(ActionState::Done(copied_toast(ttl)));
         }
         Err(e) => {
             app.push_cmd("clipboard", false, &e);
             app.set_action(ActionState::Error(format!("Clipboard error: {e}")));
         }
+    }
+}
+
+/// Renders the success toast for a clipboard write — adds the
+/// auto-clear hint when a TTL is active so the user knows the
+/// password isn't going to sit there forever.
+fn copied_toast(ttl: u64) -> String {
+    if ttl == 0 {
+        "Copied ✓".to_string()
+    } else {
+        format!("Copied ✓ (clears in {ttl}s)")
     }
 }
 
@@ -298,4 +347,20 @@ pub fn do_copy_totp(app: &mut App, item_id: String) {
 pub fn do_copy_raw(app: &mut App, text: String, msg: String) {
     app.push_cmd("clipboard", true, &msg);
     write_clipboard(app, text, &msg);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::copied_toast;
+
+    #[test]
+    fn copied_toast_omits_hint_when_disabled() {
+        assert_eq!(copied_toast(0), "Copied ✓");
+    }
+
+    #[test]
+    fn copied_toast_includes_seconds_when_enabled() {
+        assert_eq!(copied_toast(30), "Copied ✓ (clears in 30s)");
+        assert_eq!(copied_toast(5), "Copied ✓ (clears in 5s)");
+    }
 }

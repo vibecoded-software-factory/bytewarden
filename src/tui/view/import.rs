@@ -12,6 +12,9 @@ use crate::tui::app::App;
 use crate::tui::import::ImportFocus;
 use crate::tui::view::widgets::{center_rect, cursor_line, rounded_block};
 
+const FORMAT_HINT_FOCUSED: &str = "  (← → to cycle)";
+const FORMAT_HINT_BLURRED: &str = "  (Tab to focus, ← → to cycle)";
+
 /// Renders the import popup.
 pub fn draw_popup(frame: &mut Frame, area: Rect, app: &App) {
     let Some(state) = &app.import else {
@@ -40,26 +43,33 @@ pub fn draw_popup(frame: &mut Frame, area: Rect, app: &App) {
     ])
     .split(inner);
 
-    // Format field
+    // Format field — read-only dropdown, cycled with ← → when
+    // focused.
+    let fmt_focus = state.focus == ImportFocus::Format;
     frame.render_widget(
         Paragraph::new(Line::from(vec![
             Span::styled(" Format", Style::default().fg(t.dim)),
             Span::styled(
-                "  (run `bw import --formats` for the list)",
+                if fmt_focus {
+                    FORMAT_HINT_FOCUSED
+                } else {
+                    FORMAT_HINT_BLURRED
+                },
                 Style::default().fg(t.dim),
             ),
         ])),
         chunks[1],
     );
-    let fmt_focus = state.focus == ImportFocus::Format;
-    let fmt_line = if fmt_focus {
-        cursor_line(&state.format, state.format_cursor, t)
-    } else {
-        Line::from(Span::styled(
-            state.format.as_str(),
-            Style::default().fg(t.inactive),
-        ))
-    };
+    let fmt_label = format!(
+        " ◀  {}  ▶   ({} of {})",
+        state.current_format(),
+        state.format_idx + 1,
+        state.formats.len()
+    );
+    let fmt_line = Line::from(Span::styled(
+        fmt_label,
+        Style::default().fg(if fmt_focus { t.foreground } else { t.inactive }),
+    ));
     frame.render_widget(
         Paragraph::new(fmt_line).block(rounded_block(if fmt_focus {
             Style::default().fg(t.accent)

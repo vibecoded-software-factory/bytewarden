@@ -4,7 +4,7 @@ use crossterm::event::{KeyCode, KeyEvent};
 
 use crate::domain::filter::CREATE_ITEM_TYPES;
 use crate::tui::app::App;
-use crate::tui::flows::{generator, items};
+use crate::tui::flows::{assign_collections, generator, items};
 use crate::tui::input::is_alt;
 use crate::tui::input::nav::{nav_clamp, nav_wrap, text_input};
 
@@ -37,6 +37,26 @@ pub fn handle(app: &mut App, key: KeyEvent) {
     {
         generator::open_for_create_field(app, app.create_field_idx);
         return;
+    }
+
+    // Alt+L on the Collections row opens the multi-select popup.
+    // Alt+L anywhere else is a no-op (the flow surfaces a friendly
+    // "move to the Collections row first" toast).
+    if key.code == KeyCode::Char('l') && is_alt(&key) {
+        return assign_collections::open(app);
+    }
+
+    // Left/Right cycle the Organization picker when it has focus.
+    let on_org = app
+        .create_fields
+        .get(app.create_field_idx)
+        .is_some_and(|f| f.is_organization());
+    if on_org {
+        match key.code {
+            KeyCode::Left | KeyCode::Char('h') => return items::cycle_create_org(app, -1),
+            KeyCode::Right | KeyCode::Char('l') => return items::cycle_create_org(app, 1),
+            _ => {}
+        }
     }
 
     match key.code {

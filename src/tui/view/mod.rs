@@ -2,6 +2,7 @@
 //! helpers under [`widgets`], [`action`], [`starfield`], [`logo`].
 
 pub mod action;
+pub mod assign_collections;
 pub mod attachment_download;
 pub mod attachment_upload;
 pub mod confirm;
@@ -19,6 +20,7 @@ pub mod logo;
 pub mod logout_confirm;
 pub mod memberships;
 pub mod rename_field;
+pub mod reprompt;
 pub mod send_create;
 pub mod splash;
 pub mod starfield;
@@ -163,6 +165,37 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         Screen::Memberships => {
             vault::draw(frame, app);
             memberships::draw_popup(frame, frame.area(), app);
+        }
+        Screen::RepromptUnlock => {
+            // Draw the underlying screen the user came from so the
+            // popup feels overlaid in the right context. The state
+            // captures the origin at open time so we don't have to
+            // guess from heuristics.
+            let origin = app
+                .reprompt
+                .as_ref()
+                .map(|s| s.origin.clone())
+                .unwrap_or(Screen::Vault);
+            match origin {
+                Screen::Detail => detail::draw(frame, app),
+                _ => vault::draw(frame, app),
+            }
+            reprompt::draw_popup(frame, frame.area(), app);
+        }
+        Screen::AssignCollections => {
+            // Opened from either edit-mode (detail screen) or the
+            // create form. The state captures the origin so we draw
+            // the right context underneath the popup.
+            let origin = app
+                .assign_collections
+                .as_ref()
+                .map(|s| s.origin.clone())
+                .unwrap_or(Screen::Detail);
+            match origin {
+                Screen::Create => create::draw(frame, app),
+                _ => detail::draw(frame, app),
+            }
+            assign_collections::draw_popup(frame, frame.area(), app);
         }
     }
 }

@@ -161,9 +161,10 @@ save_email   = true                        # remember the e-mail across launches
 email        = "you@example.com"           # only stored when save_email = true
 
 # ── Security ─────────────────────────────────────────────────────
-auto_lock         = false                  # lock vault after inactivity
-keep_session      = false                  # persist BW_SESSION while parent shell is alive
-lock_after_minutes = 15                    # idle threshold for auto-lock
+auto_lock            = false               # lock vault after inactivity
+keep_session         = false               # persist BW_SESSION while parent shell is alive
+lock_after_minutes   = 15                  # idle threshold for auto-lock
+clipboard_clear_secs = 30                  # auto-clear copied secrets (0 = disabled)
 
 # ── Theme (every key optional — see the next section) ────────────
 [theme]
@@ -183,6 +184,7 @@ The config file and its parent directory are kept owner-only — bytewarden re-a
 - `auto_lock` — login screen "Auto-lock" checkbox.
 - `keep_session` — login screen "Keep session" checkbox.
 - `lock_after_minutes` — only via the config file (no UI toggle).
+- `clipboard_clear_secs` — only via the config file. Default `30` (seconds); set to `0` to disable. Applies to every clipboard write that carries a secret (passwords, usernames, TOTP codes, copied detail-view fields, generated values, Send URLs). The clear is contingent on the clipboard still holding the value bytewarden wrote — if you copied something else in the meantime, your selection is left alone.
 - `[theme]` — only via the config file.
 
 ---
@@ -289,6 +291,20 @@ If Bitwarden detects a new device, the login fails with `device verification req
 
 Paste the code, press `Enter`, and you're in.
 
+### Two-factor login
+
+If your account has a permanent second factor enrolled, bytewarden detects the `two-step login` prompt from `bw` and surfaces a **Two-step Code** field plus a method chip below it. Three methods are supported:
+
+| Method | bw flag | Hint label |
+|---|---|---|
+| Authenticator (TOTP) | `--method 0` | TOTP from your authenticator app |
+| Email | `--method 1` | sent to your email |
+| YubiKey | `--method 3` | touch your YubiKey |
+
+Default is **Authenticator** — the most common case. Press `← →` while the cursor is on the Two-step Code input to cycle through the methods. Type the code (or touch your YubiKey, depending on the method) and press `Enter`.
+
+Under the hood bytewarden invokes `bw login --method <N>` and feeds the code via stdin so it never reaches `argv` (and therefore never `ps`). Methods bw doesn't expose via CLI (Duo, WebAuthn, U2F) are not supported because they require a browser callback that doesn't fit the blocking-CLI flow.
+
 ### Feedback strip states
 
 | State | Display |
@@ -296,10 +312,12 @@ Paste the code, press `Enter`, and you're in.
 | Checking session | `⠋ Checking session…` (spinner, accent) |
 | Logging in | `⠋ Logging in…` (spinner, accent) |
 | Loading vault | `⠋ Loading vault…` (spinner, accent) |
-| OTP needed | `✉ Check your email for the verification code.` (accent) |
+| Device-verification OTP needed | `✉ Check your email for the verification code.` (accent) |
+| Two-factor needed | `Two-step Code` row + method chip (`← →` cycles Authenticator / Email / YubiKey) |
 | Success | `✓ Loaded ✓` (success) |
 | Wrong credentials | `✕ Invalid credentials. Please try again.` (error) |
-| Wrong OTP | `✕ Invalid verification code. Please try again.` (error) |
+| Wrong device-verification OTP | `✕ Invalid verification code. Please try again.` (error) |
+| Wrong 2FA code | `✕ Invalid two-factor code. Please try again.` (error) |
 
 ---
 
@@ -361,13 +379,13 @@ Toggling **Keep session** on the login screen makes the unlocked `bw` session ke
 │                     │  │ type to filter…                          │
 │                     │  └──────────────────────────────────────────┘
 │                     │  ┌─[3]-Vault──────────── 12 of 87 ──────────┐
-└─────────────────────┘  │ ★ [Login]      GitHub                    │
-┌─[1]-Folders────1/4──┐  │   [Login]      AWS                       │
-│ ▶ 📁 All folders 87 │  │   [Card]       Visa                      │
-│   (No folder)    1  │  │   [Identity]   Personal                  │
-│   ─────────────     │  │   [Note]       Phrase                    │
-│   Work          54  │  │   [SSH]        deploy@server             │
-│   Personal      32  │  │ …                                        │
+└─────────────────────┘  │ ★    [Login]    GitHub                   │
+┌─[1]-Folders────1/4──┐  │   🔒 [Login]    AWS Production           │
+│ ▶ 📁 All folders 87 │  │      [Login]    AWS Sandbox              │
+│   (No folder)    1  │  │   🔒 👥 [Login] Acme / SSO               │
+│   ─────────────     │  │      👥 [Card]  Acme / Corp Visa         │
+│   Work          54  │  │ ★    [Identity] Personal                 │
+│   Personal      32  │  │      [Note]     Phrase                   │
 └─────────────────────┘  │                                          │
 ┌─[2]-Items────1 of 8─┐  │                                          │
 │ ▶  All Items     87 │  └──────────────────────────────────────────┘
@@ -435,9 +453,33 @@ Number keys `0`–`4` are disabled while Search is focused so you can type them 
 
 All `Alt+` shortcuts also work while Search is focused.
 
+### Item indicators
+
+Each list row carries up to three icon prefixes before the `[Type]` column:
+
+| Icon | Meaning |
+|------|---------|
+| `★` | Favorite — toggled with `Alt+F` |
+| `🔒` | Reprompt-protected — secret-exposing actions ask for the master password (see [Reprompt](#reprompt-master-password-reverify)) |
+| `👥` | Belongs to an organisation (`organizationId` is set) — shared across collections |
+
+Indicators are independent — an item can be all three at once, or none.
+
 ### Search
 
-Press `/` to focus the search bar. Fuzzy search runs across **name**, **username** and **URI** — results update live and re-rank as you type. While focused:
+Press `/` to focus the search bar. Fuzzy search runs across **name**, **username** and **URI** — results update live and re-rank as you type.
+
+#### URL-only filter
+
+Prefix the query with `url:` to narrow the match to login URIs only — the equivalent of `bw list items --url <url>` in the CLI. Useful for "what credentials do I have for this site?" lookups when the item name is unrelated to the domain.
+
+| Query | Behaviour |
+|---|---|
+| `url:github` | Only items whose URIs contain `github`, in their original list order (no fuzzy ranking) |
+| `url:https://example.com/login` | Only items whose URIs contain that exact substring |
+| `url:` (bare prefix) | No narrowing — same as an empty query |
+
+Non-prefixed queries keep the regular fuzzy ranking over name + username + URI + notes. While focused:
 
 - Plain characters extend the query.
 - `Backspace` pops the last character.
@@ -472,18 +514,23 @@ Selecting **Trash** triggers a separate `bw list items --trash` fetch — trashe
 | Key | Action |
 |-----|--------|
 | `j` / `k`, `↑` / `↓`, `PgUp`/`PgDn` | Move selection |
-| `Enter` | Apply folder filter |
+| `Enter` | Apply folder/collection filter |
 | `Alt+N` | **New folder** (popup) |
 | `Alt+R` | **Rename** focused folder (popup) |
 | `Alt+D` | **Delete** focused folder (confirm) |
 | `Tab` / `Esc` | Cycle focus away |
 
-The folder filter is ANDed with the item-type filter. The two fixed rows are:
+The folder/collection filter is ANDed with the item-type filter. The two fixed rows at the top are:
 
-- `📁 All folders` — no folder constraint.
+- `📁 All folders` — no folder/collection constraint.
 - `(No folder)` — items with `folder_id == null`.
 
-Deleting a folder leaves its items intact; their `folder_id` is cleared by `bw`.
+Below the separator, the panel shows two sections in one scrollable list:
+
+- **Personal folders** (icon `📁`) — your private organisational containers. `Alt+N` / `Alt+R` / `Alt+D` work here.
+- **Collections** (icon `👥`, labelled `"Org / Name"`) — shared containers from every organisation you're a member of. Read-only for now (assignment via `bw move` is a follow-up); the rows are filterable like folders, and the per-row count tells you how many of your visible items belong to that collection. Personal-only accounts don't see this section at all.
+
+Deleting a folder leaves its items intact; their `folder_id` is cleared by `bw`. Collections cannot be deleted from bytewarden.
 
 ---
 
@@ -500,6 +547,7 @@ Two modes: **read** (default) and **edit** (`Alt+E`). Both walk the same field l
 | `F2` | Reveal / hide selected hidden field |
 | `Alt+C` | Copy selected field to clipboard |
 | `Alt+E` | **Enter edit mode** |
+| `Alt+M` | **Move into your organisation** — opens the assign-collections popup pre-filled with the user's org. Only when the item is personal and the user has exactly 1 organisation; multi-org accounts get an error toast asking them to use `bw move` from shell. |
 | `Alt+D` | **Delete item** — confirm popup |
 | `Alt+X` | **Check password against HaveIBeenPwned breaches** (toast) |
 | `Alt+A` | **Upload attachment** (popup) |
@@ -528,7 +576,27 @@ The **HIBP check** (`Alt+X`) hashes the password locally and queries [HaveIBeenP
 | `Alt+R` | Rename focused custom field (popup) |
 | `Alt+T` | Cycle custom-field type (text → hidden → boolean → linked) |
 | `Alt+U` | Add a URL row (login items only) |
+| `Alt+L` | Assign collections (popup) — only on the read-only **Collections** row of an organisation item |
 | `Alt+Del` | Remove focused custom field or URL row |
+
+#### Collections assignment
+
+Items that belong to a Bitwarden **organisation** show an extra read-only **Collections** row at the bottom of the edit form, listing the collection names the item is currently shared into. Move the cursor to that row and press `Alt+L` to open a multi-select popup:
+
+```
+┌─ Assign collections ───────────────────────────────────┐
+│  2 of 4 selected                                       │
+│  ▸ [x]  Engineering                                    │
+│    [x]  Ops                                            │
+│    [ ]  Marketing                                      │
+│    [ ]  Sales                                          │
+│  j/k or ↑↓ to navigate · Space to toggle · Enter ·Esc  │
+└────────────────────────────────────────────────────────┘
+```
+
+Bitwarden requires every organisation-owned item to live in **at least one** collection — empty selection is rejected with an inline error strip so you can fix it before the save round-trip.
+
+Personal-vault items don't show this row. Creating an item directly into an organisation and moving an existing item between vaults (`bw move`) are not supported yet — for now bytewarden only edits the collection set of items that *already* belong to an org.
 
 The **Type** field is read-only. **Fingerprint** on SSH key items is read-only too (recomputed by `bw` on save). All other fields are editable. Save is atomic via `bw edit item` — the local item list is updated immediately on success.
 
@@ -587,14 +655,23 @@ Supported types: **Login, Secure Note, Card, Identity, SSH Key**.
 |-----|--------|
 | `Tab` / `Shift+Tab` | Next / previous field (wraps) |
 | `↑` / `↓` | Next / previous field (clamps) |
-| `← → Home End` | Move cursor |
+| `← → Home End` | Move cursor (or cycle the **Organization** row) |
 | `Backspace` / `Delete` | Delete character |
 | `F2` | Reveal / hide hidden field |
 | `Alt+G` | Generate password into the focused hidden field |
+| `Alt+L` | Pick collections — only on the read-only **Collections** row |
 | `Enter` | **Create** — calls `bw create item` |
 | `Esc` | Cancel |
 
 The **Name** field is required. On success the new item is inserted into the local list and the vault screen is shown with it pre-selected.
+
+### Creating directly in an organisation
+
+If your account is a member of one or more Bitwarden organisations, the create form gets an extra **Organization** row at the bottom. Default is `Personal` (item lands in your private vault). Move the cursor onto that row and press `← →` to cycle through `Personal · Acme · Beta · …`.
+
+Picking a real organisation injects a sibling **Collections** row right below it. Press `Alt+L` to open the multi-select popup and pick which collections the new item should belong to. Bitwarden requires every org item to live in at least one collection — `Enter` to create rejects an empty selection inline before paying for the network round-trip.
+
+Personal-only accounts don't see either row, and the create flow stays identical to the previous behaviour.
 
 ---
 
@@ -810,6 +887,36 @@ Same redaction rules as the in-app panel — session keys are already masked bef
 
 ---
 
+## Reprompt (master-password reverify)
+
+Items marked with the Bitwarden **reprompt** flag (right-click → "Master password re-prompt" in the official GUI) ask the user to reconfirm their master password before exposing any secret. Bytewarden honors this flag on these actions:
+
+| Trigger | Where |
+|---|---|
+| `Alt+C` (copy password) | Vault list |
+| `Alt+C` (copy focused row) | Detail screen, only when the row is hidden — password / TOTP / hidden custom field |
+| `F2` (reveal hidden) | Detail screen (read-mode), only on the false→true transition |
+| `F2` (reveal hidden field) | Detail screen (edit-mode), only when the focused row is currently masked |
+
+Non-secret actions on the same item — copying the username or URL, viewing the detail page, entering edit mode — are **not** gated; they expose nothing the user can't already see by virtue of the vault being unlocked.
+
+When triggered, a centered popup appears:
+
+```
+┌─ Master password required ─────────────────────────────┐
+│  This item asks to re-verify before copying the pass…  │
+│  Master password                                       │
+│  ┌─────────────────────────────────────────────────┐   │
+│  │ ●●●●●●●●█                                        │   │
+│  └─────────────────────────────────────────────────┘   │
+│  Enter to verify · Esc to cancel                       │
+└────────────────────────────────────────────────────────┘
+```
+
+Type the master password, hit `Enter`. Bytewarden runs `bw unlock` against the input — on success the deferred action fires and the in-memory session key is silently rotated to the new one bw issued; on failure the popup stays open with an error strip and the buffer is cleared so you can retry.
+
+**No caching.** Every protected action re-prompts. This matches the official Bitwarden GUI behaviour and is intentional: caching would defeat the protection on rapid-fire copy-then-reveal sequences.
+
 ## Auto-lock
 
 Tick **Auto-lock** on the login screen (or set `auto_lock = true` in the config file) and bytewarden locks the vault after `lock_after_minutes` minutes of inactivity. Activity is any keypress; the timer resets on each one.
@@ -871,7 +978,14 @@ Validators live in `domain::validation` as pure functions, so they are unit-test
 
 When the terminal is below the minimum that the layouts assume (60 columns × 18 rows) the renderer steps out of the way and shows a single centred "Terminal too small — resize to at least 60×18" message. Resize, the next frame redetects the new size, and the regular UI comes back.
 
-In-memory secrets — the unlocked `bw` session key, the master-password buffer on the login form, and the OTP buffer — are wrapped in [`zeroize::Zeroizing`](https://docs.rs/zeroize). When the wrapper drops (lock, logout, OTP submitted, password cleared on success) every byte of the underlying string is overwritten with zeroes via a `write_volatile` the compiler can't optimise away. This narrows the window in which a heap dump or a swap-out could leak an authorisation token after the user has already locked.
+In-memory secrets are wrapped end-to-end:
+
+- **Session key, master-password buffer, OTP / 2FA buffer** are stored in [`zeroize::Zeroizing<String>`](https://docs.rs/zeroize). When the wrapper drops (lock, logout, OTP submitted, password cleared on success) every byte of the underlying string is overwritten with zeroes via a `write_volatile` the compiler can't optimise away.
+- **Every vault-data payload** (`Item`, `LoginData`, `CardData`, `SshKeyData`, `IdentityData`, `Field`, `UriData`, `Attachment`) derives `Zeroize` + `ZeroizeOnDrop`, so the entire `app.items` / `app.trashed_items` cache is scrubbed on lock / logout / app shutdown. Clones the flows pass around (favourite toggle, edit-mode entry, copy-staging…) and the parallel lowercased search cache get the same treatment.
+- **JSON intermediates** carrying credentials (`get_item_json` result, the patched payload built before `bw edit item`) are wrapped in `Zeroizing<String>` at the boundary so the heap allocation is freed with zeros.
+- **Edit-form buffers** (`EditField.value`) and the **generator result** (`GeneratorState.result`) live in `Zeroizing<String>` too — a freshly-generated password, or a password the user is mid-edit, never sits unscrubbed in the heap waiting for the allocator to reclaim it.
+
+This narrows the window in which a heap dump or a swap-out could leak credentials after the user has already locked.
 
 The composition root in `main.rs` carries no `unsafe` blocks. Hydration of the keep-session key happens via `BwCliAdapter::new_with(seed)` — the seed is passed straight to the adapter constructor instead of being injected into the process environment, so we never touch `std::env::set_var` (which is `unsafe` in edition 2024). The adapter still falls back to `$BW_SESSION` from the inherited environment when the seed is `None`, so users who export the variable manually keep working.
 
@@ -927,7 +1041,7 @@ src/
 
 ## Testing & coverage
 
-The crate has **142 unit tests + 4 doctests**, all run with `cargo test`.
+The crate has **252 unit tests + 4 doctests**, all run with `cargo test`.
 
 ```bash
 cargo test                      # everything

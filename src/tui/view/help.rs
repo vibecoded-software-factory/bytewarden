@@ -247,12 +247,29 @@ fn login_section(out: &mut Vec<Line<'static>>, t: &Theme) {
         t,
     ));
     out.push(help_line("Alt+S", "SSO login (opens browser)", t));
+    out.push(blank());
+    out.push(section("Two-factor (when prompted)", t));
+    out.push(help_line(
+        "← →",
+        "Cycle method on the Two-step Code field (Authenticator / Email / YubiKey)",
+        t,
+    ));
+    out.push(help_line(
+        "Enter",
+        "Submit the code with the active method",
+        t,
+    ));
 }
 
 fn vault_sections(out: &mut Vec<Line<'static>>, focus: &Focus, t: &Theme) {
     // Always-available shortcuts on the vault screen.
     out.push(section("Vault — global", t));
     out.push(help_line("/", "Focus search bar", t));
+    out.push(help_line(
+        "url:<text>",
+        "Search bar prefix — narrows match to login URIs only",
+        t,
+    ));
     out.push(help_line(
         "0 .. 4",
         "Jump panel: Status / Folders / Items / List / Log",
@@ -272,6 +289,19 @@ fn vault_sections(out: &mut Vec<Line<'static>>, focus: &Focus, t: &Theme) {
     out.push(help_line(
         "Alt+B",
         "Memberships: organisations + collections",
+        t,
+    ));
+    out.push(blank());
+    out.push(section("List indicators (per item row)", t));
+    out.push(help_line("★", "Favorite (toggle with Alt+F)", t));
+    out.push(help_line(
+        "🔒",
+        "Reprompt-protected — secret-exposing actions ask for master password",
+        t,
+    ));
+    out.push(help_line(
+        "👥",
+        "Belongs to an organisation (shared via collections)",
         t,
     ));
     out.push(blank());
@@ -365,6 +395,11 @@ fn detail_sections(out: &mut Vec<Line<'static>>, t: &Theme) {
     out.push(help_line("F2", "Reveal / hide hidden field", t));
     out.push(help_line("Alt+C", "Copy focused field to clipboard", t));
     out.push(help_line("Alt+E", "Enter edit mode (not in trash)", t));
+    out.push(help_line(
+        "Alt+M",
+        "Move into your organisation (popup) — only when item is personal and you have exactly 1 org",
+        t,
+    ));
     out.push(help_line("Alt+D", "Delete item (confirm)", t));
     out.push(help_line(
         "Alt+X",
@@ -411,8 +446,20 @@ fn detail_sections(out: &mut Vec<Line<'static>>, t: &Theme) {
     ));
     out.push(help_line("Alt+U", "Add URL row (login items)", t));
     out.push(help_line(
+        "Alt+L",
+        "Assign collections (popup) — only on the read-only Collections row of an org item",
+        t,
+    ));
+    out.push(help_line(
         "Alt+Del",
         "Remove focused custom field or URL row",
+        t,
+    ));
+    out.push(blank());
+    out.push(section("Reprompt-protected items (🔒 in list)", t));
+    out.push(help_line(
+        "Alt+C / F2",
+        "Master-password popup before exposing the secret (no caching)",
         t,
     ));
 }
@@ -437,6 +484,16 @@ fn create_sections(out: &mut Vec<Line<'static>>, t: &Theme) {
     out.push(help_line(
         "Alt+G",
         "Generate password into focused hidden field",
+        t,
+    ));
+    out.push(help_line(
+        "← →",
+        "Cycle Organization (Personal / Org A / …) — only on the Organization row",
+        t,
+    ));
+    out.push(help_line(
+        "Alt+L",
+        "Assign collections (popup) — only on the Collections row of an org item",
         t,
     ));
     out.push(help_line("Enter", "Create (calls bw create item)", t));

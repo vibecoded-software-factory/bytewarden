@@ -30,5 +30,5 @@ pub use item::{
     item_type_label,
 };
 pub use membership::{Collection, Organization};
-pub use search::fuzzy_score;
-pub use vault_info::{LoginOutcome, VaultInfo, VaultStatus};
+pub use search::{LoweredItem, fuzzy_score, fuzzy_score_lowered};
+pub use vault_info::{LoginOutcome, TwoFactorMethod, VaultInfo, VaultStatus};

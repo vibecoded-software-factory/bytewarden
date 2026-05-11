@@ -5,6 +5,7 @@
 //! functions take `&mut App` so they can be dispatched from the
 //! pending-action queue without method-resolution gymnastics.
 
+pub mod assign_collections;
 pub mod auth;
 pub mod copy;
 pub mod export;
@@ -14,5 +15,6 @@ pub mod import;
 pub mod item_json;
 pub mod items;
 pub mod memberships;
+pub mod reprompt;
 pub mod send;
 pub mod vault;

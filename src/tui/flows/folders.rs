@@ -32,7 +32,8 @@ pub fn refresh_folders_silent(app: &mut App) -> bool {
         Ok(folders) => {
             let count = folders.len();
             app.folders = sorted(folders);
-            app.folder_selected = row_for_filter(&app.active_folder, &app.folders);
+            app.folder_selected =
+                row_for_filter(&app.active_folder, &app.folders, &app.collections);
             app.push_cmd(&cmd, true, &format!("{count} folders loaded"));
             true
         }
@@ -53,7 +54,7 @@ fn sorted(mut folders: Vec<Folder>) -> Vec<Folder> {
 /// Moves the folder-sidebar highlight down by one (clamped, skips the
 /// separator row at logical index 2).
 pub fn move_down(app: &mut App) {
-    let n = row_count(&app.folders);
+    let n = row_count(&app.folders, &app.collections);
     if n == 0 {
         return;
     }
@@ -72,9 +73,10 @@ pub fn move_up(app: &mut App) {
 /// Activates the highlighted folder filter and resets the item-list
 /// selection / scroll so the user lands at the top of the new view.
 pub fn apply_filter(app: &mut App) {
-    app.active_folder = filter_for_row(app.folder_selected, &app.folders);
+    app.active_folder = filter_for_row(app.folder_selected, &app.folders, &app.collections);
     app.selected_index = 0;
     app.scroll_offset = 0;
+    app.rebuild_filtered_cache();
 }
 
 // ── Lookup helpers ────────────────────────────────────────────────────────
@@ -294,6 +296,7 @@ pub fn confirm_delete(app: &mut App) {
             {
                 app.active_folder = super::super::folders::FolderFilter::All;
                 app.folder_selected = 0;
+                app.rebuild_filtered_cache();
             }
             refresh_folders_silent(app);
             // Refresh items too — their folder_id pointers have changed.

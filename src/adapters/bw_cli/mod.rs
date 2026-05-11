@@ -11,8 +11,10 @@ pub mod codec;
 pub mod json;
 pub mod process;
 
-use crate::domain::{Collection, Folder, Item, LoginOutcome, Organization, VaultInfo, VaultStatus};
-use crate::ports::VaultPort;
+use crate::domain::{
+    Collection, Folder, Item, LoginOutcome, Organization, TwoFactorMethod, VaultInfo, VaultStatus,
+};
+use crate::ports::{ParallelSessionData, VaultPort};
 use serde_json::json;
 use zeroize::Zeroizing;
 
@@ -48,35 +50,69 @@ const SYNC_TIMEOUT: u64 = 30;
 /// Bulk operations that can legitimately move several megabytes of
 /// data: full export/import, attachment up/download.
 const BULK_TIMEOUT: u64 = 60;
+/// Fallback wall-clock budget for `bw list items` / `bw list items
+/// --trash` when the caller didn't override it. Decrypts every record
+/// and serializes to JSON, which on large vaults can take a few
+/// seconds — but never minutes once the pipe-buffer deadlock in
+/// `process::wait_with_timeout` is fixed. We default to 60 s, well
+/// above any realistic decrypt cost while still bounding a genuinely
+/// wedged child. Override via `list_items_timeout_secs` in
+/// `config.toml` if you ever hit the ceiling.
+const DEFAULT_LIST_ITEMS_TIMEOUT: u64 = 60;
 
-/// Patterns that indicate `bw login` wants a one-time device
-/// verification code (or a 2FA code) on the next attempt.
+/// Patterns that indicate `bw login` is challenging us with the
+/// **permanent** second factor enrolled on the user's account
+/// (Authenticator app, YubiKey, Email 2FA, …).
 ///
-/// These come from the actual `bw` CLI prompts and error messages.
-/// Each one is matched as a case-insensitive substring against the
-/// combined stdout + stderr of the failed `login` invocation.
+/// Resolved by [`VaultPort::login_with_two_factor`], which passes
+/// `--method N` to `bw login` so the CLI knows which factor to use.
 ///
-/// New entries are cheap to add — when in doubt, include the phrase
-/// rather than miss a future copy change.
-const OTP_PROMPT_PATTERNS: &[&str] = &[
-    "new device",
-    "enter otp",
-    "verification required",
-    "verification code",
+/// Each pattern is matched as a case-insensitive substring against
+/// the combined stdout + stderr of the failed `login` invocation.
+const TWO_FACTOR_PROMPT_PATTERNS: &[&str] = &[
     "two-step login",
     "two-step token",
+    "authenticator app",
     "additional authentication",
 ];
 
-/// Heuristic — does the combined stdout+stderr indicate that `bw login`
-/// wants a one-time device-verification code on the next attempt?
+/// Patterns that indicate `bw login` is asking for a one-time
+/// **device-verification** code (the e-mailed OTP that fires when bw
+/// doesn't recognise the source device).
 ///
-/// The check is intentionally a substring search: `bw` prompt text has
-/// changed across versions and we'd rather match too eagerly than miss
-/// a real prompt and dump the user back at "Invalid credentials".
-fn combined_needs_otp(text: &str) -> bool {
+/// Resolved by [`VaultPort::login_with_otp`] — no `--method` flag is
+/// involved; bw matches the prompt automatically.
+///
+/// The list is checked **after** [`TWO_FACTOR_PROMPT_PATTERNS`] so a
+/// 2FA prompt that happens to mention "verification code" is routed
+/// down the right path.
+const DEVICE_VERIFICATION_PROMPT_PATTERNS: &[&str] = &[
+    "new device",
+    "device verification",
+    "verification required",
+    "verification code",
+    "enter otp",
+];
+
+/// Classifies a failed `bw login` output into one of the interactive
+/// outcomes (or `None` if the failure is just bad credentials).
+///
+/// The two-factor list is consulted first — `"verification code"` is
+/// generic enough to appear inside 2FA prompts too, and we'd rather
+/// miss a device verification (the user can retry) than misroute a
+/// 2FA prompt down the no-method-flag path (which silently fails).
+fn combined_outcome(text: &str) -> Option<LoginOutcome> {
     let lower = text.to_lowercase();
-    OTP_PROMPT_PATTERNS.iter().any(|p| lower.contains(p))
+    if TWO_FACTOR_PROMPT_PATTERNS.iter().any(|p| lower.contains(p)) {
+        return Some(LoginOutcome::NeedsTwoFactor);
+    }
+    if DEVICE_VERIFICATION_PROMPT_PATTERNS
+        .iter()
+        .any(|p| lower.contains(p))
+    {
+        return Some(LoginOutcome::NeedsDeviceVerification);
+    }
+    None
 }
 
 /// Vault adapter that drives the `bw` CLI.
@@ -90,8 +126,15 @@ fn combined_needs_otp(text: &str) -> bool {
 /// [`Self::logout`] reset it to `None`. That closes the window in
 /// which a heap dump or a swap-out could leak the unlocked-vault
 /// authorisation token after the user has already locked.
+#[derive(Clone)]
 pub struct BwCliAdapter {
     session_key: Option<Zeroizing<String>>,
+    /// Wall-clock budget applied to `bw list items` and `bw list items
+    /// --trash`. Sourced from [`crate::ports::UserSettings::list_items_timeout_secs`]
+    /// at boot via [`Self::with_list_items_timeout`]; falls back to
+    /// [`DEFAULT_LIST_ITEMS_TIMEOUT`] when the constructor is used
+    /// without an explicit override (tests, defaults).
+    list_items_timeout: u64,
 }
 
 impl BwCliAdapter {
@@ -125,7 +168,23 @@ impl BwCliAdapter {
                 .map(|s| Zeroizing::new(s.trim().to_string()))
                 .filter(|s| !s.is_empty())
         });
-        Self { session_key }
+        Self {
+            session_key,
+            list_items_timeout: DEFAULT_LIST_ITEMS_TIMEOUT,
+        }
+    }
+
+    /// Overrides the `bw list items` timeout (seconds). Builder-style
+    /// so the composition root can read user settings and chain it
+    /// onto the constructor without a second mutation step. A value of
+    /// `0` is treated as "use the default" — never disable the
+    /// timeout, since an unbounded wait would let a wedged child hang
+    /// the TUI forever.
+    pub fn with_list_items_timeout(mut self, secs: u64) -> Self {
+        if secs > 0 {
+            self.list_items_timeout = secs;
+        }
+        self
     }
 
     /// Returns the current session key or a "Vault is locked" error,
@@ -186,13 +245,15 @@ impl VaultPort for BwCliAdapter {
             self.session_key = Some(Zeroizing::new(key.clone()));
             return LoginOutcome::Success(key);
         }
-        // `bw` exits with an error when it needs an OTP but stdin is empty;
-        // detect it via the prompt text on stdout/stderr.
+        // `bw` exits with an error when it needs an interactive code but
+        // stdin is empty; detect it via the prompt text on stdout/stderr.
+        // The follow-up classification (device-verification vs permanent
+        // 2FA) lives in [`combined_outcome`].
         let combined = format!("{}\n{}", stdout_str(&out), stderr_str(&out));
-        if combined_needs_otp(&combined) {
-            return LoginOutcome::NeedsOtp;
+        match combined_outcome(&combined) {
+            Some(o) => o,
+            None => LoginOutcome::Failed(stderr_str(&out)),
         }
-        LoginOutcome::Failed(stderr_str(&out))
     }
 
     fn login_with_otp(&mut self, email: &str, password: &str, otp: &str) -> Result<String, String> {
@@ -209,6 +270,45 @@ impl VaultPort for BwCliAdapter {
             &["login", email, "--passwordenv", BW_PASSWORD_ENV, "--raw"],
             password,
             &format!("{otp}\n"),
+            AUTH_TIMEOUT,
+        )?;
+        if out.status.success() {
+            let key = stdout_str(&out);
+            self.session_key = Some(Zeroizing::new(key.clone()));
+            Ok(key)
+        } else {
+            Err(stderr_str(&out))
+        }
+    }
+
+    fn login_with_two_factor(
+        &mut self,
+        email: &str,
+        password: &str,
+        code: &str,
+        method: TwoFactorMethod,
+    ) -> Result<String, String> {
+        // Same stdin-fed approach as `login_with_otp` — the code stays
+        // out of argv/`ps`. The `--method N` flag tells bw which
+        // factor to validate (`0` Authenticator, `1` Email, `3`
+        // YubiKey).
+        //
+        // bw's argument parser does not accept `--method` together with
+        // `--nointeraction`, so the global flag is dropped here just
+        // like in the device-verification path.
+        let method_str = method.as_u8().to_string();
+        let out = bw_run_with_password_and_stdin_timeout(
+            &[
+                "login",
+                email,
+                "--passwordenv",
+                BW_PASSWORD_ENV,
+                "--method",
+                &method_str,
+                "--raw",
+            ],
+            password,
+            &format!("{code}\n"),
             AUTH_TIMEOUT,
         )?;
         if out.status.success() {
@@ -302,8 +402,14 @@ impl VaultPort for BwCliAdapter {
 
     fn list_items(&mut self) -> Result<Vec<Item>, String> {
         // Local-only — reads the cached vault populated by the last sync.
+        // Decrypts every record and serializes to JSON; large vaults
+        // can take several seconds, so we use the configurable
+        // `list_items_timeout` (default 3 min) instead of the generic
+        // 10 s local-op fallback that fires before the legitimate
+        // decrypt completes.
         let session = self.session()?.to_string();
-        let out = bw_run(&["list", "items", "--session", &session])?;
+        let timeout = self.list_items_timeout;
+        let out = bw_run_timeout(&["list", "items", "--session", &session], timeout)?;
         if out.status.success() {
             serde_json::from_str::<Vec<Item>>(&stdout_str(&out))
                 .map_err(|e| format!("Error parsing items JSON: {e}"))
@@ -313,9 +419,14 @@ impl VaultPort for BwCliAdapter {
     }
 
     fn list_trash(&mut self) -> Result<Vec<Item>, String> {
-        // Local-only.
+        // Same decrypt cost as `list_items` — see that method for the
+        // timeout rationale.
         let session = self.session()?.to_string();
-        let out = bw_run(&["list", "items", "--trash", "--session", &session])?;
+        let timeout = self.list_items_timeout;
+        let out = bw_run_timeout(
+            &["list", "items", "--trash", "--session", &session],
+            timeout,
+        )?;
         if out.status.success() {
             serde_json::from_str::<Vec<Item>>(&stdout_str(&out))
                 .map_err(|e| format!("Error parsing trash JSON: {e}"))
@@ -347,12 +458,20 @@ impl VaultPort for BwCliAdapter {
         }
     }
 
-    fn get_item_json(&mut self, item_id: &str) -> Result<String, String> {
+    fn get_item_json(&mut self, item_id: &str) -> Result<Zeroizing<String>, String> {
         // Local-only — reads the cached item.
+        //
+        // The returned JSON contains the item's plaintext credentials
+        // (login password, TOTP seed, SSH private key, card CVV, …).
+        // Wrap it in `Zeroizing` so the buffer is overwritten with
+        // zeroes when the caller is done with it, instead of being
+        // freed-but-not-scrubbed by the allocator.
         let session = self.session()?.to_string();
         let out = bw_run(&["get", "item", item_id, "--session", &session])?;
         if out.status.success() {
-            Ok(String::from_utf8_lossy(&out.stdout).to_string())
+            Ok(Zeroizing::new(
+                String::from_utf8_lossy(&out.stdout).to_string(),
+            ))
         } else {
             Err(stderr_str(&out))
         }
@@ -528,6 +647,77 @@ impl VaultPort for BwCliAdapter {
         }
     }
 
+    fn move_item(
+        &mut self,
+        item_id: &str,
+        organization_id: &str,
+        collection_ids: &[String],
+    ) -> Result<(), String> {
+        // bw expects the collection-ids list as a base64-encoded
+        // JSON array, mirroring how `bw create item` takes its
+        // payload. We do the encoding in-process so the
+        // command line stays free of credential-shaped strings
+        // (matters less here than for passwords, but consistency
+        // keeps the adapter simple).
+        let session = self.session()?.to_string();
+        let json = serde_json::to_string(collection_ids)
+            .map_err(|e| format!("Could not serialize collection ids: {e}"))?;
+        let encoded = base64_encode(&json);
+        let out = bw_run_timeout(
+            &[
+                "move",
+                item_id,
+                organization_id,
+                &encoded,
+                "--session",
+                &session,
+            ],
+            ITEM_OP_TIMEOUT,
+        )?;
+        if out.status.success() {
+            Ok(())
+        } else {
+            Err(stderr_str(&out))
+        }
+    }
+
+    fn list_import_formats(&mut self) -> Result<Vec<String>, String> {
+        // Local-only — bw prints the static list it was compiled
+        // with. No session needed.
+        let out = bw_run(&["import", "--formats"])?;
+        if !out.status.success() {
+            return Err(stderr_str(&out));
+        }
+        let stdout = stdout_str(&out);
+        // bw's output has changed across versions (sometimes a bare
+        // list, sometimes a table with headings). We extract the
+        // first identifier-like token from every line, then dedup
+        // and keep the original order.
+        let mut seen = std::collections::HashSet::new();
+        let mut out: Vec<String> = Vec::new();
+        for line in stdout.lines() {
+            let token: String = line
+                .trim()
+                .chars()
+                .take_while(|c| c.is_ascii_alphanumeric())
+                .collect();
+            // Heuristic: real format identifiers are `[a-z][a-z0-9]+`
+            // — skip CLI banners ("Available formats:") and section
+            // markers, which would either start with uppercase or
+            // be too short to be a valid format.
+            if token.len() >= 4
+                && token.chars().next().is_some_and(|c| c.is_ascii_lowercase())
+                && seen.insert(token.clone())
+            {
+                out.push(token);
+            }
+        }
+        if out.is_empty() {
+            return Err("bw import --formats returned no usable formats".into());
+        }
+        Ok(out)
+    }
+
     fn import(&mut self, format: &str, input_path: &str) -> Result<(), String> {
         // Bulk: import can upload thousands of items in one go.
         let session = self.session()?.to_string();
@@ -673,6 +863,58 @@ impl VaultPort for BwCliAdapter {
             Err(stderr_str(&out))
         }
     }
+
+    /// Overrides the default sequential implementation: spawns one
+    /// worker thread per query so the four `bw` invocations (folders,
+    /// orgs, collections, import-formats) overlap their Node.js
+    /// cold-starts and finish in `max(t_i)` instead of `sum(t_i)`.
+    /// On a typical login that drops the post-login wait by ~3-4 s.
+    ///
+    /// Each thread holds its own clone of the adapter (so the
+    /// session key is shared by deep copy, not by `&mut`), making
+    /// the parallel reads sound under the existing `&mut self` trait
+    /// signature. The clones are dropped when the threads return,
+    /// zeroing their session-key copies.
+    ///
+    /// Thread-panic recovery: a poisoned join is reported as an
+    /// `Err` for that specific result; the other three still come
+    /// through cleanly.
+    fn parallel_session_data(&mut self) -> ParallelSessionData {
+        let f = self.clone();
+        let o = self.clone();
+        let c = self.clone();
+        let i = self.clone();
+        let folders = std::thread::spawn(move || {
+            let mut a = f;
+            a.list_folders()
+        });
+        let orgs = std::thread::spawn(move || {
+            let mut a = o;
+            a.list_organizations()
+        });
+        let cols = std::thread::spawn(move || {
+            let mut a = c;
+            a.list_collections()
+        });
+        let formats = std::thread::spawn(move || {
+            let mut a = i;
+            a.list_import_formats()
+        });
+        ParallelSessionData {
+            folders: folders
+                .join()
+                .unwrap_or_else(|_| Err("folders worker panicked".into())),
+            organizations: orgs
+                .join()
+                .unwrap_or_else(|_| Err("organizations worker panicked".into())),
+            collections: cols
+                .join()
+                .unwrap_or_else(|_| Err("collections worker panicked".into())),
+            import_formats: formats
+                .join()
+                .unwrap_or_else(|_| Err("import-formats worker panicked".into())),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -681,19 +923,63 @@ mod tests {
     use crate::ports::VaultPort;
 
     #[test]
-    fn detects_known_phrases() {
-        assert!(combined_needs_otp("New device detected"));
-        assert!(combined_needs_otp("Enter OTP:"));
-        assert!(combined_needs_otp("Verification required to continue"));
-        assert!(combined_needs_otp("Please enter the verification code"));
-        assert!(combined_needs_otp("Two-step login"));
+    fn classifies_device_verification_prompts() {
+        assert!(matches!(
+            combined_outcome("New device detected"),
+            Some(LoginOutcome::NeedsDeviceVerification)
+        ));
+        assert!(matches!(
+            combined_outcome("Verification required to continue"),
+            Some(LoginOutcome::NeedsDeviceVerification)
+        ));
+        assert!(matches!(
+            combined_outcome("Please enter the verification code"),
+            Some(LoginOutcome::NeedsDeviceVerification)
+        ));
+        assert!(matches!(
+            combined_outcome("Enter OTP:"),
+            Some(LoginOutcome::NeedsDeviceVerification)
+        ));
     }
 
     #[test]
-    fn ignores_unrelated_errors() {
-        assert!(!combined_needs_otp("Invalid email address"));
-        assert!(!combined_needs_otp("Username or password is incorrect."));
-        assert!(!combined_needs_otp(""));
+    fn classifies_two_factor_prompts() {
+        assert!(matches!(
+            combined_outcome("Two-step Login Code:"),
+            Some(LoginOutcome::NeedsTwoFactor)
+        ));
+        assert!(matches!(
+            combined_outcome("Two-step token"),
+            Some(LoginOutcome::NeedsTwoFactor)
+        ));
+        assert!(matches!(
+            combined_outcome("Two-step Login (Authenticator app)"),
+            Some(LoginOutcome::NeedsTwoFactor)
+        ));
+        assert!(matches!(
+            combined_outcome("Additional authentication required"),
+            Some(LoginOutcome::NeedsTwoFactor)
+        ));
+    }
+
+    #[test]
+    fn two_factor_takes_precedence_over_device_verification() {
+        // bw 2FA prompts often include the substring "verification
+        // code" too — those must be classified as 2FA, not as a
+        // device verification (which would skip the --method flag and
+        // fail silently).
+        let mixed = "Two-step Login. Enter the verification code:";
+        assert!(matches!(
+            combined_outcome(mixed),
+            Some(LoginOutcome::NeedsTwoFactor)
+        ));
+    }
+
+    #[test]
+    fn unrelated_errors_classify_as_none() {
+        assert!(combined_outcome("Invalid email address").is_none());
+        assert!(combined_outcome("Username or password is incorrect.").is_none());
+        assert!(combined_outcome("").is_none());
     }
 
     /// `lock` must drop the cached session key. The zeroizing wrapper
@@ -706,6 +992,7 @@ mod tests {
     fn lock_clears_cached_session_key() {
         let mut a = BwCliAdapter {
             session_key: Some(Zeroizing::new("test-key-DO-NOT-USE".into())),
+            list_items_timeout: DEFAULT_LIST_ITEMS_TIMEOUT,
         };
         assert!(a.session_key().is_some());
         a.lock();
@@ -719,8 +1006,25 @@ mod tests {
     #[test]
     fn session_key_field_type_is_zeroizing() {
         fn assert_is_zeroizing(_: &Option<Zeroizing<String>>) {}
-        let a = BwCliAdapter { session_key: None };
+        let a = BwCliAdapter {
+            session_key: None,
+            list_items_timeout: DEFAULT_LIST_ITEMS_TIMEOUT,
+        };
         assert_is_zeroizing(&a.session_key);
+    }
+
+    #[test]
+    fn with_list_items_timeout_overrides_default() {
+        let a = BwCliAdapter::new_with(None).with_list_items_timeout(42);
+        assert_eq!(a.list_items_timeout, 42);
+    }
+
+    #[test]
+    fn with_list_items_timeout_ignores_zero() {
+        // Zero would mean "kill bw immediately" — the guard keeps the
+        // existing default instead of disabling the safety net.
+        let a = BwCliAdapter::new_with(None).with_list_items_timeout(0);
+        assert_eq!(a.list_items_timeout, DEFAULT_LIST_ITEMS_TIMEOUT);
     }
 
     #[test]

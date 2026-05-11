@@ -134,7 +134,10 @@ mod tests {
             ssh_key: None,
             notes: None,
             folder_id: None,
+            organization_id: None,
+            collection_ids: Vec::new(),
             favorite,
+            reprompt: 0,
             fields: vec![],
             attachments: None,
         }

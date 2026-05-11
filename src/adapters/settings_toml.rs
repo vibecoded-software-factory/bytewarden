@@ -16,6 +16,57 @@ use crate::ports::{SettingsPort, UserSettings};
 /// Default inactivity threshold (15 minutes) when nothing is configured.
 const DEFAULT_LOCK_AFTER_SECS: u64 = 15 * 60;
 
+/// Default clipboard auto-clear delay (30 seconds), matching Bitwarden
+/// GUI's behaviour. Set `clipboard_clear_secs = 0` in `config.toml` to
+/// disable.
+const DEFAULT_CLIPBOARD_CLEAR_SECS: u64 = 30;
+
+/// Default wall-clock budget for `bw list items` (60 seconds). Sized
+/// to cover a healthy decrypt of a large vault on a slow machine
+/// without masking a wedged child for too long. Override with
+/// `list_items_timeout_secs = N` in `config.toml` if you have a
+/// genuinely huge vault and start hitting the ceiling.
+const DEFAULT_LIST_ITEMS_TIMEOUT_SECS: u64 = 60;
+
+/// Escapes a string for embedding inside a TOML basic-string literal
+/// (`"…"`). Only the two TOML-significant characters need handling
+/// here — `\` (the escape introducer) and `"` (the closing quote).
+/// Real-world e-mail addresses contain neither, so the common path
+/// is a no-op clone; the function exists purely as defense-in-depth
+/// against pathological values that would otherwise corrupt the
+/// config on rewrite.
+fn escape_toml_basic(s: &str) -> String {
+    s.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
+/// Inverse of [`escape_toml_basic`]. Decodes the two escape
+/// sequences we emit (`\"` and `\\`) and passes everything else
+/// through untouched. Trailing/standalone `\` is preserved as-is so
+/// hand-edited configs that don't follow the escape rules don't
+/// silently lose data.
+fn unescape_toml_basic(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '\\' {
+            match chars.next() {
+                Some('"') => out.push('"'),
+                Some('\\') => out.push('\\'),
+                Some(other) => {
+                    // Unknown escape — preserve verbatim rather
+                    // than silently dropping the backslash.
+                    out.push('\\');
+                    out.push(other);
+                }
+                None => out.push('\\'),
+            }
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
 /// File mode applied to `config.toml` after every write — owner-only
 /// read/write. Even though the file does not contain credentials, it
 /// can carry the user's e-mail address and `keep_session` preference,
@@ -118,6 +169,8 @@ impl SettingsPort for TomlSettingsAdapter {
         self.ensure_dir();
         let mut cfg = UserSettings {
             lock_after_secs: DEFAULT_LOCK_AFTER_SECS,
+            clipboard_clear_secs: DEFAULT_CLIPBOARD_CLEAR_SECS,
+            list_items_timeout_secs: DEFAULT_LIST_ITEMS_TIMEOUT_SECS,
             ..Default::default()
         };
         let Ok(text) = fs::read_to_string(self.file()) else {
@@ -128,9 +181,13 @@ impl SettingsPort for TomlSettingsAdapter {
             if let Some(v) = line.strip_prefix("save_email = ") {
                 cfg.save_email = v.trim() == "true";
             } else if let Some(v) = line.strip_prefix("email = ") {
-                let v = v.trim().trim_matches('"').to_string();
-                if !v.is_empty() {
-                    cfg.email = Some(v);
+                // Strip the wrapping `"` and decode escape sequences
+                // emitted by `write` for round-trip safety with
+                // pathological emails (those carrying `\` or `"`).
+                let inner = v.trim().trim_matches('"');
+                let decoded = unescape_toml_basic(inner);
+                if !decoded.is_empty() {
+                    cfg.email = Some(decoded);
                 }
             } else if let Some(v) = line.strip_prefix("auto_lock = ") {
                 cfg.auto_lock = v.trim() == "true";
@@ -140,6 +197,19 @@ impl SettingsPort for TomlSettingsAdapter {
                 && let Ok(m) = v.trim().parse::<u64>()
             {
                 cfg.lock_after_secs = m * 60;
+            } else if let Some(v) = line.strip_prefix("clipboard_clear_secs = ")
+                && let Ok(s) = v.trim().parse::<u64>()
+            {
+                cfg.clipboard_clear_secs = s;
+            } else if let Some(v) = line.strip_prefix("list_items_timeout_secs = ")
+                && let Ok(s) = v.trim().parse::<u64>()
+                && s > 0
+            {
+                // Reject 0 — it would mean "kill bw immediately", which
+                // is never what the user wants. Any positive value is
+                // accepted; the operator can pick "effectively no
+                // timeout" by setting a very large number.
+                cfg.list_items_timeout_secs = s;
             }
         }
         cfg
@@ -161,7 +231,7 @@ impl SettingsPort for TomlSettingsAdapter {
         }
         let mut owned = vec![format!("save_email = {save_email}")];
         if save_email && let Some(e) = email {
-            owned.push(format!("email = \"{e}\""));
+            owned.push(format!("email = \"{}\"", escape_toml_basic(e)));
         }
         if !preserved.is_empty() {
             owned.push(String::new());
@@ -240,6 +310,7 @@ mod tests {
         assert!(!cfg.auto_lock);
         assert_eq!(cfg.lock_after_secs, DEFAULT_LOCK_AFTER_SECS);
         assert!(!cfg.keep_session);
+        assert_eq!(cfg.clipboard_clear_secs, DEFAULT_CLIPBOARD_CLEAR_SECS);
     }
 
     #[test]
@@ -248,7 +319,8 @@ mod tests {
         std::fs::write(
             a.file(),
             "save_email = true\nemail = \"a@b.com\"\nauto_lock = true\n\
-             lock_after_minutes = 5\nkeep_session = true\nbogus = whatever\n",
+             lock_after_minutes = 5\nkeep_session = true\n\
+             clipboard_clear_secs = 60\nbogus = whatever\n",
         )
         .unwrap();
         let cfg = a.read();
@@ -257,6 +329,71 @@ mod tests {
         assert!(cfg.auto_lock);
         assert_eq!(cfg.lock_after_secs, 5 * 60);
         assert!(cfg.keep_session);
+        assert_eq!(cfg.clipboard_clear_secs, 60);
+    }
+
+    #[test]
+    fn read_parses_clipboard_clear_zero_to_disable() {
+        // 0 is the documented "auto-clear off" sentinel — must round-trip.
+        let (a, _t) = fresh();
+        std::fs::write(a.file(), "clipboard_clear_secs = 0\n").unwrap();
+        assert_eq!(a.read().clipboard_clear_secs, 0);
+    }
+
+    #[test]
+    fn read_falls_back_to_default_for_unparseable_clipboard_clear() {
+        // Garbage value falls back to the 30s default rather than 0
+        // (which would silently disable the protection).
+        let (a, _t) = fresh();
+        std::fs::write(a.file(), "clipboard_clear_secs = nope\n").unwrap();
+        assert_eq!(a.read().clipboard_clear_secs, DEFAULT_CLIPBOARD_CLEAR_SECS);
+    }
+
+    #[test]
+    fn write_save_email_preserves_clipboard_clear_secs() {
+        // Our write paths only touch `save_email`/`email`/`auto_lock`/
+        // `keep_session`. A user-edited `clipboard_clear_secs` line
+        // must survive a TUI write cycle untouched.
+        let (a, _t) = fresh();
+        std::fs::write(a.file(), "clipboard_clear_secs = 15\n").unwrap();
+        a.write(true, Some("u@x"));
+        assert_eq!(a.read().clipboard_clear_secs, 15);
+    }
+
+    #[test]
+    fn escape_helpers_are_round_trip_safe_on_pathological_input() {
+        // Plain emails are unaffected by escape/unescape.
+        let plain = "alice@example.com";
+        assert_eq!(escape_toml_basic(plain), plain);
+        assert_eq!(unescape_toml_basic(plain), plain);
+
+        // Emails carrying TOML-significant characters round-trip
+        // through the wire format. Real users won't do this — the
+        // tests guard against silent corruption if they manage to.
+        let weird = r#"alice"weird\path@example.com"#;
+        let escaped = escape_toml_basic(weird);
+        assert_eq!(escaped, r#"alice\"weird\\path@example.com"#);
+        assert_eq!(unescape_toml_basic(&escaped), weird);
+    }
+
+    #[test]
+    fn write_then_read_round_trips_email_with_quote() {
+        // The validator rejects this email at the login screen, but
+        // a hand-edited config could still produce it. Make sure the
+        // adapter doesn't corrupt the file when the next write
+        // touches it.
+        let (a, _t) = fresh();
+        let weird = r#"alice"q@example.com"#;
+        a.write(true, Some(weird));
+        assert_eq!(a.read().email.as_deref(), Some(weird));
+    }
+
+    #[test]
+    fn write_then_read_round_trips_email_with_backslash() {
+        let (a, _t) = fresh();
+        let weird = r"alice\b@example.com";
+        a.write(true, Some(weird));
+        assert_eq!(a.read().email.as_deref(), Some(weird));
     }
 
     #[test]

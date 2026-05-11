@@ -19,13 +19,21 @@ pub fn handle(app: &mut App, key: KeyEvent) {
     let Some(state) = app.import.as_mut() else {
         return;
     };
-    // Pick the (input, cursor) pair for the focused field; share the
-    // text-edit code below.
-    let (input, cursor): (&mut String, &mut usize) = match state.focus {
-        ImportFocus::Format => (&mut state.format, &mut state.format_cursor),
-        ImportFocus::Path => (&mut state.path, &mut state.path_cursor),
-    };
 
+    // The Format row is now a read-only dropdown — cycle with ← →
+    // and ignore everything else (including text input keys).
+    if state.focus == ImportFocus::Format {
+        match key.code {
+            KeyCode::Left | KeyCode::Char('h') => state.cycle_format(-1),
+            KeyCode::Right | KeyCode::Char('l') => state.cycle_format(1),
+            _ => {}
+        }
+        return;
+    }
+
+    // Path row — regular text input.
+    let input = &mut state.path;
+    let cursor = &mut state.path_cursor;
     match key.code {
         KeyCode::Left if *cursor > 0 => {
             *cursor -= 1;

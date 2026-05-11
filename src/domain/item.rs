@@ -4,8 +4,30 @@
 //! in the domain layer so any future adapter (REST API, mock, etc.) must
 //! produce the same shape. The `serde` derives are pragmatic: they avoid an
 //! extra DTO/conversion layer at the cost of a tiny dependency bleed.
+//!
+//! ## In-memory hygiene
+//!
+//! Every struct in this module derives [`Zeroize`] and
+//! [`ZeroizeOnDrop`]. When an `Item` (or any nested payload —
+//! `LoginData`, `CardData`, `SshKeyData`, `IdentityData`, `Field`,
+//! `UriData`, `Attachment`) is dropped, every byte of every owned
+//! `String` is overwritten with zeroes by the compiler-generated
+//! `Drop` impl. That includes:
+//!
+//! * the original items inside `App::items` / `App::trashed_items`
+//!   when the vault is locked or the user logs out,
+//! * every `Clone` of an item the flows pass around (favourite
+//!   toggle, edit-mode entry, copy-to-clipboard staging…),
+//! * temporary items materialised while parsing JSON or driving
+//!   `bw edit item` / `bw create item`.
+//!
+//! It does **not** cover non-domain copies — a `String` that the
+//! adapter pulls out of `bw`'s stdout, holds in `get_item_json`, and
+//! returns to the caller is wrapped separately in [`zeroize::Zeroizing`]
+//! at that boundary.
 
 use serde::Deserialize;
+use zeroize::{Zeroize, ZeroizeOnDrop};
 
 /// Numeric type identifier for a [`LoginData`] item.
 pub const ITEM_TYPE_LOGIN: u8 = 1;
@@ -23,7 +45,7 @@ pub const ITEM_TYPE_SSH_KEY: u8 = 5;
 /// `item_type` follows the Bitwarden numeric enum (see the `ITEM_TYPE_*`
 /// constants). Only the variant matching `item_type` will have its associated
 /// payload populated; the others are `None`.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Zeroize, ZeroizeOnDrop)]
 pub struct Item {
     /// Stable Bitwarden item identifier (UUID).
     pub id: String,
@@ -57,9 +79,38 @@ pub struct Item {
     #[allow(dead_code)]
     pub folder_id: Option<String>,
 
+    /// Bitwarden organisation that owns this item, when shared. `None`
+    /// for personal-vault items. Read-only from the TUI's perspective:
+    /// changing org membership requires a `bw move` follow-up that
+    /// bytewarden does not yet drive.
+    #[serde(rename = "organizationId", default)]
+    pub organization_id: Option<String>,
+
+    /// Collections inside the owning organisation that this item is
+    /// shared into. Empty for personal items. Used by the sidebar
+    /// filter to surface "Org / Collection" rows; assignment from the
+    /// TUI is a follow-up — for now bytewarden round-trips whatever
+    /// the official client set.
+    #[serde(rename = "collectionIds", default)]
+    pub collection_ids: Vec<String>,
+
     /// Whether the item is starred.
     #[serde(default)]
     pub favorite: bool,
+
+    /// Reprompt flag from the Bitwarden schema. `0` (the default) means
+    /// "no extra check"; any non-zero value (currently always `1`,
+    /// "Password") means the client is expected to re-prompt the user
+    /// for the master password before *exposing* the item's secrets —
+    /// copying the password / TOTP / a hidden custom field, or
+    /// revealing them on screen with F2.
+    ///
+    /// The check is enforced client-side: bw itself does not gate the
+    /// data behind this flag, it just round-trips the value. See
+    /// [`Self::needs_reprompt`] and the popup wired into the copy /
+    /// reveal paths in `tui::flows::copy` and `tui::input::detail`.
+    #[serde(default)]
+    pub reprompt: u8,
 
     /// User-defined custom fields.
     #[serde(default)]
@@ -76,7 +127,7 @@ pub struct Item {
 /// Bytewarden can list and upload attachments today. Download is
 /// supported via `bw get attachment` and delete via `bw delete
 /// attachment` — those are TUI follow-ups.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Zeroize, ZeroizeOnDrop)]
 pub struct Attachment {
     /// Stable Bitwarden attachment identifier.
     pub id: String,
@@ -97,7 +148,7 @@ pub struct Attachment {
 }
 
 /// Login-specific payload (username, password, URLs, TOTP seed).
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Zeroize, ZeroizeOnDrop)]
 pub struct LoginData {
     /// Account username — usually an e-mail address or handle.
     pub username: Option<String>,
@@ -113,7 +164,7 @@ pub struct LoginData {
 }
 
 /// A single URI inside a [`LoginData`] entry.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Zeroize, ZeroizeOnDrop)]
 pub struct UriData {
     /// Absolute URL (or pattern) the credentials apply to.
     pub uri: Option<String>,
@@ -215,7 +266,7 @@ impl UriMatch {
 /// * 1 — hidden (rendered masked),
 /// * 2 — boolean,
 /// * 3 — linked.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Zeroize, ZeroizeOnDrop)]
 pub struct Field {
     /// Display label for the field.
     pub name: Option<String>,
@@ -229,7 +280,7 @@ pub struct Field {
 }
 
 /// Card-specific payload (cardholder, brand, number, expiry, CVV).
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Zeroize, ZeroizeOnDrop)]
 pub struct CardData {
     /// Cardholder full name.
     #[serde(rename = "cardholderName")]
@@ -258,7 +309,7 @@ pub struct CardData {
 /// `key_fingerprint` is computed by `bw` from `private_key` whenever
 /// the item is created or edited, so the field is read-only from the
 /// caller's perspective.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Zeroize, ZeroizeOnDrop)]
 pub struct SshKeyData {
     /// PEM-encoded private key (OpenSSH or PKCS#8 — `bw` accepts both).
     #[serde(rename = "privateKey")]
@@ -274,7 +325,7 @@ pub struct SshKeyData {
 }
 
 /// Identity-specific payload (name, address, phone, …).
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Zeroize, ZeroizeOnDrop)]
 pub struct IdentityData {
     /// Honorific (`Mr`, `Ms`, …).
     pub title: Option<String>,
@@ -300,6 +351,19 @@ pub struct IdentityData {
     #[serde(rename = "postalCode")]
     pub postal_code: Option<String>,
     pub country: Option<String>,
+}
+
+impl Item {
+    /// `true` when the item carries the Bitwarden reprompt flag and
+    /// the client is expected to re-verify the master password before
+    /// exposing its secrets.
+    ///
+    /// The current Bitwarden schema only defines value `1` (Password
+    /// reprompt), but we treat any non-zero value the same way so
+    /// future variants don't silently downgrade to "no protection".
+    pub fn needs_reprompt(&self) -> bool {
+        self.reprompt != 0
+    }
 }
 
 /// Returns the human-readable label for an `item_type` discriminant.
@@ -408,8 +472,8 @@ mod tests {
         // Defaults are honoured even though the JSON omits the keys.
         assert!(!item.favorite);
         assert!(item.fields.is_empty());
-        let login = item.login.unwrap();
-        let uris = login.uris.unwrap();
+        let login = item.login.as_ref().unwrap();
+        let uris = login.uris.as_ref().unwrap();
         assert_eq!(uris[0].uri.as_deref(), Some("https://github.com"));
         assert_eq!(uris[0].match_type, Some(0));
     }
@@ -430,7 +494,7 @@ mod tests {
             }
         }"#;
         let item: Item = serde_json::from_str(json).expect("parse");
-        let card = item.card.expect("card payload");
+        let card = item.card.as_ref().expect("card payload");
         assert_eq!(card.cardholder_name.as_deref(), Some("JD"));
         assert_eq!(card.exp_month.as_deref(), Some("01"));
         assert_eq!(card.exp_year.as_deref(), Some("2030"));
@@ -443,7 +507,7 @@ mod tests {
             "sshKey":{"privateKey":"PRIV","publicKey":"PUB","keyFingerprint":"FP"}
         }"#;
         let item: Item = serde_json::from_str(json).expect("parse");
-        let ssh = item.ssh_key.expect("ssh payload");
+        let ssh = item.ssh_key.as_ref().expect("ssh payload");
         assert_eq!(ssh.private_key.as_deref(), Some("PRIV"));
         assert_eq!(ssh.public_key.as_deref(), Some("PUB"));
         assert_eq!(ssh.key_fingerprint.as_deref(), Some("FP"));
@@ -457,6 +521,114 @@ mod tests {
         assert!(!item.favorite);
     }
 
+    /// Compile-time guard: every domain struct that holds a `String`
+    /// derives `Zeroize`. If a future refactor drops the derive on any
+    /// of them, this fails to compile and signals that the in-memory
+    /// hygiene contract regressed.
+    ///
+    /// We require the trait via a generic helper so the assertion is
+    /// purely structural — the bodies never execute.
+    #[test]
+    fn every_domain_payload_implements_zeroize() {
+        fn assert_zeroize<T: zeroize::Zeroize>() {}
+        assert_zeroize::<Item>();
+        assert_zeroize::<Attachment>();
+        assert_zeroize::<LoginData>();
+        assert_zeroize::<UriData>();
+        assert_zeroize::<Field>();
+        assert_zeroize::<CardData>();
+        assert_zeroize::<SshKeyData>();
+        assert_zeroize::<IdentityData>();
+    }
+
+    /// Verifies that the auto-generated `zeroize()` impl actually
+    /// scrubs the data. Per the `zeroize` crate contract:
+    ///
+    /// * `Option<Z: Zeroize>::zeroize` first zeroizes the inner value
+    ///   (overwriting the bytes in place) and then sets the
+    ///   discriminant to `None`, so an attacker grepping the heap
+    ///   sees neither the payload nor the "Some" tag.
+    /// * `Vec<T: Zeroize>::zeroize` zeroizes every element and clears
+    ///   the length to 0.
+    ///
+    /// We assert the post-conditions both report `None` / empty —
+    /// that's the closest "no plaintext anywhere" check we can do
+    /// without dumping memory.
+    #[test]
+    fn zeroize_clears_login_data_strings() {
+        use zeroize::Zeroize;
+        let mut login = LoginData {
+            username: Some("alice@example.com".into()),
+            password: Some("hunter2-supersecret".into()),
+            uris: Some(vec![UriData {
+                uri: Some("https://example.com".into()),
+                match_type: Some(0),
+            }]),
+            totp: Some("OTPAUTHSECRETSEED".into()),
+        };
+        login.zeroize();
+        // `Option<String>::zeroize` overwrites the inner buffer and
+        // then collapses the option to `None`.
+        assert!(login.username.is_none());
+        assert!(login.password.is_none());
+        assert!(login.totp.is_none());
+        assert!(login.uris.is_none());
+    }
+
+    #[test]
+    fn deserialize_reprompt_flag_round_trip() {
+        let json = r#"{"id":"u","name":"n","type":1,"reprompt":1}"#;
+        let item: Item = serde_json::from_str(json).expect("parse");
+        assert_eq!(item.reprompt, 1);
+        assert!(item.needs_reprompt());
+    }
+
+    #[test]
+    fn deserialize_without_reprompt_defaults_to_zero() {
+        // Items from the official client omit `reprompt` when it's
+        // not set; serde's `#[serde(default)]` should give us 0.
+        let json = r#"{"id":"u","name":"n","type":1}"#;
+        let item: Item = serde_json::from_str(json).expect("parse");
+        assert_eq!(item.reprompt, 0);
+        assert!(!item.needs_reprompt());
+    }
+
+    #[test]
+    fn needs_reprompt_treats_any_nonzero_value_as_protected() {
+        // The schema only defines value 1 today, but a hypothetical
+        // future value (2 = WebAuthn step-up, say) must keep the
+        // protection on rather than silently downgrade.
+        let mut item: Item = serde_json::from_str(r#"{"id":"u","name":"n","type":1}"#).unwrap();
+        item.reprompt = 2;
+        assert!(item.needs_reprompt());
+    }
+
+    #[test]
+    fn deserialize_with_collection_ids_and_organization() {
+        let json = r#"{
+            "id":"u","name":"Shared","type":1,
+            "organizationId":"org-1",
+            "collectionIds":["c1","c2"]
+        }"#;
+        let item: Item = serde_json::from_str(json).expect("parse");
+        assert_eq!(item.organization_id.as_deref(), Some("org-1"));
+        assert_eq!(
+            item.collection_ids,
+            vec!["c1".to_string(), "c2".to_string()]
+        );
+    }
+
+    #[test]
+    fn deserialize_personal_item_has_empty_collection_ids() {
+        // Personal-vault items omit `organizationId` and
+        // `collectionIds`. The `#[serde(default)]` attribute should
+        // give us `None` and `vec![]`.
+        let json = r#"{"id":"u","name":"Personal","type":1}"#;
+        let item: Item = serde_json::from_str(json).expect("parse");
+        assert!(item.organization_id.is_none());
+        assert!(item.collection_ids.is_empty());
+    }
+
     #[test]
     fn deserialize_with_attachments() {
         let json = r#"{
@@ -464,7 +636,7 @@ mod tests {
             "attachments":[{"id":"a1","fileName":"f.pdf","sizeName":"45 KB"}]
         }"#;
         let item: Item = serde_json::from_str(json).expect("parse");
-        let atts = item.attachments.expect("attachments");
+        let atts = item.attachments.as_ref().expect("attachments");
         assert_eq!(atts.len(), 1);
         assert_eq!(atts[0].id, "a1");
         assert_eq!(atts[0].file_name, "f.pdf");

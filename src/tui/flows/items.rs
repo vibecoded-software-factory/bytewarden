@@ -6,7 +6,7 @@ use crate::domain::filter::{CREATE_ITEM_TYPES, CreateItemType, ItemFilter};
 use crate::tui::action::{ActionState, PendingAction};
 use crate::tui::app::App;
 use crate::tui::detail_fields::build_detail_fields;
-use crate::tui::edit_field::{build_create_fields, build_edit_fields_with_folders};
+use crate::tui::edit_field::{build_create_fields_with_orgs, build_edit_fields_with_folders};
 use crate::tui::flows::item_json::{build_create_payload, patch_edit_payload};
 use crate::tui::flows::vault;
 use crate::tui::screens::{Focus, Screen};
@@ -26,9 +26,80 @@ pub fn open_create(app: &mut App) {
 /// Confirms the type-picker selection and renders the matching form.
 pub fn create_select_type(app: &mut App) {
     app.create_type = CREATE_ITEM_TYPES[app.create_type_idx].clone();
-    app.create_fields = build_create_fields(&app.create_type);
+    app.create_fields = build_create_fields_with_orgs(&app.create_type, &app.organizations);
     app.create_field_idx = 0;
     app.create_choosing_type = false;
+}
+
+/// Cycles the create-form's "Organization" row by `dir` (+1 right,
+/// -1 left) through `[Personal, Org A, Org B, …, Personal]`.
+///
+/// Side-effect: when the new selection differs from the previous
+/// one, any sibling "Collections" row is rebuilt from scratch
+/// (removed if going to Personal, replaced with an empty row if
+/// going to a different org). The user fills the Collections row
+/// via the regular `Alt+L` popup.
+pub fn cycle_create_org(app: &mut App, dir: i32) {
+    if app.organizations.is_empty() {
+        return;
+    }
+    let Some(field) = app.create_fields.get(app.create_field_idx) else {
+        return;
+    };
+    if !field.is_organization() {
+        return;
+    }
+    let current_id = field.organization_id.clone();
+    // Build the cycle list: [None, org0.id, org1.id, …]. Cycling
+    // right goes from the current position to the next; cycling
+    // left goes to the previous.
+    let mut ids: Vec<Option<String>> = vec![None];
+    ids.extend(app.organizations.iter().map(|o| Some(o.id.clone())));
+    let cur_pos = ids.iter().position(|i| i == &current_id).unwrap_or(0);
+    let len = ids.len() as i32;
+    let new_pos = (((cur_pos as i32 + dir) % len) + len) % len;
+    let new_id = ids[new_pos as usize].clone();
+    let new_display = match &new_id {
+        None => "Personal".to_string(),
+        Some(id) => app
+            .organizations
+            .iter()
+            .find(|o| &o.id == id)
+            .map(|o| o.name.clone())
+            .unwrap_or_else(|| "Personal".into()),
+    };
+    if let Some(f) = app.create_fields.get_mut(app.create_field_idx) {
+        f.value = zeroize::Zeroizing::new(new_display);
+        f.cursor = f.value.chars().count();
+        f.organization_id = new_id.clone();
+    }
+    // Sync the sibling Collections row.
+    let org_idx = app.create_field_idx;
+    let coll_pos = app.create_fields.iter().position(|f| f.is_collections());
+    match (coll_pos, new_id.as_ref()) {
+        (Some(pos), None) => {
+            // Going Personal → drop the row.
+            app.create_fields.remove(pos);
+        }
+        (Some(pos), Some(_)) => {
+            // Switched org → reset the row (user must reselect).
+            if let Some(f) = app.create_fields.get_mut(pos) {
+                f.value = zeroize::Zeroizing::new(String::new());
+                f.cursor = 0;
+                f.collection_ids = Vec::new();
+            }
+        }
+        (None, Some(_)) => {
+            // Personal → real org. Insert a Collections row right
+            // after the Organization row so the form layout stays
+            // grouped.
+            app.create_fields.insert(
+                org_idx + 1,
+                crate::tui::edit_field::EditField::collections("", Vec::new()),
+            );
+        }
+        (None, None) => {} // Both absent — nothing to do.
+    }
 }
 
 /// Validates and queues a [`PendingAction::CreateItem`].
@@ -41,6 +112,28 @@ pub fn queue_create_item(app: &mut App) {
     if name.is_empty() {
         app.set_action(ActionState::Error("Name is required".into()));
         return;
+    }
+    // Bw requires org-owned items to live in ≥1 collection. The
+    // form's Organization row carries the resolved id; if it's set
+    // we expect a sibling Collections row with at least one UUID.
+    let org_set = app
+        .create_fields
+        .iter()
+        .find(|f| f.is_organization())
+        .and_then(|f| f.organization_id.clone());
+    if org_set.is_some() {
+        let coll_count = app
+            .create_fields
+            .iter()
+            .find(|f| f.is_collections())
+            .map(|f| f.collection_ids.len())
+            .unwrap_or(0);
+        if coll_count == 0 {
+            app.set_action(ActionState::Error(
+                "Pick at least one collection (Alt+L on the Collections row).".into(),
+            ));
+            return;
+        }
     }
     app.set_action(ActionState::Running("Creating…".into()));
     app.pending_action = PendingAction::CreateItem;
@@ -105,7 +198,7 @@ pub fn enter_edit_mode(app: &mut App) {
         .nth(app.detail_field)
         .map(|f| f.label);
 
-    let fields = build_edit_fields_with_folders(&item, &app.folders);
+    let fields = build_edit_fields_with_folders(&item, &app.folders, &app.collections);
     let initial_idx = detail_label
         .and_then(|lbl| fields.iter().position(|f| f.label == lbl))
         .unwrap_or(0)
@@ -362,6 +455,7 @@ pub fn do_delete_attachment(app: &mut App) {
                 && let Some(slot) = app.items.iter_mut().find(|i| i.id == item_id)
             {
                 *slot = refreshed;
+                app.rebuild_caches();
             }
             // Clamp the focused row in case it pointed at the deleted
             // attachment, otherwise the detail screen would highlight
@@ -399,6 +493,7 @@ pub fn commit_attachment_upload(app: &mut App) {
             app.push_cmd(&cmd, true, &format!("uploaded to {item_name}"));
             if let Some(slot) = app.items.iter_mut().find(|i| i.id == item_id) {
                 *slot = updated;
+                app.rebuild_caches();
             }
             app.set_action(ActionState::Done(format!("Attached to \"{item_name}\" ✓")));
             app.attachment_upload = None;
@@ -790,19 +885,27 @@ pub fn do_save_edit(app: &mut App) {
                 return f.clone();
             }
             let mut clone = f.clone();
-            clone.value = crate::tui::flows::folders::id_by_name(&folders_snapshot, &f.value)
-                .unwrap_or_default();
+            clone.value = zeroize::Zeroizing::new(
+                crate::tui::flows::folders::id_by_name(&folders_snapshot, &f.value)
+                    .unwrap_or_default(),
+            );
             clone
         })
         .collect();
 
-    let patched = patch_edit_payload(&base_json, &edit_fields_resolved);
+    // The patched payload still carries plaintext credentials (the
+    // password / TOTP / key bytes the user just edited), so wrap the
+    // intermediate buffer in `Zeroizing` — it is freed with zeros once
+    // `edit_item` returns.
+    let patched = zeroize::Zeroizing::new(patch_edit_payload(&base_json, &edit_fields_resolved));
     match app.vault.edit_item(&item_id, &patched) {
         Ok(updated) => {
             let name = updated.name.clone();
             if let Some(i) = app.items.iter_mut().find(|i| i.id == item_id) {
                 *i = updated;
             }
+            // sort_items rebuilds the caches; no need for an explicit
+            // call here.
             app.sort_items();
             app.push_cmd(&cmd, true, &format!("saved: {name}"));
             app.set_action(ActionState::Done("Saved ✓".into()));
@@ -849,6 +952,7 @@ pub fn do_delete_item(app: &mut App, permanent: bool) {
     match app.vault.delete_item(&id, permanent) {
         Ok(()) => {
             app.items.retain(|i| i.id != id);
+            app.rebuild_caches();
             if app.selected_index >= app.items.len() && !app.items.is_empty() {
                 app.selected_index = app.items.len() - 1;
             }
@@ -895,6 +999,7 @@ pub fn do_restore_item(app: &mut App) {
     match app.vault.restore_item(&id) {
         Ok(()) => {
             app.trashed_items.retain(|i| i.id != id);
+            app.rebuild_caches();
             app.push_cmd(&cmd, true, &format!("{name} restored to vault"));
             // Bring the user back to the regular vault list.
             app.screen = Screen::Vault;
@@ -1000,8 +1105,13 @@ pub fn do_toggle_favorite(app: &mut App) {
         }
     };
     val["favorite"] = Value::Bool(new_fav);
+    // Same hygiene as `do_save_edit`: the serialized payload still
+    // carries the item's secrets — wrap it before handing off to
+    // `edit_item` so the buffer is zeroed on drop. The `serde_json::
+    // Value` parsed above is short-lived and not directly reachable
+    // outside this function.
     let new_json = match serde_json::to_string(&val) {
-        Ok(s) => s,
+        Ok(s) => zeroize::Zeroizing::new(s),
         Err(e) => {
             app.cmd_err(&cmd, &format!("JSON serialize error: {e}"), "Failed");
             return;
@@ -1013,6 +1123,11 @@ pub fn do_toggle_favorite(app: &mut App) {
             if let Some(i) = app.items.iter_mut().find(|i| i.id == id) {
                 i.favorite = new_fav;
             }
+            // The fuzzy-search lowered cache doesn't change on a
+            // favorite flip (favorite isn't a search field), but the
+            // Favorites filter relies on the boolean to decide
+            // membership, so the filtered cache must be rebuilt.
+            app.rebuild_filtered_cache();
             let label = if new_fav {
                 "★ Favorited"
             } else {

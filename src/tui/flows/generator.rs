@@ -53,7 +53,9 @@ pub fn do_generate(app: &mut App) {
         Ok(value) => {
             let cmd = describe_cmd(&opts);
             app.push_cmd(&cmd, true, "generated [hidden]");
-            app.generator.result = value;
+            // `result` is `Zeroizing<String>` so the buffer is scrubbed
+            // when overwritten or when the generator state drops.
+            app.generator.result = zeroize::Zeroizing::new(value);
             app.set_action(ActionState::Done("Generated ✓".into()));
         }
         Err(e) => app.cmd_err("bw generate", &e, "Generate failed"),
@@ -61,16 +63,25 @@ pub fn do_generate(app: &mut App) {
 }
 
 /// Copies the current result to the clipboard via the injected port.
+///
+/// Honors `app.clipboard_clear_secs` — a generated password is exactly
+/// the kind of secret that benefits from the timed wipe.
 pub fn copy_result(app: &mut App) {
     if app.generator.result.is_empty() {
         app.set_action(ActionState::Error("Nothing to copy yet.".into()));
         return;
     }
     let value = app.generator.result.clone();
-    match app.clipboard.write(&value) {
+    let ttl = app.clipboard_clear_secs;
+    match app.clipboard.write_with_clear(&value, ttl) {
         Ok(()) => {
             app.push_cmd("clipboard", true, "generated value [hidden]");
-            app.set_action(ActionState::Done("Copied ✓".into()));
+            let toast = if ttl == 0 {
+                "Copied ✓".to_string()
+            } else {
+                format!("Copied ✓ (clears in {ttl}s)")
+            };
+            app.set_action(ActionState::Done(toast));
         }
         Err(e) => {
             app.push_cmd("clipboard", false, &e);
@@ -94,6 +105,9 @@ pub fn use_result(app: &mut App) {
         ));
         return;
     };
+    // `app.generator.result` is already a `Zeroizing<String>`, and
+    // `field.value` is too — clone the wrapper directly so the buffer
+    // stays scrubbed end-to-end.
     let value = app.generator.result.clone();
     match target {
         ReturnTarget::EditField(idx) => {

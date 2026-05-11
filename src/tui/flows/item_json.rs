@@ -69,8 +69,14 @@ fn build_uris_array(fields: &[EditField]) -> Vec<Value> {
 
 /// Builds the JSON payload for a "create item" call given the form
 /// values.
+///
+/// When the form carries an `Organization` row with a non-`None`
+/// `organization_id`, the payload also gets `organizationId` and
+/// `collectionIds` keys populated from the matching rows. The
+/// caller has already validated that `collectionIds` is non-empty
+/// for org items via [`crate::tui::flows::items::queue_create_item`].
 pub fn build_create_payload(item_type: &CreateItemType, fields: &[EditField]) -> String {
-    let v: Value = match item_type {
+    let mut v: Value = match item_type {
         CreateItemType::Login => json!({
             "type": ITEM_TYPE_LOGIN,
             "name":  get(fields, "Name"),
@@ -133,6 +139,23 @@ pub fn build_create_payload(item_type: &CreateItemType, fields: &[EditField]) ->
             },
         }),
     };
+
+    // When the form has an Organization row pointing at a real
+    // org, layer in `organizationId` + `collectionIds`. Personal
+    // (org_id = None) leaves both keys absent — bw treats absent
+    // organisation as personal-vault.
+    if let Some(org_field) = fields.iter().find(|f| f.is_organization())
+        && let Some(org_id) = org_field.organization_id.as_ref()
+    {
+        v["organizationId"] = json!(org_id);
+        let coll_ids: Vec<&str> = fields
+            .iter()
+            .find(|f| f.is_collections())
+            .map(|f| f.collection_ids.iter().map(String::as_str).collect())
+            .unwrap_or_default();
+        v["collectionIds"] = json!(coll_ids);
+    }
+
     v.to_string()
 }
 
@@ -161,6 +184,17 @@ pub fn patch_edit_payload(base_json: &str, fields: &[EditField]) -> String {
     // Empty value means "no folder" → write null.
     if let Some(v) = lookup("Folder") {
         val["folderId"] = if v.is_empty() { Value::Null } else { json!(v) };
+    }
+
+    // The "Collections" row, when present, carries the picked
+    // collection UUIDs alongside its display string. Only org items
+    // have this row (the builder skips it for personal-vault items),
+    // so when we find one we trust the multi-select popup's
+    // validation that ≥1 UUID is in there. Personal items leave
+    // `collectionIds` untouched at whatever bw returned (typically
+    // an empty array).
+    if let Some(coll_field) = fields.iter().find(|f| f.is_collections()) {
+        val["collectionIds"] = json!(coll_field.collection_ids);
     }
 
     if val["type"] == ITEM_TYPE_LOGIN {
@@ -262,7 +296,10 @@ pub fn patch_edit_payload(base_json: &str, fields: &[EditField]) -> String {
         .map(|f| {
             json!({
                 "name":     f.label,
-                "value":    f.value,
+                // `value` lives in a `Zeroizing<String>` wrapper that
+                // doesn't implement `Serialize`; serialise the inner
+                // `&str` instead.
+                "value":    f.value.as_str(),
                 "type":     f.custom_type().unwrap_or(0),
                 "linkedId": Value::Null,
             })
@@ -322,8 +359,8 @@ mod tests {
         let json = build_create_payload(&CreateItemType::SshKey, &fields);
         let parsed: Value = serde_json::from_str(&json).expect("must parse");
         assert_eq!(parsed["type"], 5);
-        assert_eq!(parsed["sshKey"]["privateKey"], fields[1].value);
-        assert_eq!(parsed["sshKey"]["publicKey"], fields[2].value);
+        assert_eq!(parsed["sshKey"]["privateKey"], fields[1].value.as_str());
+        assert_eq!(parsed["sshKey"]["publicKey"], fields[2].value.as_str());
         // bw computes the fingerprint server-side — we never send it.
         assert!(parsed["sshKey"].get("keyFingerprint").is_none());
     }
@@ -546,6 +583,73 @@ mod tests {
         let patched = patch_edit_payload(base, &fields);
         let parsed: Value = serde_json::from_str(&patched).unwrap();
         assert_eq!(parsed["folderId"], "abc-123-uuid");
+    }
+
+    #[test]
+    fn create_payload_omits_org_keys_for_personal() {
+        // No Organization row → personal-vault item, no
+        // organizationId / collectionIds in the payload.
+        let fields = vec![ef("Name", "n"), ef("Notes", "")];
+        let json = build_create_payload(&CreateItemType::SecureNote, &fields);
+        let parsed: Value = serde_json::from_str(&json).unwrap();
+        assert!(parsed.get("organizationId").is_none());
+        assert!(parsed.get("collectionIds").is_none());
+    }
+
+    #[test]
+    fn create_payload_omits_org_keys_when_org_row_is_personal() {
+        // Organization row exists but resolved to Personal (id=None).
+        let fields = vec![
+            ef("Name", "n"),
+            ef("Notes", ""),
+            EditField::organization("Personal", None),
+        ];
+        let json = build_create_payload(&CreateItemType::SecureNote, &fields);
+        let parsed: Value = serde_json::from_str(&json).unwrap();
+        assert!(parsed.get("organizationId").is_none());
+        assert!(parsed.get("collectionIds").is_none());
+    }
+
+    #[test]
+    fn create_payload_includes_org_keys_when_org_picked() {
+        let fields = vec![
+            ef("Name", "n"),
+            ef("Notes", ""),
+            EditField::organization("Acme", Some("o1".into())),
+            EditField::collections("Eng", vec!["c1".into()]),
+        ];
+        let json = build_create_payload(&CreateItemType::SecureNote, &fields);
+        let parsed: Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed["organizationId"], "o1");
+        let arr = parsed["collectionIds"].as_array().unwrap();
+        assert_eq!(arr.len(), 1);
+        assert_eq!(arr[0], "c1");
+    }
+
+    #[test]
+    fn patch_writes_collection_ids_when_collections_row_present() {
+        let base = r#"{"type":1,"name":"s","organizationId":"o1","collectionIds":["old1"]}"#;
+        let coll_row = EditField::collections("Eng, Ops", vec!["c1".into(), "c2".into()]);
+        let fields = vec![ef("Name", "s"), coll_row];
+        let patched = patch_edit_payload(base, &fields);
+        let parsed: Value = serde_json::from_str(&patched).unwrap();
+        assert_eq!(parsed["organizationId"], "o1");
+        let arr = parsed["collectionIds"].as_array().unwrap();
+        assert_eq!(arr.len(), 2);
+        assert_eq!(arr[0], "c1");
+        assert_eq!(arr[1], "c2");
+    }
+
+    #[test]
+    fn patch_leaves_collection_ids_untouched_when_row_absent() {
+        // Personal items don't get a Collections row. Whatever bw
+        // returned for `collectionIds` (typically `[]`) must survive
+        // the save unchanged.
+        let base = r#"{"type":1,"name":"s","collectionIds":[]}"#;
+        let fields = vec![ef("Name", "s")];
+        let patched = patch_edit_payload(base, &fields);
+        let parsed: Value = serde_json::from_str(&patched).unwrap();
+        assert!(parsed["collectionIds"].as_array().unwrap().is_empty());
     }
 
     #[test]

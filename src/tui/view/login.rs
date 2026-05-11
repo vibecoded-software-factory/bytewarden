@@ -26,7 +26,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     //            +email-lbl(1)+email-in(3)+pass-lbl(1)+pass-in(3)
     //            + [otp-lbl(1)+otp-in(3)]
     //            +save(1)+lock(1)+keep_session(1)+strip(2)+border(2).
-    let form_height: u16 = if app.otp_required { 24 } else { 20 };
+    let form_height: u16 = if app.awaiting_code() { 24 } else { 20 };
 
     // Vertical layout — stars above the form (2/3) and below (1/3),
     // command bar at the bottom.
@@ -76,9 +76,9 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     app.mouse_areas.login = Some(form_area);
 
     // Build the inner vertical splits dynamically — OTP rows only exist
-    // when needed.
+    // when needed (device verification *or* permanent 2FA).
     let (idx_otp_lbl, idx_otp_in, idx_save, idx_lock, idx_keep, idx_strip, f);
-    if app.otp_required {
+    if app.awaiting_code() {
         let splits = Layout::vertical([
             Constraint::Length(1), // [0]  padding
             Constraint::Length(1), // [1]  server label
@@ -217,26 +217,74 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         f[6],
     );
 
-    // ── OTP ──────────────────────────────────────────────────────────────
-    if app.otp_required {
+    // ── OTP / 2FA ────────────────────────────────────────────────────────
+    if app.awaiting_code() {
+        let (label_main, label_hint) = if app.two_factor_required {
+            // Method-specific hint so the user knows what code is
+            // being asked for. The method chip below the label
+            // shows the current selection + cycle hint.
+            let hint = match app.two_factor_method {
+                crate::domain::TwoFactorMethod::Authenticator => {
+                    "  (TOTP from your authenticator app)"
+                }
+                crate::domain::TwoFactorMethod::Email => "  (sent to your email)",
+                crate::domain::TwoFactorMethod::YubiKey => "  (touch your YubiKey)",
+            };
+            ("Two-step Code:", hint)
+        } else {
+            ("Verification Code:", "  (sent to your email)")
+        };
         frame.render_widget(
             Paragraph::new(Line::from(vec![
-                Span::styled("Verification Code:", Style::default().fg(t.dim)),
-                Span::styled("  (sent to your email)", Style::default().fg(t.dim)),
+                Span::styled(label_main, Style::default().fg(t.dim)),
+                Span::styled(label_hint, Style::default().fg(t.dim)),
             ])),
             f[idx_otp_lbl],
         );
         let otp_foc = app.active_field == LoginField::Otp;
-        frame.render_widget(
-            Paragraph::new(input_with_cursor(
-                &app.otp_input,
-                app.otp_cursor,
-                otp_foc,
-                t,
-            ))
-            .block(rounded_block(focus_border(otp_foc, t.accent))),
-            f[idx_otp_in],
-        );
+        // For 2FA we render a compact method chip on the input row's
+        // right side so the user can tell at a glance which factor
+        // is active. Cycling happens via ← → when focus is on the
+        // Otp field.
+        let inner = input_with_cursor(&app.otp_input, app.otp_cursor, otp_foc, t);
+        let block = rounded_block(focus_border(otp_foc, t.accent));
+        frame.render_widget(Paragraph::new(inner).block(block), f[idx_otp_in]);
+
+        if app.two_factor_required && otp_foc {
+            // One-line tip below the code input — small, dim, only
+            // when focused so it doesn't add noise on the rest of
+            // the form.
+            // We re-use the OTP-input box's row by overlaying — but
+            // simpler: show it as a status hint via the existing
+            // feedback strip below. Actually, simplest: append it
+            // as an inline label in the code label row. Done above
+            // via `label_hint`. Method chip is the next addition:
+            // render it as a one-row strip just under the input.
+            let method_line = Line::from(vec![Span::styled(
+                format!(
+                    " Method: {} · ← → to cycle (Authenticator / Email / YubiKey)",
+                    app.two_factor_method.label()
+                ),
+                Style::default().fg(t.dim),
+            )]);
+            // Repurpose the OTP-input area's last row by re-rendering
+            // a thin overlay — but we don't have a dedicated chunk
+            // for it in the layout. Easiest: render it on top of the
+            // input border's bottom row. Since `input_with_cursor`
+            // fills the box, we instead cram the method chip into
+            // the *label* row when focused, by adding a second line
+            // below the existing label hint via the strip helper.
+            //
+            // The cleanest implementation is to just write the chip
+            // into the strip area below the input. We rely on the
+            // existing `idx_strip` cell — the strip already gets
+            // overwritten by `action_line` further down. So we
+            // intercept here only when nothing else is showing.
+            if matches!(app.action_state, crate::tui::action::ActionState::Idle) && !app.login_error
+            {
+                frame.render_widget(Paragraph::new(method_line), f[idx_strip]);
+            }
+        }
     }
 
     // ── Checkboxes ────────────────────────────────────────────────────────
@@ -274,7 +322,9 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         .borders(Borders::TOP)
         .border_style(Style::default().fg(t.muted));
     if app.login_error {
-        let msg = if app.otp_required {
+        let msg = if app.two_factor_required {
+            "Invalid two-factor code. Please try again."
+        } else if app.otp_required {
             "Invalid verification code. Please try again."
         } else {
             "Invalid credentials. Please try again."
@@ -286,6 +336,21 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
                     Style::default().fg(t.error).add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(msg, Style::default().fg(t.error)),
+            ]))
+            .block(strip_block),
+            f[idx_strip],
+        );
+    } else if app.two_factor_required {
+        frame.render_widget(
+            Paragraph::new(Line::from(vec![
+                Span::styled(
+                    " 🔐 ",
+                    Style::default().fg(t.accent).add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    "Open your Authenticator and enter the 6-digit code.",
+                    Style::default().fg(t.accent),
+                ),
             ]))
             .block(strip_block),
             f[idx_strip],

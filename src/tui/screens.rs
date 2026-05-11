@@ -44,6 +44,15 @@ pub enum Screen {
     /// Memberships popup — read-only view of organisations + their
     /// collections.
     Memberships,
+    /// Master-password reverify popup, opened when the user attempts
+    /// an action that exposes a secret (copy password / TOTP / hidden
+    /// custom field, F2 reveal) on an item with the Bitwarden
+    /// `reprompt` flag set.
+    RepromptUnlock,
+    /// Multi-select popup for assigning the focused item to one or
+    /// more collections of its owning organisation. Opened with
+    /// `Alt+L` from the edit-mode "Collections" row.
+    AssignCollections,
 }
 
 /// Panels inside the [`Screen::Vault`] layout that can hold focus.

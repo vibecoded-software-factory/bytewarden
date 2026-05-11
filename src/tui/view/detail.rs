@@ -162,7 +162,7 @@ fn render_edit_form(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         let display = if field.hidden && !field.revealed {
             "●".repeat(field.value.chars().count().max(8))
         } else {
-            field.value.clone()
+            field.value.to_string()
         };
         let vline = if sel && !field.read_only {
             cursor_line(&display, field.cursor, t)

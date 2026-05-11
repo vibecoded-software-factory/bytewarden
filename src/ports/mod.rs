@@ -16,4 +16,4 @@ pub mod vault;
 pub use clipboard::ClipboardPort;
 pub use password_generator::{GeneratorMode, GeneratorOptions, PasswordGeneratorPort};
 pub use settings::{SettingsPort, UserSettings};
-pub use vault::VaultPort;
+pub use vault::{ParallelSessionData, VaultPort};

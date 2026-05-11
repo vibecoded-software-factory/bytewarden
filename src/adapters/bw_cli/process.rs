@@ -17,6 +17,16 @@ pub const BW_PASSWORD_ENV: &str = "BW_PASS_INPUT";
 /// the CLI's prompt logic could deadlock the TUI on a hidden read.
 const NOINTERACTION: &str = "--nointeraction";
 
+/// Defense-in-depth timeout for *local-only* `bw` invocations
+/// (unlock, list cached items, get TOTP from local store, list
+/// folders/orgs/collections, fingerprint, lock). These should
+/// finish in milliseconds, but a wedged bw process — or a
+/// future bug that adds an unexpected hidden prompt — would
+/// otherwise freeze the TUI indefinitely. 10 s is many orders of
+/// magnitude above the expected runtime, so it never fires in
+/// practice; it's purely a panic-prevention floor.
+const LOCAL_OP_FALLBACK_TIMEOUT: u64 = 10;
+
 /// Builds the full argv passed to the child process — always prefixed
 /// with `--nointeraction` for defense-in-depth.
 fn full_args<'a>(args: &'a [&'a str]) -> Vec<&'a str> {
@@ -31,22 +41,57 @@ fn full_args<'a>(args: &'a [&'a str]) -> Vec<&'a str> {
 ///
 /// Extracted so every `bw_run_*_timeout` variant shares the same
 /// polling code path — keeping the timeout semantics in lock-step.
+///
+/// ## Why two reader threads
+///
+/// stdout and stderr are drained concurrently in dedicated threads
+/// **while** the child is still running, not after it exits. The
+/// post-exit drain pattern (read_to_end after try_wait returns Some)
+/// deadlocks on any output larger than the pipe buffer (typically
+/// 64 KB on Linux): the child blocks on `write(2)` waiting for the
+/// pipe to be drained, we block in `try_wait` waiting for the child
+/// to exit, neither side makes progress and the only escape is the
+/// timeout. `bw list items` on a vault with a few thousand entries
+/// easily exceeds that threshold, which is exactly what was hitting
+/// the 3-minute timeout in the field.
+///
+/// `std::process::Child::wait_with_output` does this internally; we
+/// reimplement the same pattern here because we also need a wall-clock
+/// deadline, which `wait_with_output` does not expose.
 fn wait_with_timeout(mut child: Child, secs: u64, label: &str) -> Result<Output, String> {
     let deadline = Instant::now() + Duration::from_secs(secs);
+
+    // Take ownership of the pipe handles up front so the reader
+    // threads can be spawned before we start polling. Any pipe the
+    // caller didn't request (e.g. stderr not piped) is simply absent
+    // and the corresponding thread is not spawned.
+    let stdout_thread = child.stdout.take().map(|mut s| {
+        std::thread::spawn(move || {
+            let mut buf = Vec::new();
+            let _ = s.read_to_end(&mut buf);
+            buf
+        })
+    });
+    let stderr_thread = child.stderr.take().map(|mut s| {
+        std::thread::spawn(move || {
+            let mut buf = Vec::new();
+            let _ = s.read_to_end(&mut buf);
+            buf
+        })
+    });
+
     loop {
         match child
             .try_wait()
             .map_err(|e| format!("bw wait error: {e}"))?
         {
             Some(status) => {
-                let mut stdout = Vec::new();
-                let mut stderr = Vec::new();
-                if let Some(mut o) = child.stdout.take() {
-                    let _ = o.read_to_end(&mut stdout);
-                }
-                if let Some(mut e) = child.stderr.take() {
-                    let _ = e.read_to_end(&mut stderr);
-                }
+                let stdout = stdout_thread
+                    .and_then(|t| t.join().ok())
+                    .unwrap_or_default();
+                let stderr = stderr_thread
+                    .and_then(|t| t.join().ok())
+                    .unwrap_or_default();
                 return Ok(Output {
                     status,
                     stdout,
@@ -57,6 +102,11 @@ fn wait_with_timeout(mut child: Child, secs: u64, label: &str) -> Result<Output,
                 if Instant::now() >= deadline {
                     let _ = child.kill();
                     let _ = child.wait();
+                    // Reader threads return as soon as the pipe closes
+                    // (kill drops the write end), so joining here is
+                    // bounded — no risk of compounding the user's wait.
+                    let _ = stdout_thread.and_then(|t| t.join().ok());
+                    let _ = stderr_thread.and_then(|t| t.join().ok());
                     return Err(format!("{label} timed out after {secs}s"));
                 }
                 std::thread::sleep(Duration::from_millis(50));
@@ -72,11 +122,14 @@ fn wait_with_timeout(mut child: Child, secs: u64, label: &str) -> Result<Output,
 ///
 /// `--nointeraction` is prepended automatically; callers do not need
 /// (and should not) pass it themselves.
+///
+/// Used for local-only operations (no network round-trip) — but a
+/// defensive [`LOCAL_OP_FALLBACK_TIMEOUT`] still applies so a hung
+/// `bw` process can never freeze the TUI permanently. The timeout
+/// is two orders of magnitude above the expected runtime so it
+/// only ever fires if something is genuinely broken.
 pub fn bw_run(args: &[&str]) -> Result<Output, String> {
-    Command::new("bw")
-        .args(full_args(args))
-        .output()
-        .map_err(|e| format!("Could not run bw: {e}"))
+    bw_run_timeout(args, LOCAL_OP_FALLBACK_TIMEOUT)
 }
 
 /// Runs `bw <args>` with a wall-clock timeout.
@@ -88,6 +141,12 @@ pub fn bw_run(args: &[&str]) -> Result<Output, String> {
 pub fn bw_run_timeout(args: &[&str], secs: u64) -> Result<Output, String> {
     let child = Command::new("bw")
         .args(full_args(args))
+        // Null out stdin explicitly. With `--nointeraction` bw should
+        // never prompt, but the parent process is a TUI in raw mode —
+        // an inherited terminal fd would let any stray bw read steal
+        // the user's keystrokes (or block waiting for them). Closing
+        // it at spawn time is the cheapest possible defense.
+        .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
@@ -102,17 +161,18 @@ pub fn bw_run_timeout(args: &[&str], secs: u64) -> Result<Output, String> {
 /// so `bw` reads the secret from the env var instead of `argv`.
 /// `--nointeraction` is prepended automatically.
 ///
+/// Carries the same defensive [`LOCAL_OP_FALLBACK_TIMEOUT`] as
+/// [`bw_run`] — used by `unlock`, which is local-only crypto and
+/// should never need more than a fraction of a second, but a wedged
+/// child must not freeze the TUI.
+///
 /// # Why this exists
 ///
 /// Passing a password as a positional argument leaks it into `ps aux`
 /// for the lifetime of the child process. The env-var path keeps the
 /// secret out of the process command line entirely.
 pub fn bw_run_with_password(args: &[&str], password: &str) -> Result<Output, String> {
-    Command::new("bw")
-        .args(full_args(args))
-        .env(BW_PASSWORD_ENV, password)
-        .output()
-        .map_err(|e| format!("Could not run bw: {e}"))
+    bw_run_with_password_timeout(args, password, LOCAL_OP_FALLBACK_TIMEOUT)
 }
 
 /// Like [`bw_run_with_password`] but with a wall-clock timeout. Used by
@@ -125,6 +185,8 @@ pub fn bw_run_with_password_timeout(
     let child = Command::new("bw")
         .args(full_args(args))
         .env(BW_PASSWORD_ENV, password)
+        // See `bw_run_timeout` for the stdin-null rationale.
+        .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
@@ -233,7 +295,13 @@ mod tests {
     #[test]
     fn timeout_returns_err_when_command_runs_too_long() {
         // 1-second budget against a 5-second sleep — must fire.
-        let child = spawn_sh("sleep 5");
+        // `exec sleep` replaces the shell with sleep so the child PID
+        // and the sleep PID are the same; killing the child closes the
+        // pipe immediately. Without `exec`, sh forks/execs sleep and
+        // a SIGKILL on sh leaves sleep holding the inherited pipe fd
+        // open until it naturally exits, which would block our reader
+        // threads for the full 5 s and make the test useless.
+        let child = spawn_sh("exec sleep 5");
         let started = Instant::now();
         let res = wait_with_timeout(child, 1, "test");
         let elapsed = started.elapsed();
@@ -243,6 +311,26 @@ mod tests {
         assert!(msg.contains("timed out"));
         // The polling loop sleeps 50 ms between checks, so the actual
         // kill happens within a couple of ticks of the deadline.
+        assert!(elapsed < Duration::from_secs(3), "took {elapsed:?}");
+    }
+
+    /// Regression test for the pipe-buffer deadlock: a child that
+    /// emits more than 64 KB to stdout and then exits must complete
+    /// well within the timeout. The pre-fix `wait_with_timeout`
+    /// drained stdout only after `try_wait` returned `Some`, which
+    /// deadlocked any output above the pipe capacity (~64 KB on
+    /// Linux). The reader-thread version handles this correctly.
+    #[test]
+    fn timeout_drains_large_stdout_without_deadlocking() {
+        // 256 KB of output — comfortably above the 64 KB pipe buffer
+        // so the bug, if reintroduced, manifests as a hard timeout
+        // rather than a flaky pass.
+        let child = spawn_sh("exec head -c 262144 /dev/zero");
+        let started = Instant::now();
+        let res = wait_with_timeout(child, 5, "test").expect("must not time out");
+        let elapsed = started.elapsed();
+        assert!(res.status.success());
+        assert_eq!(res.stdout.len(), 262144);
         assert!(elapsed < Duration::from_secs(3), "took {elapsed:?}");
     }
 

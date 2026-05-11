@@ -154,8 +154,14 @@ fn render_vaults(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     let t = &app.theme;
     let ff = app.focus == Focus::Folders;
 
-    // Build the rows: "All folders", "(No folder)", separator, each folder.
-    let mut rows: Vec<ListItem> = Vec::with_capacity(row_count(&app.folders) + 1);
+    // Build the rows: "All folders", "(No folder)", separator,
+    // folders prefixed `📁`, collections prefixed `👥`. Folders and
+    // collections share the same scrolling list — the icon prefix
+    // tells the user which they're picking. An item can only belong
+    // to one folder but several collections, so collection rows
+    // commonly overlap with folder rows in terms of which items
+    // they surface.
+    let mut rows: Vec<ListItem> = Vec::with_capacity(row_count(&app.folders, &app.collections) + 1);
 
     // Row 0 — All folders.
     let all_active = matches!(app.active_folder, FolderFilter::All);
@@ -166,36 +172,58 @@ fn render_vaults(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         t,
     ));
 
-    // Row 1 — (No folder) — count items where folder_id is None.
+    // Row 1 — (No folder). Count is precomputed in
+    // `App::rebuild_sidebar_counts` to avoid an O(items) scan per frame.
     let none_active = matches!(app.active_folder, FolderFilter::NoFolder);
-    let no_folder_count = app.items.iter().filter(|i| i.folder_id.is_none()).count();
     rows.push(folder_row(
         "    (No folder)",
         none_active,
-        no_folder_count,
+        app.no_folder_count,
         t,
     ));
 
-    // Separator before the named folders.
+    // Separator before the named folder/collection rows.
     rows.push(ListItem::new(Line::from(Span::styled(
         "  ─────────────────",
         Style::default().fg(t.muted),
     ))));
 
-    // One row per folder (alphabetised at load time).
+    // One row per folder (alphabetised at load time). Per-folder
+    // count comes from the precomputed map — see
+    // `App::rebuild_sidebar_counts`.
     for folder in &app.folders {
         let active = matches!(&app.active_folder, FolderFilter::Folder(id) if id == &folder.id);
-        let count = app
-            .items
-            .iter()
-            .filter(|i| i.folder_id.as_deref() == Some(folder.id.as_str()))
-            .count();
+        let count = app.folder_counts.get(&folder.id).copied().unwrap_or(0);
         rows.push(folder_row(
-            &format!("    {}", folder.name),
+            &format!("  📁 {}", folder.name),
             active,
             count,
             t,
         ));
+    }
+
+    // One row per collection — labelled `Org / Name` so members of
+    // multiple organisations can tell sibling collections apart.
+    // Personal-only accounts skip this section entirely. Same
+    // precomputed-count rationale as the folder rows above.
+    for collection in &app.collections {
+        let active =
+            matches!(&app.active_folder, FolderFilter::Collection(id) if id == &collection.id);
+        let count = app
+            .collection_counts
+            .get(&collection.id)
+            .copied()
+            .unwrap_or(0);
+        let org_name = collection
+            .organization_id
+            .as_deref()
+            .and_then(|id| app.organizations.iter().find(|o| o.id == id))
+            .map(|o| o.name.as_str());
+        let label = match org_name {
+            Some(org) => format!("  👥 {org} / {}", collection.name),
+            None => format!("  👥 {}", collection.name),
+        };
+        rows.push(folder_row(&label, active, count, t));
     }
 
     // The visual selection index has to skip the separator row at
@@ -208,7 +236,7 @@ fn render_vaults(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     let mut state = ListState::default();
     state.select(Some(display_sel));
 
-    let total = 2 + app.folders.len();
+    let total = row_count(&app.folders, &app.collections);
     let indicator = format!("─{} of {}─", app.folder_selected + 1, total);
 
     frame.render_stateful_widget(
@@ -369,18 +397,35 @@ fn render_list(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
                 5 => t.item_ssh,
                 _ => t.dim,
             };
-            ListItem::new(Line::from(vec![
-                if item.favorite {
-                    Span::styled("★ ", Style::default().fg(t.item_favorite))
-                } else {
-                    Span::raw("  ")
-                },
-                Span::styled(
-                    format!("{:<14}", format!("[{}]", item_type_label(item.item_type))),
-                    Style::default().fg(col),
-                ),
-                Span::raw(item.name.as_str()),
-            ]))
+            // Indicator prefix: favorite (★, 1 cell), reprompt (🔒,
+            // typically 2 cells), org (👥, 2 cells). Empty slots use
+            // matching-width whitespace so the [Type] column stays
+            // aligned across rows.
+            let mut spans: Vec<Span> = Vec::with_capacity(8);
+            if item.favorite {
+                spans.push(Span::styled("★", Style::default().fg(t.item_favorite)));
+            } else {
+                spans.push(Span::raw(" "));
+            }
+            spans.push(Span::raw(" "));
+            if item.needs_reprompt() {
+                spans.push(Span::styled("🔒", Style::default().fg(t.error)));
+            } else {
+                spans.push(Span::raw("  "));
+            }
+            spans.push(Span::raw(" "));
+            if item.organization_id.is_some() {
+                spans.push(Span::styled("👥", Style::default().fg(t.accent)));
+            } else {
+                spans.push(Span::raw("  "));
+            }
+            spans.push(Span::raw(" "));
+            spans.push(Span::styled(
+                format!("{:<14}", format!("[{}]", item_type_label(item.item_type))),
+                Style::default().fg(col),
+            ));
+            spans.push(Span::raw(item.name.as_str()));
+            ListItem::new(Line::from(spans))
         })
         .collect();
     let flen = filtered.len();

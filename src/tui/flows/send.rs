@@ -66,11 +66,20 @@ pub fn commit(app: &mut App) {
             app.push_cmd(&cmd, true, &format!("send url for \"{name}\""));
             // Try to drop the URL on the clipboard — the toast tells
             // the user whether that worked. Failure is non-fatal: the
-            // URL is also visible in the toast text.
-            match app.clipboard.write(&url) {
+            // URL is also visible in the toast text. The Send link is
+            // a capability token (anyone with the URL can read the
+            // content), so we honour the same clipboard auto-clear
+            // window as for passwords.
+            let ttl = app.clipboard_clear_secs;
+            match app.clipboard.write_with_clear(&url, ttl) {
                 Ok(()) => {
+                    let clear_hint = if ttl == 0 {
+                        String::new()
+                    } else {
+                        format!(", clears in {ttl}s")
+                    };
                     app.set_action(ActionState::Done(format!(
-                        "Send URL copied to clipboard ✓ (expires in {days}d)"
+                        "Send URL copied to clipboard ✓ (expires in {days}d{clear_hint})"
                     )));
                 }
                 Err(_) => {

@@ -50,12 +50,16 @@ pub fn draw_popup(frame: &mut Frame, area: Rect, app: &App) {
                     Style::default().fg(t.accent).add_modifier(Modifier::BOLD),
                 ),
             ]));
-            let mut org_collections: Vec<&_> = state
+            // `state.collections` is sorted at popup-open time by
+            // `flows::memberships::open`, so the per-org filter slice
+            // is in display order without extra work here. Re-sorting
+            // per frame would allocate a fresh lowercased String per
+            // collection on every redraw.
+            let org_collections: Vec<&_> = state
                 .collections
                 .iter()
                 .filter(|c| c.organization_id.as_deref() == Some(org.id.as_str()))
                 .collect();
-            org_collections.sort_by_key(|c| c.name.to_lowercase());
             if org_collections.is_empty() {
                 lines.push(Line::from(Span::styled(
                     "      (no collections visible to you)",

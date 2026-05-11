@@ -3,9 +3,10 @@
 use crossterm::event::{KeyCode, KeyEvent};
 
 use crate::tui::app::App;
-use crate::tui::flows::{copy, generator, items};
+use crate::tui::flows::{assign_collections, copy, generator, items, reprompt};
 use crate::tui::input::is_alt;
 use crate::tui::input::nav::{nav_clamp, nav_wrap, text_input};
+use crate::tui::reprompt::ProtectedAction;
 
 /// Dispatches a single key event on the detail screen.
 pub fn handle(app: &mut App, key: KeyEvent) {
@@ -31,6 +32,9 @@ pub fn handle(app: &mut App, key: KeyEvent) {
         //   Alt+Delete   → remove focused custom field OR URL row
         //   Alt+T        → cycle focused custom field's type
         //   Alt+R        → rename focused custom field (popup)
+        //   Alt+L        → open collections multi-select (only on
+        //                  the read-only "Collections" row of an
+        //                  org item)
         if is_alt(&key) {
             match key.code {
                 KeyCode::Char('n') => return items::add_custom_field(app),
@@ -38,6 +42,7 @@ pub fn handle(app: &mut App, key: KeyEvent) {
                 KeyCode::Delete => return items::remove_current_field(app),
                 KeyCode::Char('t') => return items::cycle_field_type(app),
                 KeyCode::Char('r') => return items::open_rename_field(app),
+                KeyCode::Char('l') => return assign_collections::open(app),
                 _ => {}
             }
         }
@@ -49,7 +54,22 @@ pub fn handle(app: &mut App, key: KeyEvent) {
             KeyCode::BackTab => nav_wrap(&mut app.edit_field_idx, n, -1),
             KeyCode::Down => nav_clamp(&mut app.edit_field_idx, n, 1),
             KeyCode::Up => nav_clamp(&mut app.edit_field_idx, n, -1),
-            KeyCode::F(2) => app.edit_toggle_reveal(),
+            KeyCode::F(2) => {
+                // F2 in edit mode toggles `revealed` on the focused
+                // hidden field. Going `false → true` is the case
+                // that exposes a secret on screen and therefore
+                // gates behind the reprompt popup. The reverse
+                // direction (re-hiding) is always free.
+                let needs_gate = app
+                    .edit_fields
+                    .get(app.edit_field_idx)
+                    .is_some_and(|f| f.hidden && !f.revealed)
+                    && app.selected_item().is_some_and(|i| i.needs_reprompt());
+                if needs_gate && reprompt::maybe_open(app, ProtectedAction::RevealEditField) {
+                    return;
+                }
+                app.edit_toggle_reveal();
+            }
             _ => text_input(app.edit_field_mut(), key),
         }
         return;
@@ -78,9 +98,24 @@ pub fn handle(app: &mut App, key: KeyEvent) {
             app.show_password = false;
             nav_clamp(&mut app.detail_field, n, -1);
         }
-        KeyCode::F(2) => app.show_password = !app.show_password,
+        KeyCode::F(2) => {
+            // F2 in read-mode toggles the global `show_password`
+            // flag. Like in edit-mode, gate the false→true transition
+            // (the one that exposes secrets) for reprompt-protected
+            // items.
+            if !app.show_password
+                && app.selected_item().is_some_and(|i| i.needs_reprompt())
+                && reprompt::maybe_open(app, ProtectedAction::RevealDetail)
+            {
+                return;
+            }
+            app.show_password = !app.show_password;
+        }
         KeyCode::Char('c') if is_alt(&key) => copy::copy_selected_field(app),
         KeyCode::Char('e') if is_alt(&key) && !app.is_trash_view() => items::enter_edit_mode(app),
+        KeyCode::Char('m') if is_alt(&key) && !app.is_trash_view() => {
+            assign_collections::open_for_move(app)
+        }
         KeyCode::Char('r') if is_alt(&key) && app.is_trash_view() => items::queue_restore_item(app),
         KeyCode::Char('d') if is_alt(&key) => items::open_confirm_delete(app),
         KeyCode::Char('x') if is_alt(&key) && !app.is_trash_view() => {

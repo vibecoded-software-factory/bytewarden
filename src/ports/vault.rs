@@ -1,6 +1,19 @@
 //! Vault backend port.
 
-use crate::domain::{Collection, Folder, Item, LoginOutcome, Organization, VaultInfo};
+use crate::domain::{
+    Collection, Folder, Item, LoginOutcome, Organization, TwoFactorMethod, VaultInfo,
+};
+
+/// Bundle returned by [`VaultPort::parallel_session_data`]: the four
+/// secondary reads the TUI fires immediately after a successful login
+/// or session resume, all carrying their own `Result` so a partial
+/// failure does not poison the whole load.
+pub struct ParallelSessionData {
+    pub folders: Result<Vec<Folder>, String>,
+    pub organizations: Result<Vec<Organization>, String>,
+    pub collections: Result<Vec<Collection>, String>,
+    pub import_formats: Result<Vec<String>, String>,
+}
 
 /// Abstraction over the password-vault backend.
 ///
@@ -29,6 +42,22 @@ pub trait VaultPort {
     /// First-time login supplying the device-verification OTP.
     /// Returns the session key on success.
     fn login_with_otp(&mut self, email: &str, password: &str, otp: &str) -> Result<String, String>;
+
+    /// Login when the account has a permanent second factor enrolled.
+    ///
+    /// `method` selects which factor to validate (Authenticator,
+    /// Email or YubiKey — see [`TwoFactorMethod`] for the full set).
+    /// `code` is the user-supplied secret for that method (six-digit
+    /// TOTP, e-mailed code, or YubiKey OTP press).
+    ///
+    /// Returns the session key on success.
+    fn login_with_two_factor(
+        &mut self,
+        email: &str,
+        password: &str,
+        code: &str,
+        method: TwoFactorMethod,
+    ) -> Result<String, String>;
 
     /// Headless login using a personal API key.
     ///
@@ -91,7 +120,15 @@ pub trait VaultPort {
 
     /// Returns the raw JSON for a single item — used as the base for
     /// edit patching.
-    fn get_item_json(&mut self, item_id: &str) -> Result<String, String>;
+    ///
+    /// The buffer carries plaintext credentials (passwords, TOTP
+    /// seeds, private keys, …) so it is wrapped in
+    /// [`zeroize::Zeroizing`]. Callers receive a value that is
+    /// transparently `Deref<Target=String>` — `.as_str()`,
+    /// `serde_json::from_str(&buf)` etc. all work — and the underlying
+    /// allocation is overwritten with zeroes when the wrapper goes
+    /// out of scope.
+    fn get_item_json(&mut self, item_id: &str) -> Result<zeroize::Zeroizing<String>, String>;
 
     /// Checks whether the password of a login item appears in known
     /// breach datasets (HaveIBeenPwned). Returns the number of times
@@ -155,6 +192,30 @@ pub trait VaultPort {
     /// `bw` directly — we do not load the file ourselves.
     fn import(&mut self, format: &str, input_path: &str) -> Result<(), String>;
 
+    /// Returns the list of import formats `bw` advertises via
+    /// `bw import --formats`. Used by the import popup to render a
+    /// dropdown instead of asking the user to type the identifier
+    /// from memory.
+    ///
+    /// The list is static (depends only on the installed `bw`
+    /// version), so the TUI loads it once at login and caches it.
+    fn list_import_formats(&mut self) -> Result<Vec<String>, String>;
+
+    /// Moves a personal item into an organisation, assigning it to
+    /// the given collections. Equivalent to `bw move <id> <org_id>
+    /// <base64-encoded-json-array-of-collection-ids>`.
+    ///
+    /// Bw rejects the call when `collection_ids` is empty (org
+    /// items must live in ≥1 collection); the TUI enforces the
+    /// same precondition before reaching this call so the user
+    /// gets an inline error instead of a CLI failure.
+    fn move_item(
+        &mut self,
+        item_id: &str,
+        organization_id: &str,
+        collection_ids: &[String],
+    ) -> Result<(), String>;
+
     // ── Attachments ───────────────────────────────────────────────────────
 
     /// Uploads `file_path` as an attachment of `item_id`. Returns the
@@ -200,4 +261,30 @@ pub trait VaultPort {
     /// Lists every collection the user can see across all of their
     /// organisations.
     fn list_collections(&mut self) -> Result<Vec<Collection>, String>;
+
+    // ── Bulk session data ─────────────────────────────────────────────────
+
+    /// Loads the secondary session data the TUI needs right after a
+    /// fresh login or session resume — folders, organisations,
+    /// collections and the import-format list — bundled so adapters
+    /// that can run them concurrently (one Node cold-start per call
+    /// is the dominant cost for the bw CLI) can amortise the spawn
+    /// overhead.
+    ///
+    /// The default implementation runs them sequentially via the
+    /// individual methods, preserving correctness for every
+    /// implementation that doesn't bother to override it. Callers
+    /// must tolerate any subset of the four results being `Err` —
+    /// e.g. a personal-only account legitimately returns empty
+    /// vectors for organisations and collections, but the
+    /// import-format query may still fail on a stripped-down `bw`
+    /// install.
+    fn parallel_session_data(&mut self) -> ParallelSessionData {
+        ParallelSessionData {
+            folders: self.list_folders(),
+            organizations: self.list_organizations(),
+            collections: self.list_collections(),
+            import_formats: self.list_import_formats(),
+        }
+    }
 }

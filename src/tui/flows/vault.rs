@@ -47,6 +47,8 @@ pub fn refresh_items_silent(app: &mut App) -> bool {
         Ok(items) => {
             let count = items.len();
             app.items = items;
+            // sort_items rebuilds the search/filter caches at the end,
+            // so we do not need a separate rebuild_caches call here.
             app.sort_items();
             app.push_cmd(&cmd, true, &format!("{count} items loaded"));
             true
@@ -69,8 +71,9 @@ pub fn refresh_trash_silent(app: &mut App) -> bool {
         Ok(items) => {
             let count = items.len();
             let mut sorted = items;
-            sorted.sort_by_key(|i| i.name.to_lowercase());
+            sorted.sort_by_cached_key(|i| i.name.to_lowercase());
             app.trashed_items = sorted;
+            app.rebuild_caches();
             app.push_cmd(&cmd, true, &format!("{count} trashed items loaded"));
             true
         }

@@ -82,7 +82,7 @@ fn try_resume_session(app: &mut App, user_email: Option<String>) -> bool {
                 true,
                 &format!("{count} items loaded"),
             );
-            super::folders::refresh_folders_silent(app);
+            apply_parallel_session_data(app);
             app.go_to_vault();
             true
         }
@@ -90,6 +90,105 @@ fn try_resume_session(app: &mut App, user_email: Option<String>) -> bool {
             app.push_cmd("bw list items --session ***", false, &e);
             false
         }
+    }
+}
+
+/// Fires the four secondary post-auth reads (folders, orgs,
+/// collections, import-formats) in one trip via
+/// [`crate::ports::VaultPort::parallel_session_data`] and applies the
+/// results to `App`. The `BwCliAdapter` impl spawns one worker thread
+/// per call so the dominant cost (Node cold-start, ~500 ms each) is
+/// paid concurrently — login gets its sidebar populated in roughly
+/// the time of a single bw invocation instead of four back-to-back.
+///
+/// Failures are surfaced through the same `cmd_log` lines the
+/// individual silent refreshes used to write, so the operator gets
+/// the same diagnostic trail. We keep the post-login folder
+/// highlight in sync with `active_folder` even when the folder fetch
+/// fails, since the sidebar still has to render.
+fn apply_parallel_session_data(app: &mut App) {
+    let session = app.session_key_display();
+    let data = app.vault.parallel_session_data();
+
+    match data.folders {
+        Ok(folders) => {
+            let count = folders.len();
+            // Mirror the alphabetical sort the silent-refresh helper
+            // applied — the renderer relies on it.
+            let mut sorted = folders;
+            sorted.sort_by_key(|f| f.name.to_lowercase());
+            app.folders = sorted;
+            app.folder_selected = crate::tui::folders::row_for_filter(
+                &app.active_folder,
+                &app.folders,
+                &app.collections,
+            );
+            app.push_cmd(
+                &format!("bw list folders --session {session}"),
+                true,
+                &format!("{count} folders loaded"),
+            );
+        }
+        Err(e) => {
+            app.cmd_err(
+                &format!("bw list folders --session {session}"),
+                &e,
+                "Load folders failed",
+            );
+        }
+    }
+
+    match data.organizations {
+        Ok(orgs) => {
+            let count = orgs.len();
+            app.organizations = orgs;
+            app.push_cmd(
+                &format!("bw list organizations --session {session}"),
+                true,
+                &format!("{count} organisations loaded"),
+            );
+        }
+        Err(e) => {
+            app.push_cmd(
+                &format!("bw list organizations --session {session}"),
+                false,
+                &e,
+            );
+            app.organizations.clear();
+        }
+    }
+
+    match data.collections {
+        Ok(mut cs) => {
+            // Same sort key as `refresh_memberships_silent` so the
+            // sidebar order stays deterministic.
+            cs.sort_by(|a, b| {
+                a.organization_id
+                    .as_deref()
+                    .unwrap_or("")
+                    .cmp(b.organization_id.as_deref().unwrap_or(""))
+                    .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+            });
+            let count = cs.len();
+            app.collections = cs;
+            app.push_cmd(
+                &format!("bw list collections --session {session}"),
+                true,
+                &format!("{count} collections loaded"),
+            );
+        }
+        Err(e) => {
+            app.push_cmd(
+                &format!("bw list collections --session {session}"),
+                false,
+                &e,
+            );
+            app.collections.clear();
+        }
+    }
+
+    if let Ok(formats) = data.import_formats {
+        app.import_formats = formats;
     }
 }
 
@@ -148,22 +247,46 @@ pub fn do_login(app: &mut App) {
         return;
     }
 
-    // Fresh login that may require a one-time device-verification code.
-    if app.otp_required {
+    // Resume of an interactive challenge — the previous login attempt
+    // returned NeedsDeviceVerification or NeedsTwoFactor and the user
+    // has now typed their code. The two paths reuse the same buffer
+    // (`otp_input`) but call into different port methods — bw needs
+    // `--method N` only for permanent 2FA.
+    if app.otp_required || app.two_factor_required {
         // Wrap the trimmed copy so even this short-lived intermediate
         // is wiped from the heap once the call returns.
-        let otp = Zeroizing::new(app.otp_input.trim().to_string());
-        match app.vault.login_with_otp(&email, &password, &otp) {
+        let code = Zeroizing::new(app.otp_input.trim().to_string());
+        let result = if app.two_factor_required {
+            app.vault
+                .login_with_two_factor(&email, &password, &code, app.two_factor_method)
+        } else {
+            app.vault.login_with_otp(&email, &password, &code)
+        };
+        let cmd_label_owned;
+        let (cmd_label, error_label): (&str, &str) = if app.two_factor_required {
+            cmd_label_owned = format!(
+                "bw login *** --method {} --raw  (code via stdin)",
+                app.two_factor_method.as_u8()
+            );
+            (cmd_label_owned.as_str(), "Invalid 2FA code")
+        } else {
+            (
+                "bw login *** --raw  (otp via stdin)",
+                "Invalid verification code",
+            )
+        };
+        match result {
             Ok(_) => {
                 app.otp_input.clear();
                 app.otp_cursor = 0;
                 app.otp_required = false;
+                app.two_factor_required = false;
                 on_login_success(app, &email);
             }
             Err(_) => {
-                // OTP is now fed via stdin; the redacted log reflects
-                // that the code never reached argv.
-                app.push_cmd("bw login *** --raw  (otp via stdin)", false, "invalid OTP");
+                // The redacted log reflects that the code never reached
+                // argv (env var for password, stdin for code).
+                app.push_cmd(cmd_label, false, error_label);
                 app.set_action(ActionState::Idle);
                 app.otp_input.clear();
                 app.otp_cursor = 0;
@@ -176,7 +299,7 @@ pub fn do_login(app: &mut App) {
 
     match app.vault.login(&email, &password) {
         LoginOutcome::Success(_) => on_login_success(app, &email),
-        LoginOutcome::NeedsOtp => {
+        LoginOutcome::NeedsDeviceVerification => {
             app.push_cmd(
                 "bw login *** --raw",
                 true,
@@ -184,6 +307,23 @@ pub fn do_login(app: &mut App) {
             );
             app.set_action(ActionState::Idle);
             app.otp_required = true;
+            app.two_factor_required = false;
+            app.otp_input.clear();
+            app.otp_cursor = 0;
+            app.active_field = LoginField::Otp;
+        }
+        LoginOutcome::NeedsTwoFactor => {
+            app.push_cmd(
+                "bw login *** --raw",
+                true,
+                "two-factor required — pick method and enter code",
+            );
+            app.set_action(ActionState::Idle);
+            app.two_factor_required = true;
+            // Default to Authenticator — the most common method.
+            // The user can cycle to Email / YubiKey from the form.
+            app.two_factor_method = crate::domain::TwoFactorMethod::Authenticator;
+            app.otp_required = false;
             app.otp_input.clear();
             app.otp_cursor = 0;
             app.active_field = LoginField::Otp;
@@ -213,9 +353,11 @@ fn on_login_success(app: &mut App, email: &str) {
     app.password_input.clear();
     app.password_cursor = 0;
     super::vault::load_items(app);
-    // Folders are loaded silently — the items load already showed a
-    // toast and the folder count appears in the sidebar regardless.
-    super::folders::refresh_folders_silent(app);
+    // Folders, organisations, collections and import-formats run in
+    // parallel — see `apply_parallel_session_data` for the rationale
+    // (Node cold-start dominates and parallelising drops post-login
+    // latency from ~4× to ~1× a single bw call).
+    apply_parallel_session_data(app);
     app.set_action(ActionState::Done("Loaded ✓".into()));
     app.go_to_vault();
 }
@@ -278,6 +420,13 @@ pub fn lock_vault(app: &mut App) {
     session_file::clear();
     app.screen = Screen::Login;
     app.items.clear();
+    // Wipe organisation memberships too: the sidebar should not show
+    // collection rows from the previous session while the vault is
+    // locked. Folders are kept because they're a personal-vault
+    // concept that the next unlock will refresh anyway.
+    app.collections.clear();
+    app.organizations.clear();
+    app.rebuild_caches();
     app.password_input.clear();
     app.password_cursor = 0;
     app.active_field = LoginField::Password;
@@ -351,11 +500,16 @@ pub fn logout(app: &mut App) {
             // survives the logout.
             app.items.clear();
             app.trashed_items.clear();
+            app.folders.clear();
+            app.collections.clear();
+            app.organizations.clear();
+            app.rebuild_caches();
             app.password_input.clear();
             app.password_cursor = 0;
             app.otp_input.clear();
             app.otp_cursor = 0;
             app.otp_required = false;
+            app.two_factor_required = false;
             app.email_input.clear();
             app.email_cursor = 0;
             app.search_query.clear();

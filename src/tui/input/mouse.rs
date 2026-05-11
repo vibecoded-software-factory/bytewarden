@@ -83,7 +83,7 @@ fn mouse_login(app: &mut App, col: u16, row: u16) {
     // OTP block is shown. Branch explicitly so a click on the OTP
     // input doesn't accidentally toggle the save-email / auto-lock /
     // keep-session checkboxes.
-    if app.otp_required {
+    if app.awaiting_code() {
         if row < 17 {
             app.active_field = LoginField::Otp;
         } else if row < 18 {

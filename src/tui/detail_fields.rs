@@ -300,9 +300,12 @@ mod tests {
             ssh_key: None,
             notes: None,
             folder_id: None,
+            organization_id: None,
+            collection_ids: Vec::new(),
             favorite: false,
             fields: vec![],
             attachments: None,
+            reprompt: 0,
         }
     }
 

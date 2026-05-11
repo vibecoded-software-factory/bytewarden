@@ -93,7 +93,11 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
             }
             let sel = i == app.create_field_idx;
             let bcol = if sel { t.accent } else { t.inactive };
-            let hint = if field.hidden && sel && !field.revealed {
+            let hint = if field.is_organization() && sel {
+                "  (← → to cycle)"
+            } else if field.is_collections() && sel {
+                "  (Alt+L to assign)"
+            } else if field.hidden && sel && !field.revealed {
                 "  (F2: reveal)"
             } else if field.hidden && sel && field.revealed {
                 "  (F2: hide)"
@@ -102,10 +106,14 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
             };
             let display = if field.hidden && !field.revealed {
                 "●".repeat(field.value.chars().count())
+            } else if field.is_collections() && field.value.is_empty() {
+                "(none — Alt+L to pick)".to_string()
             } else {
-                field.value.clone()
+                field.value.to_string()
             };
-            let vline = if sel {
+            // Read-only rows don't accept text input — render them
+            // without a cursor so the user isn't tempted to type.
+            let vline = if sel && !field.read_only {
                 cursor_line(&display, field.cursor, t)
             } else {
                 Line::from(Span::styled(display, Style::default().fg(t.inactive)))

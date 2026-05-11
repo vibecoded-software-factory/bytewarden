@@ -4,6 +4,8 @@
 //! [`crate::tui::flows::generator`], [`crate::tui::input::generator`]
 //! and [`crate::tui::view::generator`].
 
+use zeroize::Zeroizing;
+
 use crate::ports::{GeneratorMode, GeneratorOptions};
 
 /// Currently focused control on the generator screen.
@@ -51,7 +53,11 @@ pub struct GeneratorState {
     pub options: GeneratorOptions,
     /// Last successfully generated value (empty before the first
     /// generation succeeds).
-    pub result: String,
+    ///
+    /// Wrapped in [`Zeroizing`]: a freshly-generated password is
+    /// exactly the kind of secret that benefits from being scrubbed
+    /// when overwritten or when the state value drops.
+    pub result: Zeroizing<String>,
     /// Currently focused control.
     pub focus: GeneratorFocus,
     /// Where to write the generated value when the user picks "Use".
@@ -64,7 +70,7 @@ impl Default for GeneratorState {
     fn default() -> Self {
         Self {
             options: GeneratorOptions::default(),
-            result: String::new(),
+            result: Zeroizing::new(String::new()),
             focus: GeneratorFocus::Length,
             return_target: None,
         }

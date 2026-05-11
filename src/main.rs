@@ -4,6 +4,7 @@
 use bytewarden::adapters::{
     BwCliAdapter, BwGeneratorAdapter, SystemClipboardAdapter, TomlSettingsAdapter,
 };
+use bytewarden::ports::SettingsPort;
 use bytewarden::tui;
 use bytewarden::tui::session_file;
 
@@ -23,9 +24,22 @@ fn main() -> Result<()> {
     session_file::cleanup_orphans();
     let seed_session_key = session_file::load();
 
-    let vault = Box::new(BwCliAdapter::new_with(seed_session_key));
+    // Read settings before constructing the vault adapter so the
+    // configurable `bw list items` timeout (used by users with very
+    // large vaults) is in effect from the very first call. The TUI
+    // also reads the same `UserSettings` via its own port, so the
+    // double-read is intentional — keeps the composition root the
+    // single source of truth for adapter wiring without coupling the
+    // TUI to the adapter constructor.
+    let settings_adapter = TomlSettingsAdapter::new();
+    let cfg = settings_adapter.read();
+
+    let vault = Box::new(
+        BwCliAdapter::new_with(seed_session_key)
+            .with_list_items_timeout(cfg.list_items_timeout_secs),
+    );
     let clipboard = Box::new(SystemClipboardAdapter::new());
-    let settings = Box::new(TomlSettingsAdapter::new());
+    let settings = Box::new(settings_adapter);
     let generator = Box::new(BwGeneratorAdapter::new());
 
     tui::run(vault, clipboard, settings, generator)
