@@ -888,7 +888,6 @@ impl App {
         self.items.sort_by_cached_key(|i| i.name.to_lowercase());
         self.rebuild_caches();
     }
-
 }
 
 /// Pure helper extracted from [`App::rebuild_filtered_cache`] so the

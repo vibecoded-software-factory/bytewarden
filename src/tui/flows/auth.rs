@@ -77,11 +77,7 @@ fn try_resume_session(app: &mut App, user_email: Option<String>) -> bool {
             app.items = items;
             app.sort_items();
             app.push_cmd("bw status", true, "session resumed");
-            app.push_cmd(
-                "bw list items",
-                true,
-                &format!("{count} items loaded"),
-            );
+            app.push_cmd("bw list items", true, &format!("{count} items loaded"));
             apply_parallel_session_data(app);
             app.go_to_vault();
             true
@@ -122,11 +118,7 @@ fn apply_parallel_session_data(app: &mut App) {
                 &app.folders,
                 &app.collections,
             );
-            app.push_cmd(
-                "bw list folders",
-                true,
-                &format!("{count} folders loaded"),
-            );
+            app.push_cmd("bw list folders", true, &format!("{count} folders loaded"));
         }
         Err(e) => {
             app.cmd_err("bw list folders", &e, "Load folders failed");

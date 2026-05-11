@@ -509,11 +509,8 @@ impl VaultPort for BwCliAdapter {
     fn check_exposed(&mut self, item_id: &str) -> Result<u32, String> {
         // Network: bw queries HaveIBeenPwned (k-anonymity API).
         let session = self.session()?.to_string();
-        let out = bw_run_with_session_timeout(
-            &["get", "exposed", item_id],
-            &session,
-            ITEM_OP_TIMEOUT,
-        )?;
+        let out =
+            bw_run_with_session_timeout(&["get", "exposed", item_id], &session, ITEM_OP_TIMEOUT)?;
         if !out.status.success() {
             return Err(stderr_str(&out));
         }
@@ -530,11 +527,8 @@ impl VaultPort for BwCliAdapter {
     fn create_item(&mut self, item_json: &str) -> Result<Item, String> {
         let session = self.session()?.to_string();
         let encoded = base64_encode(item_json);
-        let out = bw_run_with_session_timeout(
-            &["create", "item", &encoded],
-            &session,
-            ITEM_OP_TIMEOUT,
-        )?;
+        let out =
+            bw_run_with_session_timeout(&["create", "item", &encoded], &session, ITEM_OP_TIMEOUT)?;
         if out.status.success() {
             serde_json::from_str::<Item>(&stdout_str(&out))
                 .map_err(|e| format!("Error parsing created item: {e}"))
@@ -575,11 +569,8 @@ impl VaultPort for BwCliAdapter {
 
     fn restore_item(&mut self, item_id: &str) -> Result<(), String> {
         let session = self.session()?.to_string();
-        let out = bw_run_with_session_timeout(
-            &["restore", "item", item_id],
-            &session,
-            ITEM_OP_TIMEOUT,
-        )?;
+        let out =
+            bw_run_with_session_timeout(&["restore", "item", item_id], &session, ITEM_OP_TIMEOUT)?;
         if out.status.success() {
             Ok(())
         } else {
@@ -744,11 +735,8 @@ impl VaultPort for BwCliAdapter {
     fn import(&mut self, format: &str, input_path: &str) -> Result<(), String> {
         // Bulk: import can upload thousands of items in one go.
         let session = self.session()?.to_string();
-        let out = bw_run_with_session_timeout(
-            &["import", format, input_path],
-            &session,
-            BULK_TIMEOUT,
-        )?;
+        let out =
+            bw_run_with_session_timeout(&["import", format, input_path], &session, BULK_TIMEOUT)?;
         if out.status.success() {
             Ok(())
         } else {
