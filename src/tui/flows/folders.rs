@@ -27,7 +27,7 @@ pub fn load_folders(app: &mut App) {
 /// has a stable, predictable order. Snaps the highlight back to the
 /// row matching the previously-active filter.
 pub fn refresh_folders_silent(app: &mut App) -> bool {
-    let cmd = format!("bw list folders --session {}", app.session_key_display());
+    let cmd = "bw list folders".to_string();
     match app.vault.list_folders() {
         Ok(folders) => {
             let count = folders.len();
@@ -203,7 +203,7 @@ pub fn commit_name_popup(app: &mut App) {
 
     match &state.purpose {
         FolderNamePurpose::Create => {
-            let cmd = format!("bw create folder --session {}", app.session_key_display());
+            let cmd = "bw create folder".to_string();
             match app.vault.create_folder(&name) {
                 Ok(folder) => {
                     app.push_cmd(&cmd, true, &format!("created: {}", folder.name));
@@ -227,10 +227,7 @@ pub fn commit_name_popup(app: &mut App) {
             }
         }
         FolderNamePurpose::Rename { folder_id } => {
-            let cmd = format!(
-                "bw edit folder {folder_id} --session {}",
-                app.session_key_display()
-            );
+            let cmd = format!("bw edit folder {folder_id}");
             let id = folder_id.clone();
             match app.vault.edit_folder(&id, &name) {
                 Ok(folder) => {
@@ -281,10 +278,7 @@ pub fn confirm_delete(app: &mut App) {
     };
     let id = folder.id.clone();
     let name = folder.name.clone();
-    let cmd = format!(
-        "bw delete folder {id} --session {}",
-        app.session_key_display()
-    );
+    let cmd = format!("bw delete folder {id}");
     match app.vault.delete_folder(&id) {
         Ok(()) => {
             app.push_cmd(&cmd, true, &format!("deleted: {name}"));

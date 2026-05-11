@@ -78,7 +78,7 @@ fn try_resume_session(app: &mut App, user_email: Option<String>) -> bool {
             app.sort_items();
             app.push_cmd("bw status", true, "session resumed");
             app.push_cmd(
-                "bw list items --session ***",
+                "bw list items",
                 true,
                 &format!("{count} items loaded"),
             );
@@ -87,7 +87,7 @@ fn try_resume_session(app: &mut App, user_email: Option<String>) -> bool {
             true
         }
         Err(e) => {
-            app.push_cmd("bw list items --session ***", false, &e);
+            app.push_cmd("bw list items", false, &e);
             false
         }
     }
@@ -107,7 +107,6 @@ fn try_resume_session(app: &mut App, user_email: Option<String>) -> bool {
 /// highlight in sync with `active_folder` even when the folder fetch
 /// fails, since the sidebar still has to render.
 fn apply_parallel_session_data(app: &mut App) {
-    let session = app.session_key_display();
     let data = app.vault.parallel_session_data();
 
     match data.folders {
@@ -124,17 +123,13 @@ fn apply_parallel_session_data(app: &mut App) {
                 &app.collections,
             );
             app.push_cmd(
-                &format!("bw list folders --session {session}"),
+                "bw list folders",
                 true,
                 &format!("{count} folders loaded"),
             );
         }
         Err(e) => {
-            app.cmd_err(
-                &format!("bw list folders --session {session}"),
-                &e,
-                "Load folders failed",
-            );
+            app.cmd_err("bw list folders", &e, "Load folders failed");
         }
     }
 
@@ -143,17 +138,13 @@ fn apply_parallel_session_data(app: &mut App) {
             let count = orgs.len();
             app.organizations = orgs;
             app.push_cmd(
-                &format!("bw list organizations --session {session}"),
+                "bw list organizations",
                 true,
                 &format!("{count} organisations loaded"),
             );
         }
         Err(e) => {
-            app.push_cmd(
-                &format!("bw list organizations --session {session}"),
-                false,
-                &e,
-            );
+            app.push_cmd("bw list organizations", false, &e);
             app.organizations.clear();
         }
     }
@@ -172,17 +163,13 @@ fn apply_parallel_session_data(app: &mut App) {
             let count = cs.len();
             app.collections = cs;
             app.push_cmd(
-                &format!("bw list collections --session {session}"),
+                "bw list collections",
                 true,
                 &format!("{count} collections loaded"),
             );
         }
         Err(e) => {
-            app.push_cmd(
-                &format!("bw list collections --session {session}"),
-                false,
-                &e,
-            );
+            app.push_cmd("bw list collections", false, &e);
             app.collections.clear();
         }
     }
@@ -420,6 +407,11 @@ pub fn lock_vault(app: &mut App) {
     session_file::clear();
     app.screen = Screen::Login;
     app.items.clear();
+    // Trashed items also carry full plaintext (the user may have
+    // opened the trash view at some point in this session). Drop
+    // them too so the heap-dump exposure window closes the moment
+    // the vault is locked, not just on logout.
+    app.trashed_items.clear();
     // Wipe organisation memberships too: the sidebar should not show
     // collection rows from the previous session while the vault is
     // locked. Folders are kept because they're a personal-vault

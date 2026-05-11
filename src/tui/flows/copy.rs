@@ -330,11 +330,7 @@ pub fn do_copy_password(app: &mut App) {
 }
 
 pub fn do_copy_totp(app: &mut App, item_id: String) {
-    let cmd = format!(
-        "bw get totp {} --session {}",
-        item_id,
-        app.session_key_display()
-    );
+    let cmd = format!("bw get totp {item_id}");
     match app.vault.get_totp(&item_id) {
         Ok(v) => {
             app.push_cmd(&cmd, true, "totp [hidden]");

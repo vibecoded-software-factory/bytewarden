@@ -11,12 +11,15 @@
 //!
 //! ```text
 //! 2026-05-03T14:23:11Z  ✓  bw status                                 → Unlocked
-//! 2026-05-03T14:23:12Z  ✓  bw list items --session ***               → 87 items loaded
-//! 2026-05-03T14:25:40Z  ✕  bw sync --session ***                     → bw sync timed out after 30s
+//! 2026-05-03T14:23:12Z  ✓  bw list items                             → 87 items loaded
+//! 2026-05-03T14:25:40Z  ✕  bw sync                                   → bw sync timed out after 30s
 //! ```
 //!
-//! Same redaction rules as the in-app command log (session keys are
-//! already replaced with `***` before reaching this module).
+//! Session keys are fed via the `BW_SESSION` env var instead of the
+//! `--session <key>` argv path, so they never appear in the logged
+//! command line in the first place. The substring-replace redaction
+//! kicks in only as defense-in-depth for any future code path that
+//! accidentally interpolates the key into a log line.
 //!
 //! ## Why a file instead of stderr / `RUST_LOG`
 //!

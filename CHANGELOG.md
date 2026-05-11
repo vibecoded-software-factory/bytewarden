@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security hardening
+
+- **Session key fuera de `argv`** — todas las invocaciones de `bw` que
+  necesitan la session key ahora la pasan vía `BW_SESSION` env var
+  (nuevo helper `bw_run_with_session_timeout` en `process.rs`) en
+  lugar del flag `--session <key>`. Antes, cualquier proceso del
+  mismo usuario podía leer la key desde `/proc/PID/cmdline` o
+  `ps -ef` durante la vida del child bw, comprometiendo el vault
+  hasta el siguiente lock. Mismo patrón que ya usábamos para la
+  master password con `--passwordenv` / `BW_PASS_INPUT`. 24
+  callsites refactorizados en `adapters/bw_cli/mod.rs`; cleanup
+  colateral de los log strings que mencionaban `--session ***`.
+- **`Arc<Zeroizing<String>>` para la session key** — el adapter
+  `BwCliAdapter` ahora comparte el buffer del session key vía
+  `Arc` entre clones (los workers de `parallel_session_data`).
+  Antes, `Clone` hacía deep-copy y durante el ~1 s del login
+  paralelo había 5 copias de la key en memoria simultáneamente.
+  Ahora siempre hay 1 sola copia, sin importar cuántos threads la
+  estén usando; el zero-on-drop dispara cuando cae la última
+  referencia.
+- **`lock_vault` también limpia `trashed_items`** — antes solo
+  limpiaba `app.items`, dejando el plaintext de items que el
+  usuario hubiera abierto en la papelera vivo en heap después del
+  auto-lock. Ahora ambas listas se vacían (y `ZeroizeOnDrop` las
+  scrubea).
+- **Códigos OTP / 2FA en buffer zeroizado** — `login_with_otp` y
+  `login_with_two_factor` envuelven el `format!("{code}\n")` que
+  va a stdin del child en `Zeroizing`. La ventana de exposición
+  era corta (ms entre `format!` y drop) y los códigos son de un
+  solo uso, pero el patrón ahora es consistente con cómo
+  manejamos la master password.
+
 ### Performance & reliability fixes
 
 - **Pipe-buffer deadlock en `wait_with_timeout` resuelto** — el helper

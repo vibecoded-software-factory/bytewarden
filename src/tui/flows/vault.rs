@@ -42,7 +42,10 @@ pub fn load_trash(app: &mut App) {
 /// silently swallowing an error would leave the cache stale without
 /// notifying the user.
 pub fn refresh_items_silent(app: &mut App) -> bool {
-    let cmd = format!("bw list items --session {}", app.session_key_display());
+    // Session key is fed via BW_SESSION env var in the adapter, not
+    // via `--session <key>` argv. The log line stays terse to match
+    // what the child actually receives.
+    let cmd = "bw list items".to_string();
     match app.vault.list_items() {
         Ok(items) => {
             let count = items.len();
@@ -63,10 +66,7 @@ pub fn refresh_items_silent(app: &mut App) -> bool {
 /// Refreshes `app.trashed_items` without touching `action_state`.
 /// Returns `true` on success.
 pub fn refresh_trash_silent(app: &mut App) -> bool {
-    let cmd = format!(
-        "bw list items --trash --session {}",
-        app.session_key_display()
-    );
+    let cmd = "bw list items --trash".to_string();
     match app.vault.list_trash() {
         Ok(items) => {
             let count = items.len();
@@ -94,7 +94,7 @@ pub fn sync_vault(app: &mut App) {
 
 /// Pending-action executor for [`PendingAction::SyncVault`].
 pub fn do_sync_vault(app: &mut App) {
-    let cmd = format!("bw sync --session {}", app.session_key_display());
+    let cmd = "bw sync".to_string();
     match app.vault.sync() {
         Ok(()) => {
             app.push_cmd(&cmd, true, "vault synced");

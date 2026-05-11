@@ -16,13 +16,15 @@ use crate::domain::{
 };
 use crate::ports::{ParallelSessionData, VaultPort};
 use serde_json::json;
+use std::sync::Arc;
 use zeroize::Zeroizing;
 
 use codec::base64_encode;
 use json::opt_str;
 use process::{
     BW_PASSWORD_ENV, bw_run, bw_run_timeout, bw_run_with_password,
-    bw_run_with_password_and_stdin_timeout, bw_run_with_password_timeout, stderr_str, stdout_str,
+    bw_run_with_password_and_stdin_timeout, bw_run_with_password_timeout, bw_run_with_session,
+    bw_run_with_session_timeout, stderr_str, stdout_str,
 };
 
 // ── Timeout budgets ──────────────────────────────────────────────────────
@@ -118,7 +120,10 @@ fn combined_outcome(text: &str) -> Option<LoginOutcome> {
 /// Vault adapter that drives the `bw` CLI.
 ///
 /// Holds the session key returned by `bw unlock` / `bw login --raw` so
-/// later `bw` invocations can be fed the same key via `--session`.
+/// later `bw` invocations can be fed the same key via the
+/// `BW_SESSION` environment variable (see
+/// [`process::bw_run_with_session_timeout`]). The env-var path keeps
+/// the key out of `argv`, mirroring the master-password hygiene.
 ///
 /// The session key is wrapped in [`Zeroizing`] so the underlying bytes
 /// are overwritten with zeroes when the field is dropped — either
@@ -126,9 +131,17 @@ fn combined_outcome(text: &str) -> Option<LoginOutcome> {
 /// [`Self::logout`] reset it to `None`. That closes the window in
 /// which a heap dump or a swap-out could leak the unlocked-vault
 /// authorisation token after the user has already locked.
+///
+/// Wrapped in [`Arc`] so [`Self::parallel_session_data`] can hand
+/// each worker thread a cheap clone that shares **the same**
+/// underlying allocation — instead of N deep copies of the secret in
+/// memory simultaneously. The `Zeroizing` wrapper still fires when
+/// the last `Arc` reference is dropped, so the zero-on-drop
+/// guarantee is intact; we just narrow the heap-dump exposure window
+/// to a single copy regardless of parallelism.
 #[derive(Clone)]
 pub struct BwCliAdapter {
-    session_key: Option<Zeroizing<String>>,
+    session_key: Option<Arc<Zeroizing<String>>>,
     /// Wall-clock budget applied to `bw list items` and `bw list items
     /// --trash`. Sourced from [`crate::ports::UserSettings::list_items_timeout_secs`]
     /// at boot via [`Self::with_list_items_timeout`]; falls back to
@@ -162,12 +175,15 @@ impl BwCliAdapter {
     /// validates the key by calling [`VaultPort::status`] / listing
     /// items at first use; a stale seed simply falls back to login.
     pub fn new_with(seed_key: Option<Zeroizing<String>>) -> Self {
-        let session_key = seed_key.filter(|s| !s.is_empty()).or_else(|| {
-            std::env::var("BW_SESSION")
-                .ok()
-                .map(|s| Zeroizing::new(s.trim().to_string()))
-                .filter(|s| !s.is_empty())
-        });
+        let session_key = seed_key
+            .filter(|s| !s.is_empty())
+            .or_else(|| {
+                std::env::var("BW_SESSION")
+                    .ok()
+                    .map(|s| Zeroizing::new(s.trim().to_string()))
+                    .filter(|s| !s.is_empty())
+            })
+            .map(Arc::new);
         Self {
             session_key,
             list_items_timeout: DEFAULT_LIST_ITEMS_TIMEOUT,
@@ -242,7 +258,7 @@ impl VaultPort for BwCliAdapter {
             // Stash the zeroizing copy first so the long-lived storage
             // is the protected one; the LoginOutcome value is discarded
             // by every current caller.
-            self.session_key = Some(Zeroizing::new(key.clone()));
+            self.session_key = Some(Arc::new(Zeroizing::new(key.clone())));
             return LoginOutcome::Success(key);
         }
         // `bw` exits with an error when it needs an interactive code but
@@ -266,15 +282,20 @@ impl VaultPort for BwCliAdapter {
         //
         // A trailing newline is required — `inquirer` (the prompt
         // library bw uses) treats it as the line terminator.
+        // Wrap the `format!` result so the intermediate buffer
+        // carrying the verification code is overwritten with zeros
+        // when it goes out of scope, instead of being freed-but-not-
+        // scrubbed by the allocator.
+        let stdin_payload = Zeroizing::new(format!("{otp}\n"));
         let out = bw_run_with_password_and_stdin_timeout(
             &["login", email, "--passwordenv", BW_PASSWORD_ENV, "--raw"],
             password,
-            &format!("{otp}\n"),
+            &stdin_payload,
             AUTH_TIMEOUT,
         )?;
         if out.status.success() {
             let key = stdout_str(&out);
-            self.session_key = Some(Zeroizing::new(key.clone()));
+            self.session_key = Some(Arc::new(Zeroizing::new(key.clone())));
             Ok(key)
         } else {
             Err(stderr_str(&out))
@@ -297,6 +318,11 @@ impl VaultPort for BwCliAdapter {
         // `--nointeraction`, so the global flag is dropped here just
         // like in the device-verification path.
         let method_str = method.as_u8().to_string();
+        // Same zeroization rationale as `login_with_otp` for the
+        // stdin payload — the 2FA code is a short-lived secret that
+        // we still don't want lingering in the heap after the call
+        // returns.
+        let stdin_payload = Zeroizing::new(format!("{code}\n"));
         let out = bw_run_with_password_and_stdin_timeout(
             &[
                 "login",
@@ -308,12 +334,12 @@ impl VaultPort for BwCliAdapter {
                 "--raw",
             ],
             password,
-            &format!("{code}\n"),
+            &stdin_payload,
             AUTH_TIMEOUT,
         )?;
         if out.status.success() {
             let key = stdout_str(&out);
-            self.session_key = Some(Zeroizing::new(key.clone()));
+            self.session_key = Some(Arc::new(Zeroizing::new(key.clone())));
             Ok(key)
         } else {
             Err(stderr_str(&out))
@@ -357,7 +383,7 @@ impl VaultPort for BwCliAdapter {
         )?;
         if out.status.success() {
             let key = stdout_str(&out);
-            self.session_key = Some(Zeroizing::new(key.clone()));
+            self.session_key = Some(Arc::new(Zeroizing::new(key.clone())));
             Ok(key)
         } else {
             Err(stderr_str(&out))
@@ -404,12 +430,18 @@ impl VaultPort for BwCliAdapter {
         // Local-only — reads the cached vault populated by the last sync.
         // Decrypts every record and serializes to JSON; large vaults
         // can take several seconds, so we use the configurable
-        // `list_items_timeout` (default 3 min) instead of the generic
+        // `list_items_timeout` (default 60 s) instead of the generic
         // 10 s local-op fallback that fires before the legitimate
         // decrypt completes.
+        //
+        // Session key is fed via `BW_SESSION` env var (see
+        // `bw_run_with_session_timeout`) instead of the equivalent
+        // `--session <key>` flag — the env-var path keeps the key
+        // out of `argv` and `ps aux`. Same hygiene as the master-
+        // password path.
         let session = self.session()?.to_string();
         let timeout = self.list_items_timeout;
-        let out = bw_run_timeout(&["list", "items", "--session", &session], timeout)?;
+        let out = bw_run_with_session_timeout(&["list", "items"], &session, timeout)?;
         if out.status.success() {
             serde_json::from_str::<Vec<Item>>(&stdout_str(&out))
                 .map_err(|e| format!("Error parsing items JSON: {e}"))
@@ -423,10 +455,7 @@ impl VaultPort for BwCliAdapter {
         // timeout rationale.
         let session = self.session()?.to_string();
         let timeout = self.list_items_timeout;
-        let out = bw_run_timeout(
-            &["list", "items", "--trash", "--session", &session],
-            timeout,
-        )?;
+        let out = bw_run_with_session_timeout(&["list", "items", "--trash"], &session, timeout)?;
         if out.status.success() {
             serde_json::from_str::<Vec<Item>>(&stdout_str(&out))
                 .map_err(|e| format!("Error parsing trash JSON: {e}"))
@@ -437,7 +466,7 @@ impl VaultPort for BwCliAdapter {
 
     fn sync(&mut self) -> Result<(), String> {
         let session = self.session()?.to_string();
-        let out = bw_run_timeout(&["sync", "--session", &session], SYNC_TIMEOUT)?;
+        let out = bw_run_with_session_timeout(&["sync"], &session, SYNC_TIMEOUT)?;
         if out.status.success() {
             Ok(())
         } else {
@@ -450,7 +479,7 @@ impl VaultPort for BwCliAdapter {
     fn get_totp(&mut self, item_id: &str) -> Result<String, String> {
         // TOTP is computed locally from the cached seed — no network.
         let session = self.session()?.to_string();
-        let out = bw_run(&["get", "totp", item_id, "--session", &session])?;
+        let out = bw_run_with_session(&["get", "totp", item_id], &session)?;
         if out.status.success() {
             Ok(stdout_str(&out))
         } else {
@@ -467,7 +496,7 @@ impl VaultPort for BwCliAdapter {
         // zeroes when the caller is done with it, instead of being
         // freed-but-not-scrubbed by the allocator.
         let session = self.session()?.to_string();
-        let out = bw_run(&["get", "item", item_id, "--session", &session])?;
+        let out = bw_run_with_session(&["get", "item", item_id], &session)?;
         if out.status.success() {
             Ok(Zeroizing::new(
                 String::from_utf8_lossy(&out.stdout).to_string(),
@@ -480,8 +509,9 @@ impl VaultPort for BwCliAdapter {
     fn check_exposed(&mut self, item_id: &str) -> Result<u32, String> {
         // Network: bw queries HaveIBeenPwned (k-anonymity API).
         let session = self.session()?.to_string();
-        let out = bw_run_timeout(
-            &["get", "exposed", item_id, "--session", &session],
+        let out = bw_run_with_session_timeout(
+            &["get", "exposed", item_id],
+            &session,
             ITEM_OP_TIMEOUT,
         )?;
         if !out.status.success() {
@@ -500,8 +530,9 @@ impl VaultPort for BwCliAdapter {
     fn create_item(&mut self, item_json: &str) -> Result<Item, String> {
         let session = self.session()?.to_string();
         let encoded = base64_encode(item_json);
-        let out = bw_run_timeout(
-            &["create", "item", &encoded, "--session", &session],
+        let out = bw_run_with_session_timeout(
+            &["create", "item", &encoded],
+            &session,
             ITEM_OP_TIMEOUT,
         )?;
         if out.status.success() {
@@ -515,8 +546,9 @@ impl VaultPort for BwCliAdapter {
     fn edit_item(&mut self, item_id: &str, item_json: &str) -> Result<Item, String> {
         let session = self.session()?.to_string();
         let encoded = base64_encode(item_json);
-        let out = bw_run_timeout(
-            &["edit", "item", item_id, &encoded, "--session", &session],
+        let out = bw_run_with_session_timeout(
+            &["edit", "item", item_id, &encoded],
+            &session,
             ITEM_OP_TIMEOUT,
         )?;
         if out.status.success() {
@@ -529,11 +561,11 @@ impl VaultPort for BwCliAdapter {
 
     fn delete_item(&mut self, item_id: &str, permanent: bool) -> Result<(), String> {
         let session = self.session()?.to_string();
-        let mut args: Vec<&str> = vec!["delete", "item", item_id, "--session", &session];
+        let mut args: Vec<&str> = vec!["delete", "item", item_id];
         if permanent {
             args.push("--permanent");
         }
-        let out = bw_run_timeout(&args, ITEM_OP_TIMEOUT)?;
+        let out = bw_run_with_session_timeout(&args, &session, ITEM_OP_TIMEOUT)?;
         if out.status.success() {
             Ok(())
         } else {
@@ -543,8 +575,9 @@ impl VaultPort for BwCliAdapter {
 
     fn restore_item(&mut self, item_id: &str) -> Result<(), String> {
         let session = self.session()?.to_string();
-        let out = bw_run_timeout(
-            &["restore", "item", item_id, "--session", &session],
+        let out = bw_run_with_session_timeout(
+            &["restore", "item", item_id],
+            &session,
             ITEM_OP_TIMEOUT,
         )?;
         if out.status.success() {
@@ -559,7 +592,7 @@ impl VaultPort for BwCliAdapter {
     fn list_folders(&mut self) -> Result<Vec<Folder>, String> {
         // Local-only — reads the cached folder list.
         let session = self.session()?.to_string();
-        let out = bw_run(&["list", "folders", "--session", &session])?;
+        let out = bw_run_with_session(&["list", "folders"], &session)?;
         if out.status.success() {
             serde_json::from_str::<Vec<Folder>>(&stdout_str(&out))
                 .map_err(|e| format!("Error parsing folders JSON: {e}"))
@@ -572,8 +605,9 @@ impl VaultPort for BwCliAdapter {
         let session = self.session()?.to_string();
         let payload = json!({ "name": name }).to_string();
         let encoded = base64_encode(&payload);
-        let out = bw_run_timeout(
-            &["create", "folder", &encoded, "--session", &session],
+        let out = bw_run_with_session_timeout(
+            &["create", "folder", &encoded],
+            &session,
             ITEM_OP_TIMEOUT,
         )?;
         if out.status.success() {
@@ -588,8 +622,9 @@ impl VaultPort for BwCliAdapter {
         let session = self.session()?.to_string();
         let payload = json!({ "name": name }).to_string();
         let encoded = base64_encode(&payload);
-        let out = bw_run_timeout(
-            &["edit", "folder", folder_id, &encoded, "--session", &session],
+        let out = bw_run_with_session_timeout(
+            &["edit", "folder", folder_id, &encoded],
+            &session,
             ITEM_OP_TIMEOUT,
         )?;
         if out.status.success() {
@@ -602,8 +637,9 @@ impl VaultPort for BwCliAdapter {
 
     fn delete_folder(&mut self, folder_id: &str) -> Result<(), String> {
         let session = self.session()?.to_string();
-        let out = bw_run_timeout(
-            &["delete", "folder", folder_id, "--session", &session],
+        let out = bw_run_with_session_timeout(
+            &["delete", "folder", folder_id],
+            &session,
             ITEM_OP_TIMEOUT,
         )?;
         if out.status.success() {
@@ -617,16 +653,9 @@ impl VaultPort for BwCliAdapter {
         // Bulk: a full vault export can run for several seconds on
         // large accounts.
         let session = self.session()?.to_string();
-        let out = bw_run_timeout(
-            &[
-                "export",
-                "--format",
-                format,
-                "--output",
-                output_path,
-                "--session",
-                &session,
-            ],
+        let out = bw_run_with_session_timeout(
+            &["export", "--format", format, "--output", output_path],
+            &session,
             BULK_TIMEOUT,
         )?;
         if out.status.success() {
@@ -639,7 +668,7 @@ impl VaultPort for BwCliAdapter {
     fn get_fingerprint(&mut self) -> Result<String, String> {
         // Local-only — derived from the cached public key.
         let session = self.session()?.to_string();
-        let out = bw_run(&["get", "fingerprint", "me", "--session", &session])?;
+        let out = bw_run_with_session(&["get", "fingerprint", "me"], &session)?;
         if out.status.success() {
             Ok(stdout_str(&out))
         } else {
@@ -663,15 +692,9 @@ impl VaultPort for BwCliAdapter {
         let json = serde_json::to_string(collection_ids)
             .map_err(|e| format!("Could not serialize collection ids: {e}"))?;
         let encoded = base64_encode(&json);
-        let out = bw_run_timeout(
-            &[
-                "move",
-                item_id,
-                organization_id,
-                &encoded,
-                "--session",
-                &session,
-            ],
+        let out = bw_run_with_session_timeout(
+            &["move", item_id, organization_id, &encoded],
+            &session,
             ITEM_OP_TIMEOUT,
         )?;
         if out.status.success() {
@@ -721,8 +744,9 @@ impl VaultPort for BwCliAdapter {
     fn import(&mut self, format: &str, input_path: &str) -> Result<(), String> {
         // Bulk: import can upload thousands of items in one go.
         let session = self.session()?.to_string();
-        let out = bw_run_timeout(
-            &["import", format, input_path, "--session", &session],
+        let out = bw_run_with_session_timeout(
+            &["import", format, input_path],
+            &session,
             BULK_TIMEOUT,
         )?;
         if out.status.success() {
@@ -735,7 +759,7 @@ impl VaultPort for BwCliAdapter {
     fn upload_attachment(&mut self, item_id: &str, file_path: &str) -> Result<Item, String> {
         // Bulk: file uploads can be megabytes.
         let session = self.session()?.to_string();
-        let out = bw_run_timeout(
+        let out = bw_run_with_session_timeout(
             &[
                 "create",
                 "attachment",
@@ -743,9 +767,8 @@ impl VaultPort for BwCliAdapter {
                 file_path,
                 "--itemid",
                 item_id,
-                "--session",
-                &session,
             ],
+            &session,
             BULK_TIMEOUT,
         )?;
         if out.status.success() {
@@ -764,7 +787,7 @@ impl VaultPort for BwCliAdapter {
     ) -> Result<(), String> {
         // Bulk: file downloads can be megabytes.
         let session = self.session()?.to_string();
-        let out = bw_run_timeout(
+        let out = bw_run_with_session_timeout(
             &[
                 "get",
                 "attachment",
@@ -773,9 +796,8 @@ impl VaultPort for BwCliAdapter {
                 item_id,
                 "--output",
                 output_path,
-                "--session",
-                &session,
             ],
+            &session,
             BULK_TIMEOUT,
         )?;
         if out.status.success() {
@@ -787,16 +809,9 @@ impl VaultPort for BwCliAdapter {
 
     fn delete_attachment(&mut self, item_id: &str, attachment_id: &str) -> Result<(), String> {
         let session = self.session()?.to_string();
-        let out = bw_run_timeout(
-            &[
-                "delete",
-                "attachment",
-                attachment_id,
-                "--itemid",
-                item_id,
-                "--session",
-                &session,
-            ],
+        let out = bw_run_with_session_timeout(
+            &["delete", "attachment", attachment_id, "--itemid", item_id],
+            &session,
             ITEM_OP_TIMEOUT,
         )?;
         if out.status.success() {
@@ -809,7 +824,7 @@ impl VaultPort for BwCliAdapter {
     fn list_organizations(&mut self) -> Result<Vec<Organization>, String> {
         // Local-only — reads the cached membership list.
         let session = self.session()?.to_string();
-        let out = bw_run(&["list", "organizations", "--session", &session])?;
+        let out = bw_run_with_session(&["list", "organizations"], &session)?;
         if out.status.success() {
             serde_json::from_str::<Vec<Organization>>(&stdout_str(&out))
                 .map_err(|e| format!("Error parsing organizations JSON: {e}"))
@@ -821,7 +836,7 @@ impl VaultPort for BwCliAdapter {
     fn list_collections(&mut self) -> Result<Vec<Collection>, String> {
         // Local-only.
         let session = self.session()?.to_string();
-        let out = bw_run(&["list", "collections", "--session", &session])?;
+        let out = bw_run_with_session(&["list", "collections"], &session)?;
         if out.status.success() {
             serde_json::from_str::<Vec<Collection>>(&stdout_str(&out))
                 .map_err(|e| format!("Error parsing collections JSON: {e}"))
@@ -839,17 +854,9 @@ impl VaultPort for BwCliAdapter {
         let session = self.session()?.to_string();
         let days = days_to_expire.clamp(1, 31).to_string();
         // bw prints just the URL on stdout when --fullObject is omitted.
-        let out = bw_run_timeout(
-            &[
-                "send",
-                "-n",
-                name,
-                "-d",
-                &days,
-                "--session",
-                &session,
-                content,
-            ],
+        let out = bw_run_with_session_timeout(
+            &["send", "-n", name, "-d", &days, content],
+            &session,
             ITEM_OP_TIMEOUT,
         )?;
         if out.status.success() {
@@ -991,7 +998,7 @@ mod tests {
     #[test]
     fn lock_clears_cached_session_key() {
         let mut a = BwCliAdapter {
-            session_key: Some(Zeroizing::new("test-key-DO-NOT-USE".into())),
+            session_key: Some(Arc::new(Zeroizing::new("test-key-DO-NOT-USE".into()))),
             list_items_timeout: DEFAULT_LIST_ITEMS_TIMEOUT,
         };
         assert!(a.session_key().is_some());
@@ -999,18 +1006,40 @@ mod tests {
         assert!(a.session_key().is_none());
     }
 
-    /// Compile-time guard that `session_key` is the zeroizing wrapper.
-    /// If a future refactor swaps the field back to `Option<String>`
-    /// this fails to compile, signalling that the protection on the
-    /// most security-relevant in-memory secret got dropped.
+    /// Compile-time guard that `session_key` is the zeroizing wrapper
+    /// behind an `Arc`. The wrapper-on-drop guarantees the bytes are
+    /// scrubbed when the last reference is released; the `Arc` keeps
+    /// parallel `parallel_session_data` workers from each holding a
+    /// deep-copied second allocation of the secret. If a future
+    /// refactor swaps either layer this fails to compile.
     #[test]
-    fn session_key_field_type_is_zeroizing() {
-        fn assert_is_zeroizing(_: &Option<Zeroizing<String>>) {}
+    fn session_key_field_type_is_arc_zeroizing() {
+        fn assert_is_arc_zeroizing(_: &Option<Arc<Zeroizing<String>>>) {}
         let a = BwCliAdapter {
             session_key: None,
             list_items_timeout: DEFAULT_LIST_ITEMS_TIMEOUT,
         };
-        assert_is_zeroizing(&a.session_key);
+        assert_is_arc_zeroizing(&a.session_key);
+    }
+
+    /// Cloning the adapter must share the same session-key allocation
+    /// (one byte buffer, one `Arc`-counted refcount), not deep-copy
+    /// it. This is the security-relevant invariant behind switching
+    /// from `Option<Zeroizing<String>>` to
+    /// `Option<Arc<Zeroizing<String>>>`: parallel session reads spawn
+    /// 4 worker threads at login time, and 4 deep copies of the
+    /// session key would widen the heap-dump exposure window 5×.
+    #[test]
+    fn clone_shares_session_key_allocation() {
+        let a = BwCliAdapter {
+            session_key: Some(Arc::new(Zeroizing::new("shared-key".into()))),
+            list_items_timeout: DEFAULT_LIST_ITEMS_TIMEOUT,
+        };
+        let b = a.clone();
+        let arc_a = a.session_key.as_ref().unwrap();
+        let arc_b = b.session_key.as_ref().unwrap();
+        assert!(Arc::ptr_eq(arc_a, arc_b), "Arc must share the allocation");
+        assert_eq!(Arc::strong_count(arc_a), 2);
     }
 
     #[test]

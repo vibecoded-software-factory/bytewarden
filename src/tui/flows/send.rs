@@ -59,7 +59,7 @@ pub fn commit(app: &mut App) {
         return;
     }
 
-    let cmd = format!("bw send -n <name> -d {days} <content> --session ***");
+    let cmd = format!("bw send -n <name> -d {days} <content>");
     app.set_action(ActionState::Running("Creating Send…".into()));
     match app.vault.send_text(&name, days, &content) {
         Ok(url) => {

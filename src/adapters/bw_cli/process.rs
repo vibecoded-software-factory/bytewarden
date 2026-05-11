@@ -10,6 +10,13 @@ use std::time::{Duration, Instant};
 /// invisible to `ps` / process-accounting tools.
 pub const BW_PASSWORD_ENV: &str = "BW_PASS_INPUT";
 
+/// Standard env var name `bw` reads the unlocked-vault session key
+/// from. We feed every session-bearing call through this var instead
+/// of the equivalent `--session <key>` flag, so the key never lands
+/// in `argv` and stays out of `ps aux` / `/proc/PID/cmdline`. Same
+/// rationale as [`BW_PASSWORD_ENV`].
+pub const BW_SESSION_ENV: &str = "BW_SESSION";
+
 /// Global `bw` flag automatically prepended to every invocation.
 ///
 /// `--nointeraction` makes `bw` fail fast instead of waiting on stdin
@@ -185,6 +192,42 @@ pub fn bw_run_with_password_timeout(
     let child = Command::new("bw")
         .args(full_args(args))
         .env(BW_PASSWORD_ENV, password)
+        // See `bw_run_timeout` for the stdin-null rationale.
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("Could not run bw: {e}"))?;
+    wait_with_timeout(child, secs, "bw")
+}
+
+/// Runs `bw <args>` after exporting `session` to the child's
+/// environment under [`BW_SESSION_ENV`].
+///
+/// **Do not** add `--session <key>` to `args`: that's the whole point
+/// of this helper — keeping the unlocked-vault key out of `ps aux`
+/// for the duration of every vault operation. The env-var path
+/// mirrors what [`bw_run_with_password`] does for the master
+/// password.
+///
+/// Used for local-only session-bearing reads (`bw list items`,
+/// `bw list folders`, `bw get totp`, …) — same
+/// [`LOCAL_OP_FALLBACK_TIMEOUT`] as [`bw_run`].
+pub fn bw_run_with_session(args: &[&str], session: &str) -> Result<Output, String> {
+    bw_run_with_session_timeout(args, session, LOCAL_OP_FALLBACK_TIMEOUT)
+}
+
+/// Like [`bw_run_with_session`] but with a wall-clock timeout. Used
+/// by every session-bearing call that has a known upper bound on
+/// runtime (item CRUD, sync, attachments, exports, …).
+pub fn bw_run_with_session_timeout(
+    args: &[&str],
+    session: &str,
+    secs: u64,
+) -> Result<Output, String> {
+    let child = Command::new("bw")
+        .args(full_args(args))
+        .env(BW_SESSION_ENV, session)
         // See `bw_run_timeout` for the stdin-null rationale.
         .stdin(Stdio::null())
         .stdout(Stdio::piped())

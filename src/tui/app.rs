@@ -889,11 +889,6 @@ impl App {
         self.rebuild_caches();
     }
 
-    /// Returns the current session key for log redaction (or `***` when
-    /// none).
-    pub fn session_key_display(&self) -> String {
-        self.vault.session_key().unwrap_or("***").to_string()
-    }
 }
 
 /// Pure helper extracted from [`App::rebuild_filtered_cache`] so the

@@ -142,7 +142,7 @@ pub fn queue_create_item(app: &mut App) {
 /// Pending-action executor for [`PendingAction::CreateItem`].
 pub fn do_create_item(app: &mut App) {
     let json = build_create_payload(&app.create_type, &app.create_fields);
-    let cmd = format!("bw create item --session {}", app.session_key_display());
+    let cmd = "bw create item".to_string();
     match app.vault.create_item(&json) {
         Ok(item) => {
             let new_id = item.id.clone();
@@ -369,8 +369,7 @@ pub fn do_download_attachment(app: &mut App) {
     let item_name = state.item_name.clone();
     let file_name = state.file_name.clone();
     let path = state.path.trim().to_string();
-    let cmd =
-        format!("bw get attachment {file_name} --itemid {item_id} --output <path> --session ***");
+    let cmd = format!("bw get attachment {file_name} --itemid {item_id} --output <path>");
     match app.vault.download_attachment(&item_id, &file_name, &path) {
         Ok(()) => {
             app.push_cmd(&cmd, true, &format!("saved to {path}"));
@@ -444,7 +443,7 @@ pub fn do_delete_attachment(app: &mut App) {
     let item_name = state.item_name.clone();
     let attachment_id = state.attachment_id.clone();
     let file_name = state.file_name.clone();
-    let cmd = format!("bw delete attachment {attachment_id} --itemid {item_id} --session ***");
+    let cmd = format!("bw delete attachment {attachment_id} --itemid {item_id}");
     match app.vault.delete_attachment(&item_id, &attachment_id) {
         Ok(()) => {
             app.push_cmd(&cmd, true, &format!("deleted from {item_name}"));
@@ -486,7 +485,7 @@ pub fn commit_attachment_upload(app: &mut App) {
     }
     let item_id = state.item_id.clone();
     let item_name = state.item_name.clone();
-    let cmd = format!("bw create attachment --file <path> --itemid {item_id} --session ***");
+    let cmd = format!("bw create attachment --file <path> --itemid {item_id}");
     app.set_action(ActionState::Running("Uploading…".into()));
     match app.vault.upload_attachment(&item_id, &path) {
         Ok(updated) => {
@@ -858,10 +857,7 @@ pub fn queue_save_edit(app: &mut App) {
 /// Pending-action executor for [`PendingAction::SaveEdit`].
 pub fn do_save_edit(app: &mut App) {
     let item_id = app.edit_item_id.clone();
-    let cmd = format!(
-        "bw edit item {item_id} --session {}",
-        app.session_key_display()
-    );
+    let cmd = format!("bw edit item {item_id}");
     let base_json = match app.vault.get_item_json(&item_id) {
         Ok(j) => j,
         Err(e) => {
@@ -945,10 +941,7 @@ pub fn do_delete_item(app: &mut App, permanent: bool) {
     };
     let (id, name) = (item.id.clone(), item.name.clone());
     let perm_str = if permanent { " --permanent" } else { "" };
-    let cmd = format!(
-        "bw delete item {id}{perm_str} --session {}",
-        app.session_key_display()
-    );
+    let cmd = format!("bw delete item {id}{perm_str}");
     match app.vault.delete_item(&id, permanent) {
         Ok(()) => {
             app.items.retain(|i| i.id != id);
@@ -992,10 +985,7 @@ pub fn do_restore_item(app: &mut App) {
         return;
     };
     let (id, name) = (item.id.clone(), item.name.clone());
-    let cmd = format!(
-        "bw restore item {id} --session {}",
-        app.session_key_display()
-    );
+    let cmd = format!("bw restore item {id}");
     match app.vault.restore_item(&id) {
         Ok(()) => {
             app.trashed_items.retain(|i| i.id != id);
@@ -1045,10 +1035,7 @@ pub fn queue_check_exposed(app: &mut App) {
 /// * `0` hits — green ✓ "Not in any known breach".
 /// * `1+`     — error (red) "Found in N breaches — rotate this password".
 pub fn do_check_exposed(app: &mut App, item_id: String) {
-    let cmd = format!(
-        "bw get exposed {item_id} --session {}",
-        app.session_key_display()
-    );
+    let cmd = format!("bw get exposed {item_id}");
     match app.vault.check_exposed(&item_id) {
         Ok(0) => {
             app.push_cmd(&cmd, true, "0 breaches");
@@ -1088,7 +1075,7 @@ pub fn do_toggle_favorite(app: &mut App) {
         return;
     };
     let (id, name, new_fav) = (item.id.clone(), item.name.clone(), !item.favorite);
-    let cmd = format!("bw edit item {id} --session {}", app.session_key_display());
+    let cmd = format!("bw edit item {id}");
 
     let json = match app.vault.get_item_json(&id) {
         Ok(j) => j,

@@ -28,10 +28,7 @@ pub struct MembershipState {
 /// can still operate on items and reload via the Memberships popup
 /// if needed.
 pub fn refresh_memberships_silent(app: &mut App) {
-    let cmd = format!(
-        "bw list organizations --session {}",
-        app.session_key_display()
-    );
+    let cmd = "bw list organizations".to_string();
     match app.vault.list_organizations() {
         Ok(orgs) => {
             let count = orgs.len();
@@ -44,10 +41,7 @@ pub fn refresh_memberships_silent(app: &mut App) {
         }
     }
 
-    let cmd = format!(
-        "bw list collections --session {}",
-        app.session_key_display()
-    );
+    let cmd = "bw list collections".to_string();
     match app.vault.list_collections() {
         Ok(mut cs) => {
             // Sort by `Org / Name` so the sidebar order is stable.

@@ -234,10 +234,7 @@ pub fn commit(app: &mut App) {
             item_id,
             organization_id,
         } => {
-            let cmd = format!(
-                "bw move {item_id} {organization_id} <ids> --session {}",
-                app.session_key_display()
-            );
+            let cmd = format!("bw move {item_id} {organization_id} <ids>");
             app.set_action(ActionState::Running("Moving…".into()));
             match app.vault.move_item(&item_id, &organization_id, &ids) {
                 Ok(()) => {

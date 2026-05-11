@@ -93,10 +93,7 @@ pub fn commit(app: &mut App) {
         return;
     }
     let format = state.format;
-    let cmd = format!(
-        "bw export --format {} --output <path> --session ***",
-        format.cli_arg()
-    );
+    let cmd = format!("bw export --format {} --output <path>", format.cli_arg());
     app.set_action(ActionState::Running("Exporting…".into()));
     match app.vault.export(format.cli_arg(), &path) {
         Ok(()) => {

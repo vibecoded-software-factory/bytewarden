@@ -50,7 +50,7 @@ pub fn commit(app: &mut App) {
         return;
     }
 
-    let cmd = format!("bw import {format} <path> --session ***");
+    let cmd = format!("bw import {format} <path>");
     app.set_action(ActionState::Running("Importing…".into()));
     match app.vault.import(&format, &path) {
         Ok(()) => {
