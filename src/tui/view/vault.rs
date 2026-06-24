@@ -5,7 +5,10 @@ use ratatui::{
     layout::{Constraint, Layout},
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, BorderType, Borders, List, ListItem, ListState, Paragraph},
+    widgets::{
+        Block, BorderType, Borders, Cell, List, ListItem, ListState, Paragraph, Row, Table,
+        TableState,
+    },
 };
 
 use crate::domain::filter::{ITEM_FILTERS, ItemFilter};
@@ -382,11 +385,44 @@ fn render_search(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     );
 }
 
+/// Compact type label for the vault list. Identical to
+/// [`item_type_label`] except "Secure Note" is shortened to "Note" so
+/// the type column stays narrow; the detail screen still shows the full
+/// name.
+fn list_type_label(item_type: u8) -> &'static str {
+    match item_type {
+        2 => "Note",
+        other => item_type_label(other),
+    }
+}
+
 fn render_list(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     let t = &app.theme;
     let lf = app.focus == Focus::List;
     let filtered = app.filtered_items();
-    let list_items: Vec<ListItem> = filtered
+
+    // Only reserve an indicator column when at least one *visible* item
+    // actually carries that indicator. A personal-only account (no
+    // organisations) never pays for the 👥 column, and a view with no
+    // favourites or reprompt-protected items collapses those too — so
+    // the [Type]/name columns shift left instead of leaving a dead
+    // gutter. The reservation is per-view (not per-row) so alignment
+    // stays stable within the list.
+    let (mut any_fav, mut any_reprompt, mut any_org) = (false, false, false);
+    // Type column sized to the widest *visible* "[label]" (jewel's
+    // `col_width` pattern) instead of a fixed pad — an all-[Login] view
+    // gets a 7-wide column, not 11, so names start that much earlier.
+    let mut type_w = 0usize;
+    for it in filtered.iter() {
+        any_fav |= it.favorite;
+        any_reprompt |= it.needs_reprompt();
+        any_org |= it.organization_id.is_some();
+        type_w = type_w.max(list_type_label(it.item_type).len() + 2); // + "[]"
+    }
+    let ind_w = (any_fav as u16) * 2 + (any_reprompt as u16) * 2 + (any_org as u16) * 2;
+    let type_w = type_w.clamp(6, 14) as u16;
+
+    let rows: Vec<Row> = filtered
         .iter()
         .map(|item| {
             let col = match item.item_type {
@@ -397,64 +433,74 @@ fn render_list(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
                 5 => t.item_ssh,
                 _ => t.dim,
             };
-            // Indicator prefix: favorite (★, 1 cell), reprompt (🔒,
-            // typically 2 cells), org (👥, 2 cells). Empty slots use
-            // matching-width whitespace so the [Type] column stays
-            // aligned across rows.
-            let mut spans: Vec<Span> = Vec::with_capacity(8);
-            if item.favorite {
-                spans.push(Span::styled("★", Style::default().fg(t.item_favorite)));
-            } else {
-                spans.push(Span::raw(" "));
+            // First cell = indicators + type tag. Indicators (★ / 🔒 /
+            // 👥) are each 2 cells wide and only present when the column
+            // is reserved; the type tag follows. The table left-aligns
+            // the cell inside its fixed `ind_w + type_w` width, so the
+            // name column lines up across rows without manual padding.
+            // "Secure Note" is shortened to "Note" in `list_type_label`
+            // so the common rows stay narrow; the detail view shows the
+            // full type.
+            let mut spans: Vec<Span> = Vec::with_capacity(4);
+            if any_fav {
+                spans.push(if item.favorite {
+                    Span::styled("★ ", Style::default().fg(t.item_favorite))
+                } else {
+                    Span::raw("  ")
+                });
             }
-            spans.push(Span::raw(" "));
-            if item.needs_reprompt() {
-                spans.push(Span::styled("🔒", Style::default().fg(t.error)));
-            } else {
-                spans.push(Span::raw("  "));
+            if any_reprompt {
+                spans.push(if item.needs_reprompt() {
+                    Span::styled("🔒", Style::default().fg(t.error))
+                } else {
+                    Span::raw("  ")
+                });
             }
-            spans.push(Span::raw(" "));
-            if item.organization_id.is_some() {
-                spans.push(Span::styled("👥", Style::default().fg(t.accent)));
-            } else {
-                spans.push(Span::raw("  "));
+            if any_org {
+                spans.push(if item.organization_id.is_some() {
+                    Span::styled("👥", Style::default().fg(t.accent))
+                } else {
+                    Span::raw("  ")
+                });
             }
-            spans.push(Span::raw(" "));
             spans.push(Span::styled(
-                format!("{:<14}", format!("[{}]", item_type_label(item.item_type))),
+                format!("[{}]", list_type_label(item.item_type)),
                 Style::default().fg(col),
             ));
-            spans.push(Span::raw(item.name.as_str()));
-            ListItem::new(Line::from(spans))
+            Row::new(vec![
+                Cell::from(Line::from(spans)),
+                Cell::from(Span::raw(item.name.as_str())),
+            ])
         })
         .collect();
+
     let flen = filtered.len();
-    let mut state = ListState::default();
-    state.select(if flen == 0 {
-        None
-    } else {
-        Some(app.selected_index)
-    });
+    let sel = (flen > 0).then_some(app.selected_index.min(flen.saturating_sub(1)));
+    let mut state = TableState::default().with_selected(sel);
     let indicator = if flen > 0 {
         format!("{} of {}", app.selected_index + 1, flen)
     } else {
         "0 of 0".into()
     };
     frame.render_stateful_widget(
-        List::new(list_items)
-            .block(titled_block(
-                "─[3]-Vault",
-                &format!("─{indicator}─"),
-                focus_color(lf, t.accent, t.inactive),
-                t,
-            ))
-            .highlight_style(
-                Style::default()
-                    .bg(t.selected_bg)
-                    .fg(t.foreground)
-                    .add_modifier(Modifier::BOLD),
-            )
-            .highlight_symbol("▶ "),
+        Table::new(
+            rows,
+            [Constraint::Length(ind_w + type_w), Constraint::Min(0)],
+        )
+        .column_spacing(2)
+        .block(titled_block(
+            "─[3]-Vault",
+            &format!("─{indicator}─"),
+            focus_color(lf, t.accent, t.inactive),
+            t,
+        ))
+        .row_highlight_style(
+            Style::default()
+                .bg(t.selected_bg)
+                .fg(t.foreground)
+                .add_modifier(Modifier::BOLD),
+        )
+        .highlight_symbol("▶ "),
         area,
         &mut state,
     );
