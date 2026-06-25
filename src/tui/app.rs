@@ -5,14 +5,15 @@
 //! * Navigation state (current screen, focus, scroll offsets, selection).
 //! * Form-input state (login form, search box, edit/create field arrays).
 //! * Cached domain data ([`Item`] vectors for the vault and the trash).
-//! * The asynchronous-feeling action queue ([`PendingAction`]).
-//! * The injected [`crate::ports`] trait objects.
+//! * The worker channels + the in-flight ticket ([`crate::tui::worker`]).
+//! * The injected synchronous ports (clipboard, settings).
 //!
 //! The struct is intentionally large but only ~30 cheap small-value
 //! fields. Behaviour is implemented in [`crate::tui::flows`] and the
 //! input/view layers; methods on `App` itself are deliberately limited
 //! to thin getters/mutators.
 
+use std::sync::mpsc::{Receiver, Sender};
 use std::time::Instant;
 
 use zeroize::Zeroizing;
@@ -21,13 +22,14 @@ use crate::domain::LoweredItem;
 use crate::domain::filter::{CreateItemType, ITEM_FILTERS, ItemFilter};
 use crate::domain::folder::Folder;
 use crate::domain::item::Item;
-use crate::ports::{ClipboardPort, PasswordGeneratorPort, SettingsPort, VaultPort};
-use crate::tui::action::{ActionState, CmdEntry, PendingAction};
+use crate::ports::{ClipboardPort, SettingsPort};
+use crate::tui::action::{ActionState, CmdEntry};
 use crate::tui::edit_field::EditField;
 use crate::tui::generator::GeneratorState;
 use crate::tui::mouse_areas::MouseAreas;
 use crate::tui::screens::{Focus, LoginField, Screen};
 use crate::tui::theme::{self, Theme};
+use crate::tui::worker::{InFlight, WorkerRequest, WorkerResponse};
 
 /// Maximum number of entries kept in the command-log panel.
 const CMD_LOG_LIMIT: usize = 50;
@@ -37,6 +39,17 @@ pub const PAGE_STEP: usize = 10;
 
 /// Visible vault-list rows used to compute scroll behaviour.
 pub const VAULT_VIEWPORT_ROWS: usize = 20;
+
+/// Redacts a cached session key from a command string before it's logged.
+/// The `bw` argv never carries the key (it's passed via env), so this is
+/// defense-in-depth. Pure helper so the redaction is unit-testable
+/// without constructing an [`App`].
+pub(crate) fn redact_cmd(cmd: &str, marker: Option<&str>) -> String {
+    match marker {
+        Some(key) if !key.is_empty() => cmd.replace(key, "***"),
+        _ => cmd.to_string(),
+    }
+}
 
 /// Global TUI state.
 pub struct App {
@@ -86,7 +99,7 @@ pub struct App {
     /// Same rationale as [`Self::folder_counts`].
     pub collection_counts: std::collections::HashMap<String, usize>,
     /// All folders visible in the current session (sorted alphabetically
-    /// by name). Refreshed by [`crate::tui::flows::folders::load_folders`].
+    /// by name). Refreshed via the worker on login / after folder edits.
     pub folders: Vec<Folder>,
     /// All collections visible in the current session, across every
     /// organisation the user is a member of. Sorted by `Org / Name`.
@@ -151,6 +164,12 @@ pub struct App {
     /// Whether the unlocked session key should be persisted to a
     /// per-PPID runtime file (cleaned up when the parent shell dies).
     pub keep_session: bool,
+    /// Whether the `bw` CLI is logged into an account (vault Locked or
+    /// Unlocked) vs fully signed out. Tracked on `App` because the vault
+    /// now lives on the worker thread, so the login flow can't call
+    /// `status()` synchronously to decide unlock-vs-login. Set from the
+    /// boot-status / login response handlers; cleared on logout.
+    pub authenticated: bool,
 
     // ── Search ────────────────────────────────────────────────────────────
     pub search_query: String,
@@ -166,10 +185,14 @@ pub struct App {
     pub cmd_log: Vec<CmdEntry>,
     pub cmd_log_scroll: usize,
 
-    // ── Action queue ──────────────────────────────────────────────────────
+    // ── Action / worker state ─────────────────────────────────────────────
     pub action_state: ActionState,
     pub action_tick: u8,
-    pub pending_action: PendingAction,
+    /// Context for the single user request currently being served by the
+    /// worker thread. `Some` ⇒ busy; input is gated and a new request
+    /// must not be queued until the matching response clears it. Multi-step
+    /// flows chain by setting a fresh ticket from a response handler.
+    pub in_flight: Option<InFlight>,
 
     // ── Auto-lock ─────────────────────────────────────────────────────────
     pub auto_lock: bool,
@@ -275,21 +298,33 @@ pub struct App {
     // ── Theme ─────────────────────────────────────────────────────────────
     pub theme: Theme,
 
-    // ── Injected ports ────────────────────────────────────────────────────
-    pub vault: Box<dyn VaultPort>,
+    // ── Worker channels ───────────────────────────────────────────────────
+    /// Send a [`WorkerRequest`] to the thread that owns the vault +
+    /// generator ports.
+    pub worker_tx: Sender<WorkerRequest>,
+    /// Drain [`WorkerResponse`]s from the worker between frames.
+    pub worker_rx: Receiver<WorkerResponse>,
+    /// Cached session key for command-log redaction. The vault now lives
+    /// on the worker thread, so `push_cmd` can no longer call
+    /// `session_key()`; instead we cache the key here from the login /
+    /// unlock response handlers and clear it on lock / logout. The `bw`
+    /// argv never contains the key (it's passed via env), so this is
+    /// defense-in-depth. Zeroized on drop / overwrite.
+    pub session_marker: Option<Zeroizing<String>>,
+
+    // ── Injected ports (synchronous, stay on the render thread) ───────────
     pub clipboard: Box<dyn ClipboardPort>,
     pub settings: Box<dyn SettingsPort>,
-    pub generator_port: Box<dyn PasswordGeneratorPort>,
 }
 
 impl App {
     /// Constructs the initial state, reading user preferences via the
     /// settings port.
     pub fn new(
-        vault: Box<dyn VaultPort>,
+        worker_tx: Sender<WorkerRequest>,
+        worker_rx: Receiver<WorkerResponse>,
         clipboard: Box<dyn ClipboardPort>,
         settings: Box<dyn SettingsPort>,
-        generator_port: Box<dyn PasswordGeneratorPort>,
     ) -> Self {
         let cfg = settings.read();
         let saved_email = cfg.email.clone().unwrap_or_default();
@@ -336,6 +371,7 @@ impl App {
             login_error: false,
             save_email: cfg.save_email,
             keep_session: cfg.keep_session,
+            authenticated: false,
             search_query: String::new(),
             show_password: false,
             detail_field: 0,
@@ -344,7 +380,7 @@ impl App {
             cmd_log_scroll: 0,
             action_state: ActionState::Idle,
             action_tick: 0,
-            pending_action: PendingAction::None,
+            in_flight: None,
             auto_lock: cfg.auto_lock,
             lock_after_secs: cfg.lock_after_secs,
             last_activity: Instant::now(),
@@ -376,11 +412,18 @@ impl App {
             help_from: None,
             help_scroll: (0, 0),
             theme,
-            vault,
+            worker_tx,
+            worker_rx,
+            session_marker: None,
             clipboard,
             settings,
-            generator_port,
         }
+    }
+
+    /// Whether a worker request is currently in flight. While `true`,
+    /// input handlers gate most keys so a second request can't be queued.
+    pub fn is_busy(&self) -> bool {
+        self.in_flight.is_some()
     }
 
     // ── Activity / navigation ─────────────────────────────────────────────
@@ -472,17 +515,16 @@ impl App {
         }
     }
 
-    /// Activates the highlighted filter, queues a trash refresh if
-    /// switching to [`ItemFilter::Trash`].
-    pub fn apply_filter(&mut self) {
+    /// Activates the highlighted filter. Returns `true` when the new
+    /// filter is [`ItemFilter::Trash`] so the caller can kick off the
+    /// trash load on the worker (the trash list is fetched on demand).
+    pub fn apply_filter(&mut self) -> bool {
         self.active_filter = ITEM_FILTERS[self.filter_selected].clone();
         self.selected_index = 0;
         self.scroll_offset = 0;
         self.focus = Focus::List;
-        if self.active_filter == ItemFilter::Trash {
-            self.pending_action = PendingAction::LoadTrash;
-        }
         self.rebuild_filtered_cache();
+        self.active_filter == ItemFilter::Trash
     }
 
     pub fn move_down(&mut self) {
@@ -657,12 +699,11 @@ impl App {
     /// see [`crate::tui::debug_log`]. The check is cheap when the env
     /// var is unset, so leaving it off costs nothing.
     pub fn push_cmd(&mut self, cmd: &str, ok: bool, detail: &str) {
-        let session_marker = self
-            .vault
-            .session_key()
-            .unwrap_or("__NO_SESSION__")
-            .to_string();
-        let redacted = cmd.replace(&session_marker, "***");
+        // The vault lives on the worker thread, so we can't call
+        // `session_key()` here. Redact against the cached `session_marker`
+        // (set from the login / unlock response handlers). The `bw` argv
+        // never carries the key anyway — this is defense-in-depth.
+        let redacted = redact_cmd(cmd, self.session_marker.as_deref().map(|s| s.as_str()));
         crate::tui::debug_log::append(&redacted, ok, detail);
         self.cmd_log.push(CmdEntry {
             cmd: redacted,
@@ -1001,6 +1042,21 @@ mod tests {
 
     fn lowered(items: &[Item]) -> Vec<LoweredItem> {
         items.iter().map(LoweredItem::from_item).collect()
+    }
+
+    #[test]
+    fn redact_cmd_replaces_cached_session_key() {
+        assert_eq!(
+            redact_cmd("bw unlock SECRETKEY", Some("SECRETKEY")),
+            "bw unlock ***"
+        );
+    }
+
+    #[test]
+    fn redact_cmd_is_noop_without_a_marker() {
+        assert_eq!(redact_cmd("bw status", None), "bw status");
+        // An empty marker must not turn every gap into `***`.
+        assert_eq!(redact_cmd("bw status", Some("")), "bw status");
     }
 
     #[test]

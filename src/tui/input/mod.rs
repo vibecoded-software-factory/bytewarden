@@ -40,6 +40,17 @@ pub fn is_alt(key: &KeyEvent) -> bool {
     key.modifiers.contains(KeyModifiers::ALT)
 }
 
+/// Whether a key should be swallowed because a worker request is in
+/// flight. While busy we accept only `Esc` (cancel / back) — every other
+/// key could queue a second request or race the pending one. `Ctrl+C`
+/// quits and is handled before this gate, so it always works.
+///
+/// Pure helper (no `App`) so it's unit-testable.
+#[inline]
+pub fn busy_blocks(is_busy: bool, key: &KeyEvent) -> bool {
+    is_busy && key.code != KeyCode::Esc
+}
+
 /// Per-axis step constants for help-popup scrolling.
 const HELP_PAGE_ROWS: u16 = 8;
 const HELP_PAGE_COLS: u16 = 16;
@@ -106,6 +117,11 @@ pub fn handle_events(app: &mut App, ev: Event) {
                 app.screen = Screen::Help;
                 return;
             }
+            // While a worker request is in flight, swallow every key but
+            // Esc so a second request can't be queued mid-flight.
+            if busy_blocks(app.is_busy(), &key) {
+                return;
+            }
             match app.screen.clone() {
                 Screen::Splash => {}
                 Screen::Login => login::handle(app, key),
@@ -132,5 +148,31 @@ pub fn handle_events(app: &mut App, ev: Event) {
         }
         Event::Mouse(mouse) => mouse::handle(app, mouse),
         _ => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+    fn key(code: KeyCode) -> KeyEvent {
+        KeyEvent::new(code, KeyModifiers::NONE)
+    }
+
+    #[test]
+    fn busy_blocks_swallows_keys_except_esc_while_busy() {
+        assert!(busy_blocks(true, &key(KeyCode::Char('a'))));
+        assert!(busy_blocks(true, &key(KeyCode::Enter)));
+        assert!(busy_blocks(true, &key(KeyCode::Down)));
+        // Esc always passes so the user can cancel / navigate away.
+        assert!(!busy_blocks(true, &key(KeyCode::Esc)));
+    }
+
+    #[test]
+    fn busy_blocks_passes_everything_when_idle() {
+        assert!(!busy_blocks(false, &key(KeyCode::Char('a'))));
+        assert!(!busy_blocks(false, &key(KeyCode::Enter)));
+        assert!(!busy_blocks(false, &key(KeyCode::Esc)));
     }
 }

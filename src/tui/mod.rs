@@ -5,9 +5,9 @@
 //! 1. Holding the [`App`] state container,
 //! 2. Reading terminal events and dispatching them to per-screen handlers,
 //! 3. Rendering the current state to the screen via Ratatui,
-//! 4. Driving the asynchronous-feeling action queue
-//!    ([`action::PendingAction`]) so blocking calls happen between two
-//!    spinner frames instead of freezing the UI.
+//! 4. Draining [`worker::WorkerResponse`]s from the worker thread that
+//!    owns the vault + generator ports, so blocking `bw` calls never
+//!    freeze the render loop.
 //!
 //! The bottom-level domain ports ([`crate::ports`]) are injected at
 //! construction time, so the whole layer is testable against fakes.
@@ -31,6 +31,7 @@ pub mod send;
 pub mod session_file;
 pub mod theme;
 pub mod view;
+pub mod worker;
 
 pub use app::App;
 
@@ -40,8 +41,7 @@ use crossterm::execute;
 use std::time::Duration;
 
 use crate::ports::{ClipboardPort, PasswordGeneratorPort, SettingsPort, VaultPort};
-use action::{ActionState, PendingAction};
-use screens::Screen;
+use action::ActionState;
 
 /// Number of poll ticks (~80 ms each) a Done/Error message stays on screen
 /// before reverting to Idle. ~1.5 s total.
@@ -61,31 +61,33 @@ const POLL_BUSY_MS: u64 = 80;
 /// This function blocks until the user quits the application
 /// (`Ctrl+C` or by closing the terminal).
 pub fn run(
-    vault: Box<dyn VaultPort>,
+    vault: Box<dyn VaultPort + Send>,
     clipboard: Box<dyn ClipboardPort>,
     settings: Box<dyn SettingsPort>,
-    generator_port: Box<dyn PasswordGeneratorPort>,
+    generator: Box<dyn PasswordGeneratorPort + Send>,
 ) -> Result<()> {
     ratatui::run(|terminal| {
-        let mut app = App::new(vault, clipboard, settings, generator_port);
+        // Move the vault + generator ports onto the worker thread so the
+        // render loop never blocks on a `bw` call.
+        let mut worker = worker::WorkerHandle::spawn(vault, generator);
+        let worker_tx = worker.tx();
+        let worker_rx = worker.take_rx();
+        let mut app = App::new(worker_tx, worker_rx, clipboard, settings);
+
         execute!(std::io::stdout(), EnableMouseCapture)?;
 
-        // Show the splash + spinner while `bw status` runs.
+        // Show the splash + spinner while the boot `bw status` runs on
+        // the worker; the response handler routes to login / vault.
         app.set_action(ActionState::Running("Checking session…".into()));
         terminal.draw(|frame| view::draw(frame, &mut app))?;
-
-        flows::auth::resume_from_status(&mut app);
-
-        // After the status check, settle into the right starting screen.
-        if app.screen != Screen::Vault {
-            app.screen = Screen::Login;
-        }
-        if matches!(app.action_state, ActionState::Running(_)) {
-            app.set_action(ActionState::Idle);
-        }
+        flows::auth::request_resume(&mut app);
 
         let result = run_loop(terminal, &mut app);
         let _ = execute!(std::io::stdout(), DisableMouseCapture);
+        // Drop the app (releasing its request sender + response receiver)
+        // before the worker handle so `Shutdown` + join run cleanly.
+        drop(app);
+        drop(worker);
         result
     })
 }
@@ -108,15 +110,15 @@ fn run_loop(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<()
 
         terminal.draw(|frame| view::draw(frame, app))?;
 
-        // Dispatch any pending action *after* the Running frame is drawn,
-        // so the spinner is visible before the blocking call.
-        if app.pending_action != PendingAction::None {
-            dispatch_pending(app);
+        // Drain every worker response that has arrived, applying each to
+        // `App`. Non-blocking — the worker runs the `bw` call off-thread,
+        // so the loop keeps animating the spinner while it's in flight.
+        while let Ok(resp) = app.worker_rx.try_recv() {
+            flows::apply_response(app, resp);
             done_ticks = 0;
-            terminal.draw(|frame| view::draw(frame, app))?;
         }
 
-        if event::poll(poll_timeout(&app.action_state))? {
+        if event::poll(poll_timeout(&app.action_state, app.is_busy()))? {
             let ev = event::read()?;
             input::handle_events(app, ev);
             app.reset_activity();
@@ -132,33 +134,12 @@ fn run_loop(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<()
     Ok(())
 }
 
-/// Executes the queued [`PendingAction`] and clears the slot.
-fn dispatch_pending(app: &mut App) {
-    let pending = std::mem::replace(&mut app.pending_action, PendingAction::None);
-    match pending {
-        PendingAction::None => {}
-        PendingAction::Login => flows::auth::do_login(app),
-        PendingAction::CopyUsername => flows::copy::do_copy_username(app),
-        PendingAction::CopyPassword => flows::copy::do_copy_password(app),
-        PendingAction::SyncVault => flows::vault::do_sync_vault(app),
-        PendingAction::ToggleFavorite => flows::items::do_toggle_favorite(app),
-        PendingAction::CopyRaw(text, msg) => flows::copy::do_copy_raw(app, text, msg),
-        PendingAction::CopyTotp(item_id) => flows::copy::do_copy_totp(app, item_id),
-        PendingAction::SaveEdit => flows::items::do_save_edit(app),
-        PendingAction::CreateItem => flows::items::do_create_item(app),
-        PendingAction::DeleteItem { permanent } => flows::items::do_delete_item(app, permanent),
-        PendingAction::RestoreItem => flows::items::do_restore_item(app),
-        PendingAction::LoadTrash => flows::vault::load_trash(app),
-        PendingAction::GeneratePassword => flows::generator::do_generate(app),
-        PendingAction::CheckExposed(id) => flows::items::do_check_exposed(app, id),
-        PendingAction::DownloadAttachment => flows::items::do_download_attachment(app),
-        PendingAction::DeleteAttachment => flows::items::do_delete_attachment(app),
+/// Returns the next event-poll timeout — fast while busy / animating,
+/// longer when idle to avoid CPU churn.
+fn poll_timeout(state: &ActionState, busy: bool) -> Duration {
+    if busy {
+        return Duration::from_millis(POLL_BUSY_MS);
     }
-}
-
-/// Returns the next event-poll timeout — fast during animation, longer
-/// when idle to avoid CPU churn.
-fn poll_timeout(state: &ActionState) -> Duration {
     match state {
         ActionState::Idle => Duration::from_millis(POLL_IDLE_MS),
         _ => Duration::from_millis(POLL_BUSY_MS),

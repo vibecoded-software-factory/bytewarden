@@ -8,39 +8,30 @@ use crate::domain::Folder;
 use crate::tui::action::ActionState;
 use crate::tui::app::App;
 use crate::tui::folders::{filter_for_row, row_count, row_for_filter};
+use crate::tui::worker::{InFlight, WorkerRequest};
 
 // ── Loading ───────────────────────────────────────────────────────────────
 
-/// Loads the folder list with a "Loading…" spinner — used for an
-/// explicit user refresh.
-pub fn load_folders(app: &mut App) {
-    app.set_action(ActionState::Running("Loading folders…".into()));
-    if refresh_folders_silent(app) {
-        app.set_action(ActionState::Idle);
-    }
+/// Queues a silent folder reload (worker). The caller has already set the
+/// toast it wants the user to keep seeing.
+pub fn request_reload_folders_silent(app: &mut App) {
+    app.in_flight = Some(InFlight::FolderReload);
+    let _ = app.worker_tx.send(WorkerRequest::ListFolders);
 }
 
-/// Refreshes `app.folders` from the backend without touching
-/// `action_state`. Returns `true` on success.
-///
-/// Sorts the result alphabetically (case-insensitive) so the sidebar
-/// has a stable, predictable order. Snaps the highlight back to the
-/// row matching the previously-active filter.
-pub fn refresh_folders_silent(app: &mut App) -> bool {
-    let cmd = "bw list folders".to_string();
-    match app.vault.list_folders() {
+/// `bw list folders` response — applies the list silently (preserves the
+/// prior toast). Sorts alphabetically and snaps the highlight back to the
+/// row matching the active filter.
+pub fn handle_reload(app: &mut App, r: Result<Vec<Folder>, String>) {
+    match r {
         Ok(folders) => {
             let count = folders.len();
             app.folders = sorted(folders);
             app.folder_selected =
                 row_for_filter(&app.active_folder, &app.folders, &app.collections);
-            app.push_cmd(&cmd, true, &format!("{count} folders loaded"));
-            true
+            app.push_cmd("bw list folders", true, &format!("{count} folders loaded"));
         }
-        Err(e) => {
-            app.cmd_err(&cmd, &e, "Load folders failed");
-            false
-        }
+        Err(e) => app.cmd_err("bw list folders", &e, "Load folders failed"),
     }
 }
 
@@ -169,23 +160,21 @@ pub fn cancel_name_popup(app: &mut App) {
     app.screen = crate::tui::screens::Screen::Vault;
 }
 
-/// Commits the popup's input via `bw create folder` or `bw edit
-/// folder` depending on the purpose. Validates non-empty after trim;
-/// on backend error rolls the popup state back so the user can retry.
+/// Validates and dispatches the folder create / rename to the worker.
+/// The popup state (`folder_name`) is kept so the response handler can
+/// restore it on error; it's cleared on success.
 pub fn commit_name_popup(app: &mut App) {
-    let Some(state) = app.folder_name.take() else {
+    let Some(state) = app.folder_name.as_ref() else {
         return;
     };
     let name = state.input.trim().to_string();
     if name.is_empty() {
-        app.folder_name = Some(state);
         app.set_action(ActionState::Error("Folder name cannot be empty.".into()));
         return;
     }
-    // Pre-flight unique check against the in-memory folder list.
-    // For a rename, the folder being edited keeps its old name as the
-    // exempt "current" so submitting the same value back is a no-op
-    // rather than a duplicate-error.
+    // Pre-flight unique check against the in-memory folder list. For a
+    // rename, the folder being edited keeps its old name as the exempt
+    // "current" so submitting the same value back is a no-op.
     let existing: Vec<&str> = app.folders.iter().map(|f| f.name.as_str()).collect();
     let current = match &state.purpose {
         FolderNamePurpose::Rename { folder_id } => app
@@ -196,55 +185,66 @@ pub fn commit_name_popup(app: &mut App) {
         FolderNamePurpose::Create => None,
     };
     if let Err(msg) = crate::domain::validation::check_name_unique(&name, &existing, current) {
-        app.folder_name = Some(state);
         app.set_action(ActionState::Error(msg));
         return;
     }
 
-    match &state.purpose {
+    match state.purpose.clone() {
         FolderNamePurpose::Create => {
-            let cmd = "bw create folder".to_string();
-            match app.vault.create_folder(&name) {
-                Ok(folder) => {
-                    app.push_cmd(&cmd, true, &format!("created: {}", folder.name));
-                    app.set_action(ActionState::Done(format!(
-                        "Folder \"{}\" created ✓",
-                        folder.name
-                    )));
-                    refresh_folders_silent(app);
-                    // Highlight the newly created folder so the next
-                    // Enter applies its filter.
-                    if let Some(idx) = app.folders.iter().position(|f| f.id == folder.id) {
-                        app.folder_selected = idx + 2;
-                    }
-                    app.screen = crate::tui::screens::Screen::Vault;
-                }
-                Err(e) => {
-                    app.cmd_err(&cmd, &e, "Create folder failed");
-                    // Restore popup with the typed text so the user can fix.
-                    app.folder_name = Some(state);
-                }
-            }
+            app.set_action(ActionState::Running("Creating folder…".into()));
+            app.in_flight = Some(InFlight::CreateFolder);
+            let _ = app.worker_tx.send(WorkerRequest::CreateFolder { name });
         }
         FolderNamePurpose::Rename { folder_id } => {
-            let cmd = format!("bw edit folder {folder_id}");
-            let id = folder_id.clone();
-            match app.vault.edit_folder(&id, &name) {
-                Ok(folder) => {
-                    app.push_cmd(&cmd, true, &format!("renamed to: {}", folder.name));
-                    app.set_action(ActionState::Done(format!(
-                        "Renamed to \"{}\" ✓",
-                        folder.name
-                    )));
-                    refresh_folders_silent(app);
-                    app.screen = crate::tui::screens::Screen::Vault;
-                }
-                Err(e) => {
-                    app.cmd_err(&cmd, &e, "Rename folder failed");
-                    app.folder_name = Some(state);
-                }
-            }
+            app.set_action(ActionState::Running("Renaming folder…".into()));
+            app.in_flight = Some(InFlight::EditFolder);
+            let _ = app
+                .worker_tx
+                .send(WorkerRequest::EditFolder { folder_id, name });
         }
+    }
+}
+
+/// `bw create folder` response.
+pub fn handle_create(app: &mut App, r: Result<Folder, String>) {
+    match r {
+        Ok(folder) => {
+            app.push_cmd(
+                "bw create folder",
+                true,
+                &format!("created: {}", folder.name),
+            );
+            app.set_action(ActionState::Done(format!(
+                "Folder \"{}\" created ✓",
+                folder.name
+            )));
+            app.folder_name = None;
+            app.screen = crate::tui::screens::Screen::Vault;
+            request_reload_folders_silent(app);
+        }
+        // Keep the popup open (state untouched) so the user can fix it.
+        Err(e) => app.cmd_err("bw create folder", &e, "Create folder failed"),
+    }
+}
+
+/// `bw edit folder` response.
+pub fn handle_edit(app: &mut App, r: Result<Folder, String>) {
+    match r {
+        Ok(folder) => {
+            app.push_cmd(
+                "bw edit folder",
+                true,
+                &format!("renamed to: {}", folder.name),
+            );
+            app.set_action(ActionState::Done(format!(
+                "Renamed to \"{}\" ✓",
+                folder.name
+            )));
+            app.folder_name = None;
+            app.screen = crate::tui::screens::Screen::Vault;
+            request_reload_folders_silent(app);
+        }
+        Err(e) => app.cmd_err("bw edit folder", &e, "Rename folder failed"),
     }
 }
 
@@ -267,10 +267,9 @@ pub fn cancel_delete(app: &mut App) {
     app.screen = crate::tui::screens::Screen::Vault;
 }
 
-/// Performs the deletion and refreshes the sidebar. Items previously
-/// assigned to the folder are not deleted — bw clears their
-/// `folder_id` to null, which would show under "(No folder)" after
-/// the next item-list refresh.
+/// Dispatches the folder deletion to the worker. If the active filter
+/// points at the folder being deleted, it's reset to "All" up front so
+/// the list isn't confusingly empty.
 pub fn confirm_delete(app: &mut App) {
     let Some(folder) = focused_folder(app) else {
         app.screen = crate::tui::screens::Screen::Vault;
@@ -278,25 +277,41 @@ pub fn confirm_delete(app: &mut App) {
     };
     let id = folder.id.clone();
     let name = folder.name.clone();
-    let cmd = format!("bw delete folder {id}");
-    match app.vault.delete_folder(&id) {
-        Ok(()) => {
-            app.push_cmd(&cmd, true, &format!("deleted: {name}"));
-            app.set_action(ActionState::Done(format!("Folder \"{name}\" deleted ✓")));
-            // If the active filter was pointing at the now-gone folder,
-            // fall back to "All folders" so the list isn't empty for a
-            // confusing reason.
-            if matches!(&app.active_folder, super::super::folders::FolderFilter::Folder(fid) if fid == &id)
-            {
-                app.active_folder = super::super::folders::FolderFilter::All;
-                app.folder_selected = 0;
-                app.rebuild_filtered_cache();
-            }
-            refresh_folders_silent(app);
-            // Refresh items too — their folder_id pointers have changed.
-            super::vault::refresh_items_silent(app);
-        }
-        Err(e) => app.cmd_err(&cmd, &e, "Delete folder failed"),
+    if matches!(&app.active_folder, super::super::folders::FolderFilter::Folder(fid) if fid == &id)
+    {
+        app.active_folder = super::super::folders::FolderFilter::All;
+        app.folder_selected = 0;
+        app.rebuild_filtered_cache();
     }
+    app.set_action(ActionState::Running("Deleting folder…".into()));
     app.screen = crate::tui::screens::Screen::Vault;
+    app.in_flight = Some(InFlight::DeleteFolder { name });
+    let _ = app
+        .worker_tx
+        .send(WorkerRequest::DeleteFolder { folder_id: id });
+}
+
+/// `bw delete folder` response. Items previously in the folder aren't
+/// deleted — bw clears their `folder_id`, so both lists are reloaded.
+pub fn handle_delete(app: &mut App, name: String, r: Result<(), String>) {
+    match r {
+        Ok(()) => {
+            app.push_cmd("bw delete folder", true, &format!("deleted: {name}"));
+            app.set_action(ActionState::Done(format!("Folder \"{name}\" deleted ✓")));
+            // Items' folder_id pointers changed → reload items, then
+            // folders. Both silent so the toast survives.
+            app.in_flight = Some(InFlight::FolderDeleteReloadItems);
+            let _ = app.worker_tx.send(WorkerRequest::ListItems);
+        }
+        Err(e) => app.cmd_err("bw delete folder", &e, "Delete folder failed"),
+    }
+}
+
+/// Silent post-folder-delete item reload → chains the folder reload.
+pub fn handle_delete_reload_items(app: &mut App, r: Result<Vec<crate::domain::Item>, String>) {
+    match r {
+        Ok(items) => super::vault::set_items(app, items),
+        Err(e) => app.push_cmd("bw list items", false, &e),
+    }
+    request_reload_folders_silent(app);
 }

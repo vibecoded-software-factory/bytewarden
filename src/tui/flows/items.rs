@@ -1,15 +1,17 @@
 //! Create / edit / delete / restore / favorite flows.
 
 use serde_json::Value;
+use zeroize::Zeroizing;
 
 use crate::domain::filter::{CREATE_ITEM_TYPES, CreateItemType, ItemFilter};
-use crate::tui::action::{ActionState, PendingAction};
+use crate::tui::action::ActionState;
 use crate::tui::app::App;
 use crate::tui::detail_fields::build_detail_fields;
 use crate::tui::edit_field::{build_create_fields_with_orgs, build_edit_fields_with_folders};
 use crate::tui::flows::item_json::{build_create_payload, patch_edit_payload};
 use crate::tui::flows::vault;
 use crate::tui::screens::{Focus, Screen};
+use crate::tui::worker::{InFlight, WorkerRequest};
 
 // ── Create ────────────────────────────────────────────────────────────────
 
@@ -102,7 +104,7 @@ pub fn cycle_create_org(app: &mut App, dir: i32) {
     }
 }
 
-/// Validates and queues a [`PendingAction::CreateItem`].
+/// Validates the create form and dispatches the create to the worker.
 pub fn queue_create_item(app: &mut App) {
     let name = app
         .create_fields
@@ -135,15 +137,16 @@ pub fn queue_create_item(app: &mut App) {
             return;
         }
     }
+    let json = Zeroizing::new(build_create_payload(&app.create_type, &app.create_fields));
     app.set_action(ActionState::Running("Creating…".into()));
-    app.pending_action = PendingAction::CreateItem;
+    app.in_flight = Some(InFlight::CreateItem);
+    let _ = app.worker_tx.send(WorkerRequest::CreateItem { json });
 }
 
-/// Pending-action executor for [`PendingAction::CreateItem`].
-pub fn do_create_item(app: &mut App) {
-    let json = build_create_payload(&app.create_type, &app.create_fields);
+/// `bw create item` response.
+pub fn handle_create(app: &mut App, r: Result<crate::domain::Item, String>) {
     let cmd = "bw create item".to_string();
-    match app.vault.create_item(&json) {
+    match r {
         Ok(item) => {
             let new_id = item.id.clone();
             let name = item.name.clone();
@@ -346,8 +349,8 @@ pub fn cancel_attachment_download(app: &mut App) {
     app.screen = Screen::Detail;
 }
 
-/// Queues the download — the dispatcher runs the blocking call after
-/// rendering the spinner.
+/// Sends the attachment download request (worker). The popup state is
+/// kept so the response handler can build the success toast.
 pub fn queue_attachment_download(app: &mut App) {
     let Some(state) = app.attachment_download.as_ref() else {
         return;
@@ -356,12 +359,20 @@ pub fn queue_attachment_download(app: &mut App) {
         app.set_action(ActionState::Error("Output path cannot be empty.".into()));
         return;
     }
+    let item_id = state.item_id.clone();
+    let file_name = state.file_name.clone();
+    let output_path = state.path.trim().to_string();
     app.set_action(ActionState::Running("Downloading…".into()));
-    app.pending_action = PendingAction::DownloadAttachment;
+    app.in_flight = Some(InFlight::DownloadAttachment);
+    let _ = app.worker_tx.send(WorkerRequest::DownloadAttachment {
+        item_id,
+        file_name,
+        output_path,
+    });
 }
 
-/// Performs the download via `bw get attachment`.
-pub fn do_download_attachment(app: &mut App) {
+/// `bw get attachment` response.
+pub fn handle_download_attachment(app: &mut App, r: Result<(), String>) {
     let Some(state) = app.attachment_download.as_ref() else {
         return;
     };
@@ -370,7 +381,7 @@ pub fn do_download_attachment(app: &mut App) {
     let file_name = state.file_name.clone();
     let path = state.path.trim().to_string();
     let cmd = format!("bw get attachment {file_name} --itemid {item_id} --output <path>");
-    match app.vault.download_attachment(&item_id, &file_name, &path) {
+    match r {
         Ok(()) => {
             app.push_cmd(&cmd, true, &format!("saved to {path}"));
             app.set_action(ActionState::Done(format!(
@@ -423,57 +434,75 @@ pub fn cancel_delete_attachment(app: &mut App) {
     app.screen = Screen::Detail;
 }
 
-/// Queues the delete — the dispatcher runs the blocking call after
-/// rendering the spinner.
+/// Sends the delete-attachment request (worker). The popup state is kept
+/// so the refresh step / toast can use it.
 pub fn queue_delete_attachment(app: &mut App) {
-    if app.attachment_delete.is_none() {
+    let Some(state) = app.attachment_delete.as_ref() else {
         return;
-    }
+    };
+    let item_id = state.item_id.clone();
+    let attachment_id = state.attachment_id.clone();
     app.set_action(ActionState::Running("Deleting attachment…".into()));
-    app.pending_action = PendingAction::DeleteAttachment;
+    app.in_flight = Some(InFlight::DeleteAttachment);
+    let _ = app.worker_tx.send(WorkerRequest::DeleteAttachment {
+        item_id,
+        attachment_id,
+    });
 }
 
-/// Performs the delete via `bw delete attachment` and refreshes the
-/// item from the server so the in-memory copy drops the gone row.
-pub fn do_delete_attachment(app: &mut App) {
+/// `bw delete attachment` response — step 1. Chains a `get item` to
+/// refresh the in-memory copy so the detail row count drops.
+pub fn handle_delete_attachment(app: &mut App, r: Result<(), String>) {
     let Some(state) = app.attachment_delete.as_ref() else {
         return;
     };
     let item_id = state.item_id.clone();
     let item_name = state.item_name.clone();
     let attachment_id = state.attachment_id.clone();
-    let file_name = state.file_name.clone();
     let cmd = format!("bw delete attachment {attachment_id} --itemid {item_id}");
-    match app.vault.delete_attachment(&item_id, &attachment_id) {
+    match r {
         Ok(()) => {
             app.push_cmd(&cmd, true, &format!("deleted from {item_name}"));
-            // bw doesn't return the updated item from `delete attachment` —
-            // refresh it via `get item` so the detail row count drops.
-            if let Ok(json) = app.vault.get_item_json(&item_id)
-                && let Ok(refreshed) = serde_json::from_str::<crate::domain::Item>(&json)
-                && let Some(slot) = app.items.iter_mut().find(|i| i.id == item_id)
-            {
-                *slot = refreshed;
-                app.rebuild_caches();
-            }
-            // Clamp the focused row in case it pointed at the deleted
-            // attachment, otherwise the detail screen would highlight
-            // something past the new end of the list.
-            let count = app.detail_field_count();
-            if count > 0 && app.detail_field >= count {
-                app.detail_field = count - 1;
-            }
-            app.set_action(ActionState::Done(format!("Deleted \"{file_name}\" ✓")));
-            app.attachment_delete = None;
-            app.screen = Screen::Detail;
+            app.in_flight = Some(InFlight::DeleteAttachmentRefresh {
+                item_id: item_id.clone(),
+            });
+            let _ = app.worker_tx.send(WorkerRequest::GetItemJson { item_id });
         }
         Err(e) => app.cmd_err(&cmd, &e, "Delete failed"),
     }
 }
 
-/// Performs the upload via `bw create attachment`. On success the
-/// item record in `app.items` is replaced with the freshly returned
-/// one (which now carries the new attachment).
+/// `get item` refresh after an attachment delete — step 2.
+pub fn handle_delete_attachment_refresh(
+    app: &mut App,
+    item_id: String,
+    r: Result<Zeroizing<String>, String>,
+) {
+    let file_name = app
+        .attachment_delete
+        .as_ref()
+        .map(|s| s.file_name.clone())
+        .unwrap_or_default();
+    // The delete already succeeded; the refresh is best-effort. Whatever
+    // happens, finish on the detail screen with the success toast.
+    if let Ok(json) = r
+        && let Ok(refreshed) = serde_json::from_str::<crate::domain::Item>(&json)
+        && let Some(slot) = app.items.iter_mut().find(|i| i.id == item_id)
+    {
+        *slot = refreshed;
+        app.rebuild_caches();
+    }
+    let count = app.detail_field_count();
+    if count > 0 && app.detail_field >= count {
+        app.detail_field = count - 1;
+    }
+    app.set_action(ActionState::Done(format!("Deleted \"{file_name}\" ✓")));
+    app.attachment_delete = None;
+    app.screen = Screen::Detail;
+}
+
+/// Sends the attachment upload request (worker). The popup state is kept
+/// for the response handler.
 pub fn commit_attachment_upload(app: &mut App) {
     let Some(state) = app.attachment_upload.as_ref() else {
         return;
@@ -484,10 +513,23 @@ pub fn commit_attachment_upload(app: &mut App) {
         return;
     }
     let item_id = state.item_id.clone();
+    app.set_action(ActionState::Running("Uploading…".into()));
+    app.in_flight = Some(InFlight::UploadAttachment);
+    let _ = app.worker_tx.send(WorkerRequest::UploadAttachment {
+        item_id,
+        file_path: path,
+    });
+}
+
+/// `bw create attachment` response.
+pub fn handle_upload_attachment(app: &mut App, r: Result<crate::domain::Item, String>) {
+    let Some(state) = app.attachment_upload.as_ref() else {
+        return;
+    };
+    let item_id = state.item_id.clone();
     let item_name = state.item_name.clone();
     let cmd = format!("bw create attachment --file <path> --itemid {item_id}");
-    app.set_action(ActionState::Running("Uploading…".into()));
-    match app.vault.upload_attachment(&item_id, &path) {
+    match r {
         Ok(updated) => {
             app.push_cmd(&cmd, true, &format!("uploaded to {item_name}"));
             if let Some(slot) = app.items.iter_mut().find(|i| i.id == item_id) {
@@ -848,30 +890,26 @@ pub fn cycle_field_type(app: &mut App) {
     app.set_action(ActionState::Done(format!("Type → {label} ✓")));
 }
 
-/// Queues a [`PendingAction::SaveEdit`].
+/// Save edit — step 1: fetch the item JSON to patch (worker).
 pub fn queue_save_edit(app: &mut App) {
     app.set_action(ActionState::Running("Saving…".into()));
-    app.pending_action = PendingAction::SaveEdit;
+    app.in_flight = Some(InFlight::SaveEditFetch);
+    let item_id = app.edit_item_id.clone();
+    let _ = app.worker_tx.send(WorkerRequest::GetItemJson { item_id });
 }
 
-/// Pending-action executor for [`PendingAction::SaveEdit`].
-pub fn do_save_edit(app: &mut App) {
+/// Save edit — step 1 response: patch the fetched JSON and commit it.
+pub fn handle_save_edit_fetch(app: &mut App, r: Result<Zeroizing<String>, String>) {
     let item_id = app.edit_item_id.clone();
     let cmd = format!("bw edit item {item_id}");
-    let base_json = match app.vault.get_item_json(&item_id) {
+    let base_json = match r {
         Ok(j) => j,
-        Err(e) => {
-            app.cmd_err(&cmd, &e, "Fetch failed");
-            return;
-        }
+        Err(e) => return app.cmd_err(&cmd, &e, "Fetch failed"),
     };
 
-    // Resolve the "Folder" row (which carries the folder *name* the
-    // user typed) into an actual folder id before patching. Empty or
-    // unrecognised name → null (no folder). The user gets no error
-    // for a typo because the patcher is forgiving by design — bw
-    // accepts any UUID and the item just shows under "(No folder)"
-    // if it doesn't match.
+    // Resolve the "Folder" row (which carries the folder *name* the user
+    // typed) into an actual folder id before patching. Empty / unknown
+    // name → null (no folder); the patcher is forgiving by design.
     let folders_snapshot = app.folders.clone();
     let edit_fields_resolved: Vec<crate::tui::edit_field::EditField> = app
         .edit_fields
@@ -889,19 +927,26 @@ pub fn do_save_edit(app: &mut App) {
         })
         .collect();
 
-    // The patched payload still carries plaintext credentials (the
-    // password / TOTP / key bytes the user just edited), so wrap the
-    // intermediate buffer in `Zeroizing` — it is freed with zeros once
-    // `edit_item` returns.
-    let patched = zeroize::Zeroizing::new(patch_edit_payload(&base_json, &edit_fields_resolved));
-    match app.vault.edit_item(&item_id, &patched) {
+    // The patched payload still carries plaintext credentials, so wrap
+    // the intermediate buffer in `Zeroizing`.
+    let patched = Zeroizing::new(patch_edit_payload(&base_json, &edit_fields_resolved));
+    app.in_flight = Some(InFlight::SaveEditCommit);
+    let _ = app.worker_tx.send(WorkerRequest::EditItem {
+        item_id,
+        json: patched,
+    });
+}
+
+/// Save edit — step 2 response: the committed item.
+pub fn handle_save_edit_commit(app: &mut App, r: Result<crate::domain::Item, String>) {
+    let item_id = app.edit_item_id.clone();
+    let cmd = format!("bw edit item {item_id}");
+    match r {
         Ok(updated) => {
             let name = updated.name.clone();
             if let Some(i) = app.items.iter_mut().find(|i| i.id == item_id) {
                 *i = updated;
             }
-            // sort_items rebuilds the caches; no need for an explicit
-            // call here.
             app.sort_items();
             app.push_cmd(&cmd, true, &format!("saved: {name}"));
             app.set_action(ActionState::Done("Saved ✓".into()));
@@ -920,8 +965,12 @@ pub fn open_confirm_delete(app: &mut App) {
     }
 }
 
-/// Queues a delete action.
+/// Queues a delete action (worker).
 pub fn queue_delete_item(app: &mut App, permanent: bool) {
+    let Some(item) = app.selected_item() else {
+        return;
+    };
+    let (item_id, name) = (item.id.clone(), item.name.clone());
     app.set_action(ActionState::Running(
         if permanent {
             "Deleting…"
@@ -930,21 +979,30 @@ pub fn queue_delete_item(app: &mut App, permanent: bool) {
         }
         .into(),
     ));
-    app.pending_action = PendingAction::DeleteItem { permanent };
     app.screen = Screen::Vault;
+    app.in_flight = Some(InFlight::DeleteItem {
+        permanent,
+        item_id: item_id.clone(),
+        name,
+    });
+    let _ = app
+        .worker_tx
+        .send(WorkerRequest::DeleteItem { item_id, permanent });
 }
 
-/// Pending-action executor for [`PendingAction::DeleteItem`].
-pub fn do_delete_item(app: &mut App, permanent: bool) {
-    let Some(item) = app.selected_item() else {
-        return;
-    };
-    let (id, name) = (item.id.clone(), item.name.clone());
+/// `bw delete item` response.
+pub fn handle_delete(
+    app: &mut App,
+    permanent: bool,
+    item_id: String,
+    name: String,
+    r: Result<(), String>,
+) {
     let perm_str = if permanent { " --permanent" } else { "" };
-    let cmd = format!("bw delete item {id}{perm_str}");
-    match app.vault.delete_item(&id, permanent) {
+    let cmd = format!("bw delete item {item_id}{perm_str}");
+    match r {
         Ok(()) => {
-            app.items.retain(|i| i.id != id);
+            app.items.retain(|i| i.id != item_id);
             app.rebuild_caches();
             if app.selected_index >= app.items.len() && !app.items.is_empty() {
                 app.selected_index = app.items.len() - 1;
@@ -955,9 +1013,6 @@ pub fn do_delete_item(app: &mut App, permanent: bool) {
                 "moved to trash"
             };
             app.push_cmd(&cmd, true, &format!("{name} {label}"));
-            // Refresh the trash list silently so the badge count updates,
-            // but the success toast set below is what the user sees.
-            vault::refresh_trash_silent(app);
             app.set_action(ActionState::Done(
                 if permanent {
                     "Deleted ✓"
@@ -966,53 +1021,77 @@ pub fn do_delete_item(app: &mut App, permanent: bool) {
                 }
                 .into(),
             ));
+            // Refresh the trash list silently so the badge count updates;
+            // the "Deleted ✓" toast above survives.
+            app.in_flight = Some(InFlight::DeleteReloadTrash);
+            let _ = app.worker_tx.send(WorkerRequest::ListTrash);
         }
         Err(e) => app.cmd_err(&cmd, &e, "Delete failed"),
     }
 }
 
-/// Queues a restore action for the selected (trashed) item.
-pub fn queue_restore_item(app: &mut App) {
-    if app.selected_item().is_some() {
-        app.set_action(ActionState::Running("Restoring…".into()));
-        app.pending_action = PendingAction::RestoreItem;
+/// Silent post-delete trash reload.
+pub fn handle_delete_reload_trash(app: &mut App, r: Result<Vec<crate::domain::Item>, String>) {
+    match r {
+        Ok(items) => {
+            vault::set_trash(app, items);
+        }
+        Err(e) => app.push_cmd("bw list items --trash", false, &e),
     }
 }
 
-/// Pending-action executor for [`PendingAction::RestoreItem`].
-pub fn do_restore_item(app: &mut App) {
+/// Queues a restore action for the selected (trashed) item (worker).
+pub fn queue_restore_item(app: &mut App) {
     let Some(item) = app.selected_item() else {
         return;
     };
-    let (id, name) = (item.id.clone(), item.name.clone());
-    let cmd = format!("bw restore item {id}");
-    match app.vault.restore_item(&id) {
+    let (item_id, name) = (item.id.clone(), item.name.clone());
+    app.set_action(ActionState::Running("Restoring…".into()));
+    app.in_flight = Some(InFlight::RestoreItem {
+        item_id: item_id.clone(),
+        name,
+    });
+    let _ = app.worker_tx.send(WorkerRequest::RestoreItem { item_id });
+}
+
+/// `bw restore item` response.
+pub fn handle_restore(app: &mut App, item_id: String, name: String, r: Result<(), String>) {
+    let cmd = format!("bw restore item {item_id}");
+    match r {
         Ok(()) => {
-            app.trashed_items.retain(|i| i.id != id);
+            app.trashed_items.retain(|i| i.id != item_id);
             app.rebuild_caches();
             app.push_cmd(&cmd, true, &format!("{name} restored to vault"));
-            // Bring the user back to the regular vault list.
             app.screen = Screen::Vault;
             app.active_filter = ItemFilter::All;
             app.filter_selected = 0;
             app.selected_index = 0;
             app.scroll_offset = 0;
             app.focus = Focus::Search;
-            // Re-sync the items silently so the restored entry is
-            // present in the list, but keep the "Restored ✓" toast.
-            vault::refresh_items_silent(app);
             app.set_action(ActionState::Done("Restored ✓".into()));
+            // Re-sync items silently so the restored entry is present; the
+            // "Restored ✓" toast survives.
+            app.in_flight = Some(InFlight::RestoreReloadItems);
+            let _ = app.worker_tx.send(WorkerRequest::ListItems);
         }
         Err(e) => app.cmd_err(&cmd, &e, "Restore failed"),
     }
 }
 
+/// Silent post-restore item reload.
+pub fn handle_restore_reload(app: &mut App, r: Result<Vec<crate::domain::Item>, String>) {
+    match r {
+        Ok(items) => vault::set_items(app, items),
+        Err(e) => app.push_cmd("bw list items", false, &e),
+    }
+}
+
 // ── Exposed (HaveIBeenPwned) ──────────────────────────────────────────────
 
-/// Queues a [`PendingAction::CheckExposed`] for the currently selected
-/// item. No-op when the selection is empty or the item is not a login
-/// (the backend would reject the request anyway, but failing fast saves
-/// a round trip).
+/// Dispatches a HaveIBeenPwned check for the currently selected item to
+/// the worker. No-op when the selection is empty or the item is not a
+/// login (the backend would reject the request anyway, but failing fast
+/// saves a round trip).
 pub fn queue_check_exposed(app: &mut App) {
     let Some(item) = app.selected_item() else {
         return;
@@ -1025,18 +1104,19 @@ pub fn queue_check_exposed(app: &mut App) {
     }
     let id = item.id.clone();
     app.set_action(ActionState::Running("Checking HIBP…".into()));
-    app.pending_action = PendingAction::CheckExposed(id);
+    app.in_flight = Some(InFlight::CheckExposed);
+    let _ = app
+        .worker_tx
+        .send(WorkerRequest::CheckExposed { item_id: id });
 }
 
-/// Pending-action executor for [`PendingAction::CheckExposed`].
-///
-/// Calls `bw get exposed` and reports the result as a coloured toast:
+/// `bw get exposed` response. Reports the result as a coloured toast:
 ///
 /// * `0` hits — green ✓ "Not in any known breach".
 /// * `1+`     — error (red) "Found in N breaches — rotate this password".
-pub fn do_check_exposed(app: &mut App, item_id: String) {
-    let cmd = format!("bw get exposed {item_id}");
-    match app.vault.check_exposed(&item_id) {
+pub fn handle_check_exposed(app: &mut App, r: Result<u32, String>) {
+    let cmd = "bw get exposed".to_string();
+    match r {
         Ok(0) => {
             app.push_cmd(&cmd, true, "0 breaches");
             app.set_action(ActionState::Done("Not in any known breach ✓".into()));
@@ -1056,72 +1136,72 @@ pub fn do_check_exposed(app: &mut App, item_id: String) {
 
 // ── Favorite ──────────────────────────────────────────────────────────────
 
-/// Queues a favorite-toggle.
+/// Favorite-toggle — step 1: fetch the item JSON (worker).
 pub fn toggle_favorite(app: &mut App) {
-    if app.selected_item().is_some() {
-        app.set_action(ActionState::Running("Updating…".into()));
-        app.pending_action = PendingAction::ToggleFavorite;
-    }
-}
-
-/// Pending-action executor for [`PendingAction::ToggleFavorite`].
-///
-/// Fetches the existing JSON, flips the `favorite` boolean, and re-edits
-/// the item. The flip lives here (not on the port) because it is
-/// app-level logic that any vault backend would have to perform the
-/// same way.
-pub fn do_toggle_favorite(app: &mut App) {
     let Some(item) = app.selected_item() else {
         return;
     };
-    let (id, name, new_fav) = (item.id.clone(), item.name.clone(), !item.favorite);
-    let cmd = format!("bw edit item {id}");
+    let item_id = item.id.clone();
+    app.set_action(ActionState::Running("Updating…".into()));
+    app.in_flight = Some(InFlight::ToggleFavoriteFetch {
+        item_id: item_id.clone(),
+    });
+    let _ = app.worker_tx.send(WorkerRequest::GetItemJson { item_id });
+}
 
-    let json = match app.vault.get_item_json(&id) {
+/// Favorite-toggle — step 1 response: flip the `favorite` flag and
+/// commit. The flip lives here (not on the port) because it's app-level
+/// logic any backend would perform the same way.
+pub fn handle_toggle_fetch(app: &mut App, item_id: String, r: Result<Zeroizing<String>, String>) {
+    let cmd = format!("bw edit item {item_id}");
+    let json = match r {
         Ok(j) => j,
-        Err(e) => {
-            app.cmd_err(&cmd, &e, "Fetch failed");
-            return;
-        }
+        Err(e) => return app.cmd_err(&cmd, &e, "Fetch failed"),
+    };
+    let new_fav = match app.items.iter().find(|i| i.id == item_id) {
+        Some(i) => !i.favorite,
+        None => return, // item gone from under us
     };
     let mut val: Value = match serde_json::from_str(&json) {
         Ok(v) => v,
-        Err(e) => {
-            app.cmd_err(&cmd, &format!("JSON parse error: {e}"), "Failed");
-            return;
-        }
+        Err(e) => return app.cmd_err(&cmd, &format!("JSON parse error: {e}"), "Failed"),
     };
     val["favorite"] = Value::Bool(new_fav);
-    // Same hygiene as `do_save_edit`: the serialized payload still
-    // carries the item's secrets — wrap it before handing off to
-    // `edit_item` so the buffer is zeroed on drop. The `serde_json::
-    // Value` parsed above is short-lived and not directly reachable
-    // outside this function.
     let new_json = match serde_json::to_string(&val) {
-        Ok(s) => zeroize::Zeroizing::new(s),
-        Err(e) => {
-            app.cmd_err(&cmd, &format!("JSON serialize error: {e}"), "Failed");
-            return;
-        }
+        Ok(s) => Zeroizing::new(s),
+        Err(e) => return app.cmd_err(&cmd, &format!("JSON serialize error: {e}"), "Failed"),
     };
+    app.in_flight = Some(InFlight::ToggleFavoriteCommit {
+        new_favorite: new_fav,
+    });
+    let _ = app.worker_tx.send(WorkerRequest::EditItem {
+        item_id,
+        json: new_json,
+    });
+}
 
-    match app.vault.edit_item(&id, &new_json) {
-        Ok(_) => {
-            if let Some(i) = app.items.iter_mut().find(|i| i.id == id) {
-                i.favorite = new_fav;
+/// Favorite-toggle — step 2 response: apply the flipped flag.
+pub fn handle_toggle_commit(
+    app: &mut App,
+    new_favorite: bool,
+    r: Result<crate::domain::Item, String>,
+) {
+    let cmd = "bw edit item".to_string();
+    match r {
+        Ok(updated) => {
+            if let Some(i) = app.items.iter_mut().find(|i| i.id == updated.id) {
+                i.favorite = new_favorite;
             }
-            // The fuzzy-search lowered cache doesn't change on a
-            // favorite flip (favorite isn't a search field), but the
-            // Favorites filter relies on the boolean to decide
-            // membership, so the filtered cache must be rebuilt.
+            // Favorite isn't a search field, but the Favorites filter
+            // depends on the boolean, so rebuild the filtered cache.
             app.rebuild_filtered_cache();
-            let label = if new_fav {
+            let label = if new_favorite {
                 "★ Favorited"
             } else {
                 "Unfavorited"
             };
             app.set_action(ActionState::Done(label.into()));
-            app.push_cmd(&cmd, true, &format!("{name} {label}"));
+            app.push_cmd(&cmd, true, label);
         }
         Err(e) => app.cmd_err(&cmd, &e, "Failed"),
     }

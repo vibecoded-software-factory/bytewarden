@@ -9,7 +9,7 @@ use crossterm::event::{KeyCode, KeyEvent};
 use crate::ports::GeneratorMode;
 use crate::tui::app::App;
 use crate::tui::flows::generator::{
-    cancel, copy_result, focus_step, queue_regenerate, toggle_mode, use_result,
+    cancel, copy_result, focus_step, request_generate, toggle_mode, use_result,
 };
 use crate::tui::generator::{
     GeneratorFocus, PASSPHRASE_WORDS_MAX, PASSPHRASE_WORDS_MIN, PASSWORD_LENGTH_MAX,
@@ -38,7 +38,7 @@ pub fn handle(app: &mut App, key: KeyEvent) {
             return focus_step(app, -1);
         }
         // The single, explicit "generate now" trigger.
-        KeyCode::Enter => return queue_regenerate(app),
+        KeyCode::Enter => return request_generate(app),
         _ => {}
     }
 

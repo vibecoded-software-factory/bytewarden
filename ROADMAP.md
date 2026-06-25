@@ -30,15 +30,11 @@ soon they're worth doing, not committed.
 
 ## Cross-cutting — architecture
 
-- [ ] **Worker thread + `mpsc` (de-freeze the UI).** Today bytewarden is
-  synchronous: each `bw` call blocks the render loop for its whole duration
-  (see `CLAUDE.md` → "Execution model"). The sibling project **jewel** runs a
-  worker thread that owns the port and serves requests over `mpsc` so the
-  render thread never blocks, plus a background lane for long non-interactive
-  work. Porting that model here (the spinner would actually animate during a
-  slow `bw sync`, and `Ctrl+C` would stay instant) is the **big** improvement
-  — a deliberate, explicit decision, not a side effect of another change.
-  Keep the per-call timeouts either way.
+- [x] **Worker thread + `mpsc` (de-freeze the UI).** Done — the vault +
+  generator ports now live on a worker thread; the render loop drains
+  responses and never blocks on a `bw` call (the spinner animates during a
+  slow `bw sync`, `Ctrl+C` stays instant). See `CLAUDE.md` → "Execution
+  model" and `tui/worker.rs`. Per-call timeouts retained.
 - [ ] **Snapshot tests for the view layer** — none of the sibling projects
   have these yet; would unlock confident refactors of `view/*` and `input/*`
   (the layers currently below the ~95 % coverage of `domain`/`adapters`).

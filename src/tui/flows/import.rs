@@ -4,6 +4,7 @@ use crate::tui::action::ActionState;
 use crate::tui::app::App;
 use crate::tui::import::{ImportFocus, ImportState};
 use crate::tui::screens::Screen;
+use crate::tui::worker::{InFlight, WorkerRequest};
 
 /// Opens the import popup, populating the format dropdown from the
 /// cached `bw import --formats` list (loaded once at login).
@@ -50,18 +51,40 @@ pub fn commit(app: &mut App) {
         return;
     }
 
-    let cmd = format!("bw import {format} <path>");
     app.set_action(ActionState::Running("Importing…".into()));
-    match app.vault.import(&format, &path) {
+    app.in_flight = Some(InFlight::Import);
+    let _ = app.worker_tx.send(WorkerRequest::Import { format, path });
+}
+
+/// `bw import` response. On success, closes the popup and silently
+/// reloads items then folders so the new content shows up.
+pub fn handle(app: &mut App, r: Result<(), String>) {
+    let cmd = "bw import".to_string();
+    match r {
         Ok(()) => {
             app.push_cmd(&cmd, true, "import succeeded");
-            // Fresh data — a successful import added new items / folders.
-            super::vault::refresh_items_silent(app);
-            super::folders::refresh_folders_silent(app);
             app.set_action(ActionState::Done("Import succeeded ✓".into()));
             app.import = None;
             app.screen = Screen::Vault;
+            // Fresh data — reload items then folders (both silent).
+            app.in_flight = Some(InFlight::ImportReloadItems);
+            let _ = app.worker_tx.send(WorkerRequest::ListItems);
         }
         Err(e) => app.cmd_err(&cmd, &e, "Import failed"),
     }
+}
+
+/// Silent post-import item reload → chains the folder reload.
+pub fn handle_reload_items(app: &mut App, r: Result<Vec<crate::domain::Item>, String>) {
+    match r {
+        Ok(items) => super::vault::set_items(app, items),
+        Err(e) => app.push_cmd("bw list items", false, &e),
+    }
+    app.in_flight = Some(InFlight::ImportReloadFolders);
+    let _ = app.worker_tx.send(WorkerRequest::ListFolders);
+}
+
+/// Silent post-import folder reload.
+pub fn handle_reload_folders(app: &mut App, r: Result<Vec<crate::domain::Folder>, String>) {
+    super::folders::handle_reload(app, r);
 }
