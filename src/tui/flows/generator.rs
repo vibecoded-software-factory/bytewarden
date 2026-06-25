@@ -1,12 +1,13 @@
 //! Open / regenerate / copy / use flows for the password generator.
 
 use crate::ports::GeneratorMode;
-use crate::tui::action::{ActionState, PendingAction};
+use crate::tui::action::ActionState;
 use crate::tui::app::App;
 use crate::tui::generator::{
     GeneratorFocus, GeneratorState, ReturnTarget, focus_index, focusable_for,
 };
 use crate::tui::screens::Screen;
+use crate::tui::worker::{InFlight, WorkerRequest};
 
 /// Opens the generator screen in standalone mode (no return target).
 ///
@@ -38,20 +39,19 @@ pub fn open_for_create_field(app: &mut App, idx: usize) {
     app.screen = Screen::Generator;
 }
 
-/// Queues a [`PendingAction::GeneratePassword`] — the actual `bw
-/// generate` call runs on the next tick so the spinner is visible
-/// before the (typically <300 ms) blocking call.
-pub fn queue_regenerate(app: &mut App) {
+/// Sends a `bw generate` request to the worker with the current options.
+pub fn request_generate(app: &mut App) {
     app.set_action(ActionState::Running("Generating…".into()));
-    app.pending_action = PendingAction::GeneratePassword;
+    app.in_flight = Some(InFlight::Generate);
+    let opts = app.generator.options.clone();
+    let _ = app.worker_tx.send(WorkerRequest::Generate { opts });
 }
 
-/// Pending-action executor for [`PendingAction::GeneratePassword`].
-pub fn do_generate(app: &mut App) {
-    let opts = app.generator.options.clone();
-    match app.generator_port.generate(&opts) {
+/// `bw generate` response.
+pub fn handle(app: &mut App, r: Result<String, String>) {
+    match r {
         Ok(value) => {
-            let cmd = describe_cmd(&opts);
+            let cmd = describe_cmd(&app.generator.options);
             app.push_cmd(&cmd, true, "generated [hidden]");
             // `result` is `Zeroizing<String>` so the buffer is scrubbed
             // when overwritten or when the generator state drops.

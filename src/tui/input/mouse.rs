@@ -4,7 +4,6 @@
 use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 
 use crate::domain::filter::{ITEM_FILTERS, ItemFilter};
-use crate::tui::action::PendingAction;
 use crate::tui::app::App;
 use crate::tui::screens::{Focus, LoginField, Screen};
 
@@ -147,8 +146,9 @@ fn mouse_vault(app: &mut App, col: u16, row: u16) {
             app.active_filter = ITEM_FILTERS[filter_idx].clone();
             app.selected_index = 0;
             app.scroll_offset = 0;
+            app.rebuild_filtered_cache();
             if app.active_filter == ItemFilter::Trash {
-                app.pending_action = PendingAction::LoadTrash;
+                crate::tui::flows::vault::request_load_trash(app);
             }
         }
     }

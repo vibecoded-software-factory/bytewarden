@@ -10,6 +10,7 @@ use crate::tui::action::ActionState;
 use crate::tui::app::App;
 use crate::tui::assign_collections::{AssignCollectionsPurpose, AssignCollectionsState};
 use crate::tui::screens::Screen;
+use crate::tui::worker::{InFlight, WorkerRequest};
 
 /// Opens the popup for the focused "Collections" row.
 ///
@@ -234,28 +235,39 @@ pub fn commit(app: &mut App) {
             item_id,
             organization_id,
         } => {
-            let cmd = format!("bw move {item_id} {organization_id} <ids>");
             app.set_action(ActionState::Running("Moving…".into()));
-            match app.vault.move_item(&item_id, &organization_id, &ids) {
-                Ok(()) => {
-                    app.push_cmd(
-                        &cmd,
-                        true,
-                        &format!("moved into {} collection(s)", ids.len()),
-                    );
-                    // The item changed organisation context — reload
-                    // the vault silently so the indicator (`👥`) and
-                    // the collection rows light up. The Done toast
-                    // below is preserved by `refresh_items_silent`.
-                    super::vault::refresh_items_silent(app);
-                    app.set_action(ActionState::Done("Moved ✓".into()));
-                    app.screen = Screen::Detail;
-                }
-                Err(e) => {
-                    app.cmd_err(&cmd, &e, "Move failed");
-                    app.screen = Screen::Detail;
-                }
-            }
+            app.in_flight = Some(InFlight::MoveItem);
+            let _ = app.worker_tx.send(WorkerRequest::MoveItem {
+                item_id,
+                organization_id,
+                collection_ids: ids,
+            });
         }
+    }
+}
+
+/// `bw move` response. On success the vault is reloaded silently so the
+/// `👥` indicator and collection rows light up.
+pub fn handle_move(app: &mut App, r: Result<(), String>) {
+    match r {
+        Ok(()) => {
+            app.push_cmd("bw move", true, "moved into organisation");
+            app.set_action(ActionState::Done("Moved ✓".into()));
+            app.screen = Screen::Detail;
+            app.in_flight = Some(InFlight::MoveReloadItems);
+            let _ = app.worker_tx.send(WorkerRequest::ListItems);
+        }
+        Err(e) => {
+            app.cmd_err("bw move", &e, "Move failed");
+            app.screen = Screen::Detail;
+        }
+    }
+}
+
+/// Silent post-move item reload.
+pub fn handle_move_reload(app: &mut App, r: Result<Vec<crate::domain::Item>, String>) {
+    match r {
+        Ok(items) => super::vault::set_items(app, items),
+        Err(e) => app.push_cmd("bw list items", false, &e),
     }
 }

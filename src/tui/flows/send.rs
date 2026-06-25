@@ -4,6 +4,7 @@ use crate::tui::action::ActionState;
 use crate::tui::app::App;
 use crate::tui::screens::Screen;
 use crate::tui::send::{SEND_MAX_DAYS, SEND_MIN_DAYS, SendCreateState, SendFocus};
+use crate::tui::worker::{InFlight, WorkerRequest};
 
 /// Opens the send-create popup with default values.
 pub fn open(app: &mut App) {
@@ -59,17 +60,26 @@ pub fn commit(app: &mut App) {
         return;
     }
 
-    let cmd = format!("bw send -n <name> -d {days} <content>");
     app.set_action(ActionState::Running("Creating Send…".into()));
-    match app.vault.send_text(&name, days, &content) {
+    app.in_flight = Some(InFlight::SendText);
+    let _ = app.worker_tx.send(WorkerRequest::SendText {
+        name,
+        days,
+        content,
+    });
+}
+
+/// `bw send` response — copies the resulting URL to the clipboard.
+pub fn handle(app: &mut App, r: Result<String, String>) {
+    let days = app.send_create.as_ref().map(|s| s.days).unwrap_or(0);
+    let cmd = format!("bw send -n <name> -d {days} <content>");
+    match r {
         Ok(url) => {
-            app.push_cmd(&cmd, true, &format!("send url for \"{name}\""));
-            // Try to drop the URL on the clipboard — the toast tells
-            // the user whether that worked. Failure is non-fatal: the
-            // URL is also visible in the toast text. The Send link is
-            // a capability token (anyone with the URL can read the
-            // content), so we honour the same clipboard auto-clear
-            // window as for passwords.
+            app.push_cmd(&cmd, true, "send url created");
+            // The Send link is a capability token (anyone with the URL
+            // can read the content), so we honour the same clipboard
+            // auto-clear window as for passwords. Clipboard failure is
+            // non-fatal — the URL is shown in the toast instead.
             let ttl = app.clipboard_clear_secs;
             match app.clipboard.write_with_clear(&url, ttl) {
                 Ok(()) => {

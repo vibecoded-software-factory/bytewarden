@@ -41,7 +41,7 @@ pub fn handle(app: &mut App, key: KeyEvent) {
 
     // Global vault shortcuts.
     if key.code == KeyCode::Char('s') && is_alt(&key) && !app.is_trash_view() {
-        vault::sync_vault(app);
+        vault::request_sync(app);
         return;
     }
     if key.code == KeyCode::Char('l') && is_alt(&key) {
@@ -103,7 +103,9 @@ pub fn handle(app: &mut App, key: KeyEvent) {
         Focus::Items => match key.code {
             KeyCode::Char('j') | KeyCode::Down | KeyCode::PageDown => app.filter_move_down(),
             KeyCode::Char('k') | KeyCode::Up | KeyCode::PageUp => app.filter_move_up(),
-            KeyCode::Enter => app.apply_filter(),
+            // Switching to Trash fetches the trash list on demand;
+            // `apply_filter` runs (and applies the filter) in the guard.
+            KeyCode::Enter if app.apply_filter() => vault::request_load_trash(app),
             KeyCode::Tab | KeyCode::Esc => app.cycle_focus(),
             _ => {}
         },

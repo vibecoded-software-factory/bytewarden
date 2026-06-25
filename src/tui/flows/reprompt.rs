@@ -16,6 +16,7 @@ use crate::tui::action::ActionState;
 use crate::tui::app::App;
 use crate::tui::reprompt::{ProtectedAction, RepromptState};
 use crate::tui::screens::Screen;
+use crate::tui::worker::{InFlight, WorkerRequest};
 
 /// Opens the popup if the currently selected item carries the
 /// `reprompt` flag, otherwise runs `action` immediately.
@@ -70,37 +71,44 @@ pub fn verify_and_run(app: &mut App) {
         return;
     };
     if state.input.is_empty() {
-        // Empty input — turn on the error strip so the user knows
-        // the press registered, without paying for a `bw unlock`.
+        // Empty input — turn on the error strip so the user knows the
+        // press registered, without paying for a `bw unlock`.
         if let Some(s) = app.reprompt.as_mut() {
             s.error = true;
         }
         return;
     }
-
-    // Snapshot what we need before the borrow chain forces us to
-    // drop the reference. Wrap the password in `Zeroizing` so the
-    // intermediate copy used by `vault.unlock` gets scrubbed.
+    // Wrap the password so the intermediate copy is scrubbed. The popup
+    // state is kept so the response handler can read the deferred action
+    // and, on failure, re-enable the error strip.
     let password = Zeroizing::new(state.input.as_str().to_string());
-    let action = state.after.clone();
-    let origin = state.origin.clone();
+    app.set_action(ActionState::Running("Verifying…".into()));
+    app.in_flight = Some(InFlight::RepromptUnlock);
+    let _ = app.worker_tx.send(WorkerRequest::Unlock { password });
+}
 
-    match app.vault.unlock(&password) {
-        Ok(_) => {
-            // bw issued a fresh session key — the adapter has it now.
-            // Drop the popup state (scrubs the password buffer) and
-            // execute the deferred action.
+/// `bw unlock` (reprompt) response. On success runs the deferred action;
+/// on failure re-opens the error strip for a retry.
+pub fn handle_unlock(app: &mut App, r: Result<String, String>) {
+    match r {
+        Ok(key) => {
+            // bw issued a fresh session key — cache it for redaction.
+            app.session_marker = Some(Zeroizing::new(key));
             app.push_cmd("bw unlock *** (reprompt)", true, "verified");
+            let Some((action, origin)) = app
+                .reprompt
+                .as_ref()
+                .map(|s| (s.after.clone(), s.origin.clone()))
+            else {
+                return;
+            };
             app.reprompt = None;
             app.screen = origin;
             run_protected_action(app, action);
         }
         Err(_) => {
-            // Don't push the underlying bw error to the cmd log —
-            // the wording can be surprising ("Invalid master
-            // password.") and we already surface it via the popup's
-            // own error strip.
             app.push_cmd("bw unlock *** (reprompt)", false, "verification failed");
+            app.set_action(ActionState::Idle);
             if let Some(s) = app.reprompt.as_mut() {
                 s.error = true;
                 s.input.clear();
@@ -121,11 +129,8 @@ fn run_protected_action(app: &mut App, action: ProtectedAction) {
     match action {
         ProtectedAction::CopyPassword => copy::copy_password_to_clipboard(app),
         ProtectedAction::CopyTotp(item_id) => {
-            // Reuse the same wiring the regular Alt+C-on-TOTP path
-            // takes — queue a CopyTotp pending action so the user
-            // sees the spinner, just like an unprotected copy.
-            app.set_action(ActionState::Running("Copying TOTP…".into()));
-            app.pending_action = crate::tui::action::PendingAction::CopyTotp(item_id);
+            // Reuse the same wiring the regular Alt+C-on-TOTP path takes.
+            copy::request_copy_totp(app, item_id);
         }
         ProtectedAction::CopySelectedDetailField => copy::copy_selected_field(app),
         ProtectedAction::RevealDetail => {

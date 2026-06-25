@@ -97,26 +97,37 @@ shortcuts change.
 - `tempfile` is a dev-dependency only (test fixtures).
 - Release profile is size-optimized (`opt-level = "s"`, `lto`, `strip`).
 
-## Execution model — synchronous (do NOT touch unprompted)
+## Execution model — worker thread + mpsc (do NOT touch unprompted)
 
-bytewarden is **single-threaded and synchronous**. There is **no worker
-thread and no async runtime**. The trick that keeps the spinner honest is the
-`PendingAction` queue:
+The vault + generator ports live on a **single worker thread** that owns them
+and serves requests serially over `mpsc`; the render thread never blocks on a
+`bw` call (`tui/worker.rs`). The flow:
 
-1. A handler sets `App::action_state = Running(..)` and queues a
-   `PendingAction` (`tui/action.rs`).
-2. The run loop (`tui/mod.rs::run_loop`) draws the `Running…` frame **first**,
-   then calls `dispatch_pending`, which runs the blocking `bw` call inline on
-   the render thread.
-3. The result becomes `Done`/`Error` (auto-clears after ~1.5 s).
+1. A `request_*` builder (in `tui/flows/`) validates input, stashes a
+   `worker::InFlight` ticket on `App::in_flight`, sets a `Running` toast, and
+   sends a `WorkerRequest` on `app.worker_tx`.
+2. The worker runs the blocking `bw` call off-thread and sends a
+   `WorkerResponse` back. Each call is wrapped in `run_caught` so a panic in
+   one can't kill the worker.
+3. The run loop (`tui/mod.rs::run_loop`) drains `app.worker_rx` every frame and
+   routes each response through `flows::apply_response`, which consumes the
+   `in_flight` ticket and dispatches to the owning `handle_*`. The spinner
+   animates throughout; `Ctrl+C` stays instant.
 
-The UI is genuinely frozen for the duration of each `bw` call — that's why
-every call has a **per-operation wall-clock timeout** in
-`adapters/bw_cli/process.rs` (no call can wedge the loop forever).
+Multi-step flows (login → load → session-data; save = fetch → patch → edit;
+delete → reload) **chain** by having a `handle_*` queue the next `request_*`.
+Only one user request is in flight at a time (`App::in_flight: Option<_>`);
+`input::busy_blocks` gates all keys but `Esc` while busy so a second request
+can't be queued. Each call still has a per-operation timeout in
+`adapters/bw_cli/process.rs`.
 
-**Do NOT pull in `tokio`/`async-std` or spawn threads.** Porting jewel's
-worker-thread + `mpsc` model is a deliberate future decision tracked in
-`ROADMAP.md`, not a side effect of an unrelated change.
+Clipboard + settings stay **synchronous** on the render thread (they're fast).
+Plain clipboard copies (username/password) read an in-memory item and don't
+touch the worker; only TOTP / HIBP do.
+
+**Do NOT pull in `tokio`/`async-std`.** Extend the `std::thread` + `mpsc`
+worker pattern: add a `WorkerRequest`/`WorkerResponse`/`InFlight` variant and a
+`request_*`/`handle_*` pair.
 
 ## No Bitwarden SDK
 
@@ -146,13 +157,15 @@ main ──► tui ──► flows ──► ports ◄── adapters
   (`wl-copy`/`xclip`/`xsel`/`pbcopy`), `settings_toml.rs` (hand-rolled TOML
   that preserves unknown keys).
 - `src/tui/` — the driving adapter:
-  - `app.rs` — global mutable `App` state container.
-  - `action.rs` — `PendingAction` queue + `ActionState` (Idle/Running/Done/
-    Error) + `CmdEntry`.
+  - `app.rs` — global mutable `App` state container (incl. `worker_tx`/
+    `worker_rx`/`in_flight`).
+  - `worker.rs` — the worker thread + `WorkerRequest`/`WorkerResponse`/
+    `InFlight` enums + `WorkerHandle`.
+  - `action.rs` — `ActionState` (Idle/Running/Done/Error) + `CmdEntry`.
   - `screens.rs` — `Screen`, `Focus`, `LoginField` enums.
-  - `flows/` — per-feature action handlers (`auth`, `vault`, `items`, `copy`,
-    `generator`, `folders`, `memberships`, `reprompt`, …). `dispatch_pending`
-    routes each `PendingAction` here.
+  - `flows/` — per-feature `request_*`/`handle_*` pairs (`auth`, `vault`,
+    `items`, `copy`, `generator`, `folders`, `memberships`, `reprompt`, …).
+    `flows::apply_response` routes each `WorkerResponse` to its `handle_*`.
   - `input/` — per-screen keyboard handlers (wired in `input/mod.rs::
     handle_events`) + `mouse.rs` + shared `nav.rs`.
   - `view/` — per-screen Ratatui renderers (router in `view/mod.rs::draw`) +
@@ -211,9 +224,9 @@ that's what keeps the app coherent.
 
 ## Things to NOT touch unprompted
 
-- The synchronous `PendingAction` execution model — extend it, don't replace
-  it with an async runtime / worker thread (that's a tracked `ROADMAP.md`
-  decision).
+- The worker-thread + `mpsc` execution model — keep `bw` calls off the render
+  thread; extend the `WorkerRequest`/`WorkerResponse`/`InFlight` + `request_*`/
+  `handle_*` pattern, don't reach for `tokio`/`async-std`.
 - The ports/adapters boundary — I/O (subprocess, filesystem, clipboard)
   belongs only in `adapters/`; keep `domain/` pure.
 - Existing keybindings and the shared chrome widgets — changing one screen's

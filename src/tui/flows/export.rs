@@ -4,6 +4,7 @@ use crate::tui::action::ActionState;
 use crate::tui::app::App;
 use crate::tui::export::{ExportFocus, ExportState};
 use crate::tui::screens::Screen;
+use crate::tui::worker::{InFlight, WorkerRequest};
 
 /// Opens the export popup with default values (JSON format, default
 /// download path).
@@ -93,9 +94,23 @@ pub fn commit(app: &mut App) {
         return;
     }
     let format = state.format;
-    let cmd = format!("bw export --format {} --output <path>", format.cli_arg());
     app.set_action(ActionState::Running("Exporting…".into()));
-    match app.vault.export(format.cli_arg(), &path) {
+    app.in_flight = Some(InFlight::Export);
+    let _ = app.worker_tx.send(WorkerRequest::Export {
+        format: format.cli_arg().to_string(),
+        path,
+    });
+}
+
+/// `bw export` response. Closes the popup on success; keeps it open on
+/// failure so the user can fix the path and retry.
+pub fn handle(app: &mut App, r: Result<(), String>) {
+    let (path, format) = match app.export.as_ref() {
+        Some(s) => (s.path.trim().to_string(), s.format),
+        None => return,
+    };
+    let cmd = format!("bw export --format {} --output <path>", format.cli_arg());
+    match r {
         Ok(()) => {
             app.push_cmd(&cmd, true, &format!("exported to {path}"));
             app.set_action(ActionState::Done(format!(
