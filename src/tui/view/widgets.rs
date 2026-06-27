@@ -34,10 +34,17 @@ pub fn rounded_block(border_style: Style) -> Block<'static> {
 
 /// Rounded block with a top-left title and a dim bottom-right counter.
 pub fn titled_block(title: &str, bottom: &str, col: Color, t: &Theme) -> Block<'static> {
+    // Match jewel/secretbase: square borders (not rounded) and a
+    // bold title when the panel is focused. `col` is the focus color the
+    // caller already resolved (accent when focused, else inactive), so a
+    // `col == accent` test recovers the focused state for the bold.
+    let mut title_style = Style::default().fg(col);
+    if col == t.accent {
+        title_style = title_style.add_modifier(Modifier::BOLD);
+    }
     Block::default()
         .borders(Borders::ALL)
-        .border_type(BorderType::Rounded)
-        .title(Span::styled(title.to_string(), Style::default().fg(col)))
+        .title(Span::styled(title.to_string(), title_style))
         .title_bottom(
             Line::from(Span::styled(bottom.to_string(), Style::default().fg(t.dim)))
                 .right_aligned(),

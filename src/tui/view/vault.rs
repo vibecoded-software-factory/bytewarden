@@ -5,10 +5,7 @@ use ratatui::{
     layout::{Constraint, Layout},
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{
-        Block, BorderType, Borders, Cell, List, ListItem, ListState, Paragraph, Row, Table,
-        TableState,
-    },
+    widgets::{Block, Borders, Cell, List, ListItem, ListState, Paragraph, Row, Table, TableState},
 };
 
 use crate::domain::filter::{ITEM_FILTERS, ItemFilter};
@@ -143,8 +140,7 @@ fn render_status(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         Paragraph::new(status_line).block(
             Block::default()
                 .borders(Borders::ALL)
-                .border_type(BorderType::Rounded)
-                .title(Span::styled("─[0]-Status", title_style))
+                .title(Span::styled("[0] Status", title_style))
                 .border_style(Style::default().fg(focus_color(sf, t.accent, t.inactive))),
         ),
         area,
@@ -240,12 +236,12 @@ fn render_vaults(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     state.select(Some(display_sel));
 
     let total = row_count(&app.folders, &app.collections);
-    let indicator = format!("─{} of {}─", app.folder_selected + 1, total);
+    let indicator = format!("{} of {}", app.folder_selected + 1, total);
 
     frame.render_stateful_widget(
         List::new(rows)
             .block(titled_block(
-                "─[1]-Folders",
+                "[1] Folders",
                 &indicator,
                 focus_color(ff, t.accent, t.inactive),
                 t,
@@ -339,8 +335,8 @@ fn render_filters(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     frame.render_stateful_widget(
         List::new(filter_items_with_sep)
             .block(titled_block(
-                "─[2]-Items",
-                &format!("─{indicator}─"),
+                "[2] Items",
+                &indicator,
                 focus_color(itf, t.accent, t.inactive),
                 t,
             ))
@@ -374,9 +370,8 @@ fn render_search(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         Paragraph::new(line).block(
             Block::default()
                 .borders(Borders::ALL)
-                .border_type(BorderType::Rounded)
                 .title(Span::styled(
-                    "─[/]-Search",
+                    "[/] Search",
                     Style::default().fg(focus_color(sf, t.accent, t.inactive)),
                 ))
                 .border_style(focus_border(sf, t.accent)),
@@ -489,8 +484,8 @@ fn render_list(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         )
         .column_spacing(2)
         .block(titled_block(
-            "─[3]-Vault",
-            &format!("─{indicator}─"),
+            "[3] Vault",
+            &indicator,
             focus_color(lf, t.accent, t.inactive),
             t,
         ))
@@ -521,10 +516,9 @@ fn render_cmd_log(frame: &mut Frame, app: &App, area: ratatui::layout::Rect, cmd
     } else {
         format!("  ↑{scroll}")
     };
-    let title = format!("─[4]-Command Log{scroll_tag}");
+    let title = format!("[4] Command Log{scroll_tag}");
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_type(BorderType::Rounded)
         .title(Span::styled(title, Style::default().fg(color)))
         .border_style(Style::default().fg(color));
     let inner = block.inner(area);
