@@ -19,6 +19,18 @@ use crate::tui::view::widgets::{
 
 /// Renders the login screen.
 pub fn draw(frame: &mut Frame, app: &mut App) {
+    // While a request is in flight (logging in / loading the vault) the
+    // form has nothing actionable — show the same centered logo + spinner
+    // as the boot/session-check splash instead of the form with a loading
+    // line tacked underneath.
+    if matches!(
+        app.action_state,
+        crate::tui::action::ActionState::Running(_)
+    ) {
+        crate::tui::view::splash::draw(frame, app);
+        return;
+    }
+
     let t = &app.theme;
     let area = frame.area();
 
