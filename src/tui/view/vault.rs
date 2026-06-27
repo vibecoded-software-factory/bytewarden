@@ -509,49 +509,50 @@ fn render_list(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
 fn render_cmd_log(frame: &mut Frame, app: &App, area: ratatui::layout::Rect, cmd_h: u16) {
     let t = &app.theme;
     let clf = app.focus == Focus::CmdLog;
-    let all_log: Vec<Line> = if app.cmd_log.is_empty() {
-        vec![Line::from(Span::styled(
-            "  no commands yet",
-            Style::default().fg(t.dim),
-        ))]
+    let color = focus_color(clf, t.accent, t.inactive);
+    let visible = (cmd_h as usize).saturating_sub(2);
+    let total = app.cmd_log.len();
+    // Entry-based scroll-back with a `↑N` tag — the shared command-log
+    // convention across the three TUIs. One line per entry:
+    // `✓ <cmd>  →  <detail>` (was a two-line `$ cmd` / `icon detail`).
+    let scroll = app.cmd_log_scroll.min(total.saturating_sub(visible));
+    let scroll_tag = if scroll == 0 {
+        String::new()
     } else {
-        app.cmd_log
-            .iter()
-            .flat_map(|e| {
-                let col = if e.ok { t.success } else { t.error };
-                let icon = if e.ok { "✓" } else { "✕" };
-                vec![
-                    Line::from(Span::styled(
-                        format!("  $ {}", e.cmd),
-                        Style::default().fg(t.dim),
-                    )),
-                    Line::from(Span::styled(
-                        format!("  {icon} {}", e.detail),
-                        Style::default().fg(col),
-                    )),
-                ]
-            })
-            .collect()
+        format!("  ↑{scroll}")
     };
-    let visible = cmd_h.saturating_sub(2) as usize;
-    let end = all_log.len().saturating_sub(app.cmd_log_scroll);
+    let title = format!("─[4]-Command Log{scroll_tag}");
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .title(Span::styled(title, Style::default().fg(color)))
+        .border_style(Style::default().fg(color));
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    if total == 0 {
+        frame.render_widget(
+            Paragraph::new(Line::from(Span::styled(
+                "  no commands yet",
+                Style::default().fg(t.dim),
+            ))),
+            inner,
+        );
+        return;
+    }
+    let end = total - scroll;
     let start = end.saturating_sub(visible);
-    let title = if app.cmd_log_scroll > 0 {
-        "─[4]-Command Log  ↑"
-    } else {
-        "─[4]-Command Log"
-    };
-    frame.render_widget(
-        Paragraph::new(all_log[start..end].to_vec()).block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_type(BorderType::Rounded)
-                .title(Span::styled(
-                    title,
-                    Style::default().fg(focus_color(clf, t.accent, t.inactive)),
-                ))
-                .border_style(Style::default().fg(focus_color(clf, t.accent, t.inactive))),
-        ),
-        area,
-    );
+    let lines: Vec<Line> = app.cmd_log[start..end]
+        .iter()
+        .map(|e| {
+            let mark = if e.ok { "✓" } else { "✗" };
+            let mark_style = Style::default().fg(if e.ok { t.success } else { t.error });
+            Line::from(vec![
+                Span::styled(format!("  {mark} "), mark_style),
+                Span::styled(e.cmd.clone(), Style::default().fg(t.foreground)),
+                Span::styled(format!("  →  {}", e.detail), Style::default().fg(t.dim)),
+            ])
+        })
+        .collect();
+    frame.render_widget(Paragraph::new(lines), inner);
 }

@@ -88,7 +88,7 @@ pub fn render_cmd_bar_with_help(
         short,
         col,
         t,
-        Some("F1: help · F9: settings"),
+        Some("F1 help · F9 settings"),
     );
 }
 
@@ -105,50 +105,61 @@ fn render_cmd_bar_inner(
     t: &Theme,
     anchor: Option<&str>,
 ) {
-    const SEP: &str = "  |  ";
-    let avail = area.width.saturating_sub(2) as usize;
+    let _ = area; // budget is computed from the footer rect itself
+    // Match jewel/secretbase's `draw_status_strip`: a dim hint on the
+    // left and an accent-bold affordance anchored to the right edge. The
+    // anchor always wins the space contest so the user can always
+    // discover the help / settings shortcuts; the hint degrades
+    // full → short → truncated to fit whatever is left.
+    let block = Block::default()
+        .borders(Borders::TOP)
+        .border_style(Style::default().fg(t.muted));
+    let inner = block.inner(bar);
+    frame.render_widget(block, bar);
+
     let suffix = anchor.unwrap_or("");
+    let total = inner.width as usize;
+    // +2 gap before the anchor, +1 for the leading space on the hint.
     let suffix_block = if suffix.is_empty() {
         0
     } else {
-        SEP.len() + suffix.len()
+        suffix.chars().count() + 2
     };
-    let hints_avail = avail.saturating_sub(suffix_block);
+    let hints_avail = total.saturating_sub(suffix_block + 1);
 
-    let hints: &str = if full.len() <= hints_avail {
+    let hints: &str = if full.chars().count() <= hints_avail {
         full
-    } else if short.len() <= hints_avail {
+    } else if short.chars().count() <= hints_avail {
         short
     } else if hints_avail == 0 {
         ""
     } else {
-        // Truncate `short` on a char boundary to avoid breaking UTF-8
-        // when an emoji or accent lands exactly at the cap.
-        let cap = hints_avail.min(short.len());
-        let mut idx = cap;
+        // Truncate `short` on a char boundary to avoid breaking UTF-8.
+        let mut idx = hints_avail.min(short.len());
         while !short.is_char_boundary(idx) && idx > 0 {
             idx -= 1;
         }
         &short[..idx]
     };
 
-    let line = match (hints.is_empty(), suffix.is_empty()) {
-        (true, true) => String::new(),
-        (true, false) => suffix.to_string(),
-        (false, true) => hints.to_string(),
-        (false, false) => format!("{hints}{SEP}{suffix}"),
-    };
-
-    frame.render_widget(
-        Paragraph::new(format!(" {line}"))
-            .style(Style::default().fg(col))
-            .block(
-                Block::default()
-                    .borders(Borders::TOP)
-                    .border_style(Style::default().fg(t.muted)),
+    if !hints.is_empty() {
+        frame.render_widget(
+            Paragraph::new(format!(" {hints}")).style(Style::default().fg(col)),
+            inner,
+        );
+    }
+    if !suffix.is_empty() {
+        frame.render_widget(
+            Paragraph::new(
+                Line::from(Span::styled(
+                    suffix,
+                    Style::default().fg(t.accent).add_modifier(Modifier::BOLD),
+                ))
+                .right_aligned(),
             ),
-        bar,
-    );
+            inner,
+        );
+    }
 }
 
 /// Builds a `Line` showing a text input with a block cursor at
