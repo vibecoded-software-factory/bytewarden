@@ -23,7 +23,16 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     let t = &app.theme;
     let area = frame.area();
 
-    let outer = Layout::vertical([Constraint::Min(0), Constraint::Length(2)]).split(area);
+    // Command-log height: 6 rows (2 border + 4 visible entries). The log
+    // is a full-width row at the bottom (spanning sidebar + main), above
+    // the hint bar.
+    let cmd_h = 6u16;
+    let outer = Layout::vertical([
+        Constraint::Min(0),
+        Constraint::Length(cmd_h),
+        Constraint::Length(2),
+    ])
+    .split(area);
     let body = Layout::horizontal([Constraint::Percentage(26), Constraint::Percentage(74)])
         .split(outer[0]);
     // Folders is sized to its content (small box at the top); the Items
@@ -38,29 +47,22 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         Constraint::Min(0),
     ])
     .split(body[0]);
-    // Command-log height: 6 rows (2 border + 4 visible entries).
-    let cmd_h = 6u16;
-    let main = Layout::vertical([
-        Constraint::Length(3),
-        Constraint::Min(0),
-        Constraint::Length(cmd_h),
-    ])
-    .split(body[1]);
+    let main = Layout::vertical([Constraint::Length(3), Constraint::Min(0)]).split(body[1]);
 
-    render_hint_bar(frame, app, area, outer[1]);
+    render_hint_bar(frame, app, area, outer[2]);
     render_status(frame, app, sidebar[0]);
     render_vaults(frame, app, sidebar[1]);
     render_filters(frame, app, sidebar[2]);
     render_search(frame, app, main[0]);
     render_list(frame, app, main[1]);
-    render_cmd_log(frame, app, main[2], cmd_h);
+    render_cmd_log(frame, app, outer[1], cmd_h);
 
     app.mouse_areas.status = Some(sidebar[0]);
     app.mouse_areas.folders = Some(sidebar[1]);
     app.mouse_areas.items = Some(sidebar[2]);
     app.mouse_areas.search = Some(main[0]);
     app.mouse_areas.list = Some(main[1]);
-    app.mouse_areas.cmdlog = Some(main[2]);
+    app.mouse_areas.cmdlog = Some(outer[1]);
 
     let _ = t; // some helpers re-borrow theme; suppress unused-warning in slim builds
 }
