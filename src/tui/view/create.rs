@@ -123,13 +123,10 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     }
 
     let (hf, hs) = if app.create_choosing_type {
-        (
-            "j/k: type  |  Enter: pick  |  Esc: cancel",
-            "j/k  Enter  Esc",
-        )
+        ("j/k type · Enter pick · Esc cancel", "j/k  Enter  Esc")
     } else {
         (
-            "Tab/↑↓: field  |  Enter: create  |  Esc: cancel",
+            "Tab/↑↓ field · Enter create · Esc cancel",
             "Tab  Enter  Esc",
         )
     };

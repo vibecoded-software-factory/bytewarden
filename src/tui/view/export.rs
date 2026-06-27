@@ -99,7 +99,7 @@ pub fn draw_popup(frame: &mut Frame, area: Rect, app: &App) {
     // ── Footer hints + security note ──────────────────────────────────────
     frame.render_widget(
         Paragraph::new(Line::from(Span::styled(
-            " Tab: switch field   |   Enter: export   |   Esc: cancel",
+            " Tab switch field · Enter export · Esc cancel",
             Style::default().fg(t.dim),
         ))),
         chunks[5],

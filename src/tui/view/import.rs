@@ -118,7 +118,7 @@ pub fn draw_popup(frame: &mut Frame, area: Rect, app: &App) {
     // Hints + warning
     frame.render_widget(
         Paragraph::new(Line::from(Span::styled(
-            " Tab: switch field   |   Enter: import   |   Esc: cancel",
+            " Tab switch field · Enter import · Esc cancel",
             Style::default().fg(t.dim),
         ))),
         chunks[5],

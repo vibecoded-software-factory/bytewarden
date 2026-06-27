@@ -56,12 +56,12 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
 fn footer_hints(has_target: bool) -> (&'static str, &'static str) {
     if has_target {
         (
-            "Tab/↑↓: field  |  ←→/Space: change  |  Enter: regenerate  |  Alt+U: use  |  Alt+C: copy  |  Esc: cancel",
+            "Tab/↑↓ field · ←→/Space change · Enter regenerate · Alt+U use · Alt+C copy · Esc cancel",
             "Tab:field  Enter:regen  Alt+U:use  Alt+C:copy  Esc:back",
         )
     } else {
         (
-            "Tab/↑↓: field  |  ←→/Space: change  |  Enter: regenerate  |  Alt+C: copy  |  Esc: back",
+            "Tab/↑↓ field · ←→/Space change · Enter regenerate · Alt+C copy · Esc back",
             "Tab:field  Enter:regen  Alt+C:copy  Esc:back",
         )
     }

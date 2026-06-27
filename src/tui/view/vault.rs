@@ -115,17 +115,14 @@ fn render_hint_bar(
             }
         }
     };
+    // `key action` pairs joined with ` · ` — a compact footer that reads
+    // tighter than the old `key: action` joined with a spaced pipe.
     let full = hints_pairs
         .iter()
-        .map(|(k, v)| format!("{k}: {v}"))
+        .map(|(k, v)| format!("{k} {v}"))
         .collect::<Vec<_>>()
-        .join("  |  ");
-    let short = hints_pairs
-        .iter()
-        .map(|(k, v)| format!("{k}:{v}"))
-        .collect::<Vec<_>>()
-        .join("  ");
-    render_cmd_bar_with_help(frame, area, bar, &full, &short, t.dim, t);
+        .join(" · ");
+    render_cmd_bar_with_help(frame, area, bar, &full, &full, t.dim, t);
 }
 
 fn render_status(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {

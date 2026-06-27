@@ -150,7 +150,7 @@ pub fn draw_popup(frame: &mut Frame, area: Rect, app: &App) {
 
     frame.render_widget(
         Paragraph::new(Line::from(Span::styled(
-            " Tab: switch field   |   Enter: create   |   Esc: cancel",
+            " Tab switch field · Enter create · Esc cancel",
             Style::default().fg(t.dim),
         ))),
         chunks[7],

@@ -391,7 +391,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         frame,
         area,
         bar_chunk,
-        "Tab: field  |  Enter: login  |  F2: reveal pwd",
+        "Tab field · Enter login · F2 reveal pwd",
         "Tab  Enter  F2",
         t.dim,
         t,
