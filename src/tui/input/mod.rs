@@ -24,6 +24,7 @@ pub mod nav;
 pub mod rename_field;
 pub mod reprompt;
 pub mod send_create;
+pub mod settings;
 pub mod vault;
 
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
@@ -93,6 +94,16 @@ fn f1_opens_help(screen: &Screen) -> bool {
     )
 }
 
+/// Returns the screens where pressing F9 should open the Settings
+/// overlay. Like [`f1_opens_help`] plus the standalone Generator;
+/// excluded on the modal popups, which own their input.
+fn f9_opens_settings(screen: &Screen) -> bool {
+    matches!(
+        screen,
+        Screen::Vault | Screen::Login | Screen::Detail | Screen::Create | Screen::Generator
+    )
+}
+
 /// Dispatches a pre-read crossterm event to the right per-screen handler.
 pub fn handle_events(app: &mut App, ev: Event) {
     match ev {
@@ -117,6 +128,19 @@ pub fn handle_events(app: &mut App, ev: Event) {
                 app.screen = Screen::Help;
                 return;
             }
+            // Global Settings shortcut — F9 toggles the Settings overlay.
+            // It opens from the main screens (never stacked on a popup)
+            // and closes (cancel) when already open. Pure UI overlay, so
+            // it sits before the busy gate like F1.
+            if key.code == KeyCode::F(9) {
+                if app.screen == Screen::Settings {
+                    app.settings_cancel();
+                    return;
+                } else if f9_opens_settings(&app.screen) {
+                    app.open_settings();
+                    return;
+                }
+            }
             // While a worker request is in flight, swallow every key but
             // Esc so a second request can't be queued mid-flight.
             if busy_blocks(app.is_busy(), &key) {
@@ -128,6 +152,7 @@ pub fn handle_events(app: &mut App, ev: Event) {
                 Screen::Vault => vault::handle(app, key),
                 Screen::Detail => detail::handle(app, key),
                 Screen::Help => handle_help(app, key),
+                Screen::Settings => settings::handle(app, key),
                 Screen::Create => create::handle(app, key),
                 Screen::ConfirmDelete => confirm::handle(app, key),
                 Screen::ConfirmLogout => logout_confirm::handle(app, key),

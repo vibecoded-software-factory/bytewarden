@@ -168,7 +168,7 @@ clipboard_clear_secs = 30                  # auto-clear copied secrets (0 = disa
 
 # ── Theme (every key optional — see the next section) ────────────
 [theme]
-name        = "catppuccin-mocha"           # bundled preset (see Theme below)
+name        = "nord"                       # bundled preset (see Theme below)
 accent      = "#cba6f7"                    # optional overrides on top
 inactive    = "#a6adc8"
 selected_bg = "#313244"
@@ -194,20 +194,20 @@ The config file and its parent directory are kept owner-only — bytewarden re-a
 
 All colors are driven by the `[theme]` block. Pick a bundled **preset** with
 `name`, then override individual keys if you want. Every key is optional;
-omitting `name` keeps the shared default (Catppuccin Mocha with
-terminal-inherited text).
+omitting `name` keeps the shared default (Nord with terminal-inherited text).
 
 Four presets ship — the same set in jewel and secretbase, so the three apps
 look identical:
 
 | `name` | palette |
 |---|---|
-| `catppuccin-mocha` | Catppuccin Mocha (default, dark) |
+| `nord` | Nord (default, dark) |
+| `catppuccin-mocha` | Catppuccin Mocha (dark) |
 | `dracula` | Dracula (dark) |
-| `nord` | Nord (dark) |
 | `catppuccin-latte` | Catppuccin Latte (light) |
 
-You can also switch presets live from inside the app — see the keybindings.
+You can also switch presets live from inside the app — open **Settings** with
+`F9` (Theme section), preview with `↑/↓`, `Enter` saves.
 
 ```toml
 [theme]
@@ -467,6 +467,7 @@ Number keys `0`–`4` are disabled while Search is focused so you can type them 
 | `Alt+W` | Create a text **Send** (popup) |
 | `Alt+B` | View **memberships** (organisations + collections) |
 | `F1` | Help popup — context-aware |
+| `F9` | Open **Settings** (Theme preset picker; more sections coming) |
 | `Ctrl+C` | Quit |
 
 All `Alt+` shortcuts also work while Search is focused.

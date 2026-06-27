@@ -281,9 +281,55 @@ impl SettingsPort for TomlSettingsAdapter {
         write_file_secure(&self.file(), &(lines.join("\n") + "\n"));
     }
 
+    fn write_theme_name(&self, name: &str) {
+        self.ensure_dir();
+        let existing = fs::read_to_string(self.file()).unwrap_or_default();
+        write_file_secure(&self.file(), &upsert_theme_name(&existing, name));
+    }
+
     fn config_dir(&self) -> PathBuf {
         self.dir.clone()
     }
+}
+
+/// Sets `name = "<name>"` inside the `[theme]` section, preserving every
+/// other line (including per-key color overrides). Replaces an existing
+/// `name` line in that section; inserts the section + key if absent. The
+/// `[theme]` block is owned by the theme loader, so we touch only the
+/// single `name` line.
+fn upsert_theme_name(raw: &str, name: &str) -> String {
+    let mut out: Vec<String> = Vec::new();
+    let mut in_theme = false;
+    let mut found_theme = false;
+    for line in raw.lines() {
+        let t = line.trim();
+        let is_header = t.starts_with('[') && t.ends_with(']');
+        if is_header {
+            in_theme = t == "[theme]";
+            out.push(line.to_string());
+            if in_theme {
+                found_theme = true;
+                out.push(format!("name = \"{name}\""));
+            }
+            continue;
+        }
+        // Drop a prior `name` line inside the theme section.
+        if in_theme && t.split_once('=').is_some_and(|(k, _)| k.trim() == "name") {
+            continue;
+        }
+        out.push(line.to_string());
+    }
+    let mut text = out.join("\n");
+    if !text.is_empty() && !text.ends_with('\n') {
+        text.push('\n');
+    }
+    if !found_theme {
+        if !text.is_empty() {
+            text.push('\n');
+        }
+        text.push_str(&format!("[theme]\nname = \"{name}\"\n"));
+    }
+    text
 }
 
 #[cfg(test)]
@@ -427,6 +473,40 @@ mod tests {
         assert!(on_disk.contains("foo = \"bar\""));
         assert!(on_disk.contains("save_email = true"));
         assert!(on_disk.contains("email = \"u@x\""));
+    }
+
+    #[test]
+    fn write_theme_name_inserts_into_section_preserving_overrides() {
+        let (a, _t) = fresh();
+        std::fs::write(
+            a.file(),
+            "save_email = true\n[theme]\naccent = \"#ff0000\"\n",
+        )
+        .unwrap();
+        a.write_theme_name("dracula");
+        let out = std::fs::read_to_string(a.file()).unwrap();
+        assert!(out.contains("name = \"dracula\""));
+        assert!(out.contains("accent = \"#ff0000\""));
+        assert!(out.contains("save_email = true"));
+        let theme_at = out.find("[theme]").unwrap();
+        let name_at = out.find("name = \"dracula\"").unwrap();
+        assert!(name_at > theme_at, "name must sit inside [theme]");
+        // A second write replaces, not duplicates.
+        a.write_theme_name("nord");
+        let out2 = std::fs::read_to_string(a.file()).unwrap();
+        assert_eq!(out2.matches("name = ").count(), 1);
+        assert!(out2.contains("name = \"nord\""));
+    }
+
+    #[test]
+    fn write_theme_name_creates_section_when_absent() {
+        let (a, _t) = fresh();
+        std::fs::write(a.file(), "save_email = true\n").unwrap();
+        a.write_theme_name("nord");
+        let out = std::fs::read_to_string(a.file()).unwrap();
+        assert!(out.contains("[theme]"));
+        assert!(out.contains("name = \"nord\""));
+        assert!(out.contains("save_email = true"));
     }
 
     #[test]

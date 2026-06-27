@@ -155,9 +155,9 @@ URL rows add with `Alt+U`. Empty inputs show a dim placeholder
 
 ## Keybindings (global conventions)
 
-- `/` focus search · `Esc`/`h` back · `F1`/`?` help · `0`–`4` focus panel ·
-  `Tab` cycle focus · **only `Ctrl+C` quits** (everything else is free for
-  navigation / type-to-search).
+- `/` focus search · `Esc`/`h` back · `F1`/`?` help · `F9` Settings ·
+  `0`–`4` focus panel · `Tab` cycle focus · **only `Ctrl+C` quits**
+  (everything else is free for navigation / type-to-search).
 - `j/k` + `↑/↓` navigate · `PgUp/PgDn` page · `Enter`/`l` open.
 - **Actions use the `Alt+<letter>` convention** (distinctive to bytewarden):
   e.g. `Alt+C` copy password, `Alt+U` copy username, `Alt+N` new, `Alt+E`
@@ -182,11 +182,25 @@ colors — use these.**
 `Theme::from_palette`, which maps the core roles identically to jewel and
 secretbase and derives bytewarden's starfield + item-type colors (`item_note`
 maps to the teal `cyan` role so it stays distinct from the green `success`).
-Four presets ship (`Preset::ALL`: `catppuccin-mocha` (default), `dracula`,
-`nord`, `catppuccin-latte`); `name = "<preset>"` in `[theme]` picks the base and
-per-key hex entries override it. The in-app picker cycles `Preset::next/prev`
-and applies live. Adding a preset = one `Palette` arm in `Preset::palette`
-(mirror it in all three apps).
+Four presets ship (`Preset::ALL`: `catppuccin-mocha`, `dracula`, `nord`
+(default — `Preset::DEFAULT`), `catppuccin-latte`); `name = "<preset>"` in
+`[theme]` picks the base and per-key hex entries override it. The Settings
+picker (`F9`) applies live. Adding a preset = one `Palette` arm in
+`Preset::palette` (mirror it in all three apps).
+
+## Settings overlay (`F9`)
+
+`F9` opens a centered **Settings** overlay (`Screen::Settings`, drawn over
+`settings_from`) — `view::settings::draw_popup`, input in `input::settings`.
+Layout: a left **section sidebar** + the active section's **panel**,
+`Tab`/arrows move between and within them. It's **sectioned so the preferences
+surface can grow** (Security, Clipboard…) without changing the chrome; today the
+only section is **Theme**, a preset picker that **previews live** as you move
+(`App::settings_preview_theme`) — `Enter` applies + persists `name = "<preset>"`
+to `config.toml` (`SettingsPort::write_theme_name`), `Esc`/`F9` cancels and
+restores the pre-open theme. The bottom hint bar anchors `F1: help · F9:
+settings`. Shared verbatim with jewel and secretbase; add a section by extending
+`SettingsSection`.
 
 ## Branding
 

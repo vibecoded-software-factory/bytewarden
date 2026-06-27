@@ -80,7 +80,16 @@ pub fn render_cmd_bar_with_help(
     col: Color,
     t: &Theme,
 ) {
-    render_cmd_bar_inner(frame, area, bar, full, short, col, t, Some("F1: help"));
+    render_cmd_bar_inner(
+        frame,
+        area,
+        bar,
+        full,
+        short,
+        col,
+        t,
+        Some("F1: help · F9: settings"),
+    );
 }
 
 /// Internal — picks the longest hint string that fits next to the

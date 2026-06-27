@@ -22,6 +22,7 @@ pub mod memberships;
 pub mod rename_field;
 pub mod reprompt;
 pub mod send_create;
+pub mod settings;
 pub mod splash;
 pub mod starfield;
 pub mod vault;
@@ -113,6 +114,18 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
                 _ => vault::draw(frame, app),
             }
             help::draw_popup(frame, frame.area(), app);
+        }
+        Screen::Settings => {
+            // Draw the originating screen underneath so the overlay feels
+            // in context, then the Settings popup on top.
+            match app.settings_from.clone() {
+                Screen::Login => login::draw(frame, app),
+                Screen::Detail => detail::draw(frame, app),
+                Screen::Create => create::draw(frame, app),
+                Screen::Generator => generator::draw(frame, app),
+                _ => vault::draw(frame, app),
+            }
+            settings::draw_popup(frame, frame.area(), app);
         }
         Screen::Create => create::draw(frame, app),
         Screen::ConfirmDelete => {

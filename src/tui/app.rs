@@ -51,6 +51,35 @@ pub(crate) fn redact_cmd(cmd: &str, marker: Option<&str>) -> String {
     }
 }
 
+/// Which pane of the Settings overlay currently holds focus.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SettingsFocus {
+    /// The left-hand list of sections.
+    Sidebar,
+    /// The right-hand panel showing the active section's options.
+    Panel,
+}
+
+/// A section of the Settings overlay. Sectioned so the preferences
+/// surface can grow (Security, Clipboard…) without changing the layout.
+/// Today only [`SettingsSection::Theme`] exists.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SettingsSection {
+    Theme,
+}
+
+impl SettingsSection {
+    /// Every section, in sidebar order.
+    pub const ALL: [SettingsSection; 1] = [SettingsSection::Theme];
+
+    /// The sidebar label.
+    pub fn label(self) -> &'static str {
+        match self {
+            SettingsSection::Theme => "Theme",
+        }
+    }
+}
+
 /// Global TUI state.
 pub struct App {
     // ── Screen / focus / filter ───────────────────────────────────────────
@@ -298,6 +327,21 @@ pub struct App {
     // ── Theme ─────────────────────────────────────────────────────────────
     pub theme: Theme,
 
+    // ── Settings overlay (F9) ─────────────────────────────────────────────
+    /// Which pane of the Settings overlay holds focus.
+    pub settings_focus: SettingsFocus,
+    /// Highlighted section in the sidebar (index into
+    /// [`SettingsSection::ALL`]).
+    pub settings_section: usize,
+    /// Highlighted preset in the Theme panel (index into
+    /// [`theme::Preset::ALL`]). Previews live as it moves.
+    pub settings_theme_idx: usize,
+    /// Theme active when the Settings overlay opened — restored if the
+    /// user cancels (`Esc`/`F9`) instead of confirming.
+    pub theme_before_settings: Theme,
+    /// Screen the Settings overlay was opened from (returned to on close).
+    pub settings_from: Screen,
+
     // ── Worker channels ───────────────────────────────────────────────────
     /// Send a [`WorkerRequest`] to the thread that owns the vault +
     /// generator ports.
@@ -329,6 +373,11 @@ impl App {
         let cfg = settings.read();
         let saved_email = cfg.email.clone().unwrap_or_default();
         let theme = theme::load(&settings.config_dir());
+        // Preselect the picker on the configured preset, else Nord.
+        let settings_theme_idx = theme::configured_preset(&settings.config_dir())
+            .or(Some(theme::Preset::DEFAULT))
+            .and_then(|p| theme::Preset::ALL.iter().position(|&q| q == p))
+            .unwrap_or(0);
         Self {
             screen: Screen::Splash,
             should_quit: false,
@@ -411,7 +460,12 @@ impl App {
             reprompt_verified: false,
             help_from: None,
             help_scroll: (0, 0),
-            theme,
+            theme: theme.clone(),
+            settings_focus: SettingsFocus::Sidebar,
+            settings_section: 0,
+            settings_theme_idx,
+            theme_before_settings: theme,
+            settings_from: Screen::Vault,
             worker_tx,
             worker_rx,
             session_marker: None,
@@ -431,6 +485,44 @@ impl App {
     /// Records "user is active right now" — resets the auto-lock timer.
     pub fn reset_activity(&mut self) {
         self.last_activity = Instant::now();
+    }
+
+    /// Opens the Settings overlay over the current screen. Stashes the
+    /// originating screen and the active theme (so `Esc`/`F9` can restore
+    /// it), and starts focus on the section sidebar.
+    pub fn open_settings(&mut self) {
+        self.settings_from = self.screen.clone();
+        self.theme_before_settings = self.theme.clone();
+        self.settings_focus = SettingsFocus::Sidebar;
+        self.settings_section = 0;
+        self.screen = Screen::Settings;
+    }
+
+    /// Applies the highlighted preset to [`Self::theme`] as a live
+    /// preview — no persistence. Called whenever the picker moves.
+    pub fn settings_preview_theme(&mut self) {
+        if let Some(&p) = theme::Preset::ALL.get(self.settings_theme_idx) {
+            self.theme = Theme::from_palette(&p.palette());
+        }
+    }
+
+    /// Confirms the highlighted preset: applies it, persists
+    /// `name = "<preset>"` to `config.toml`, and closes the overlay.
+    pub fn settings_confirm_theme(&mut self) {
+        if let Some(&p) = theme::Preset::ALL.get(self.settings_theme_idx) {
+            self.theme = Theme::from_palette(&p.palette());
+            self.settings.write_theme_name(p.name());
+            self.push_cmd("theme", true, &format!("saved {}", p.name()));
+            self.set_action(ActionState::Done(format!("Theme: {}", p.label())));
+        }
+        self.screen = self.settings_from.clone();
+    }
+
+    /// Cancels the Settings overlay: restores the theme that was active
+    /// when it opened (dropping any live preview) and closes it.
+    pub fn settings_cancel(&mut self) {
+        self.theme = self.theme_before_settings.clone();
+        self.screen = self.settings_from.clone();
     }
 
     /// `true` while bw is asking the user for an interactive code —

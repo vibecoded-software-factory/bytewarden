@@ -63,6 +63,11 @@ pub trait SettingsPort {
     /// Persists just the keep-session toggle.
     fn write_keep_session(&self, keep_session: bool);
 
+    /// Persists the chosen theme preset as `name = "<preset>"` inside the
+    /// `[theme]` section, preserving every other key (incl. per-color
+    /// overrides). Best-effort, like the other writers.
+    fn write_theme_name(&self, name: &str);
+
     /// Returns the directory that backs this settings store. The TUI uses
     /// this to discover the optional `[theme]` overrides file living next
     /// to `config.toml`.
