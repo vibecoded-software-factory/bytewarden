@@ -26,19 +26,15 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     let outer = Layout::vertical([Constraint::Min(0), Constraint::Length(2)]).split(area);
     let body = Layout::horizontal([Constraint::Percentage(26), Constraint::Percentage(74)])
         .split(outer[0]);
-    // Size each sidebar panel to its content and let the leftover height
-    // fall to an empty filler at the bottom — compact, content-hugging
-    // boxes like secretbase's sidebar, instead of stretching a panel to
-    // fill (which left the Folders box tall and sparse). The folder list
-    // (and items list) scroll to their selection via `ListState`, so the
-    // caps below never hide a row.
+    // Folders is sized to its content (small box at the top); the Items
+    // filter fills the rest of the column, its border reaching the bottom
+    // with the list top-aligned, so there's no dead gutter below the
+    // sidebar.
     let folder_rows = 3 + app.folders.len() + app.collections.len();
     let folders_h = (folder_rows as u16 + 2).clamp(5, 14);
-    let items_h = ITEM_FILTERS.len() as u16 + 3; // filters + Trash spacer + borders
     let sidebar = Layout::vertical([
         Constraint::Length(3),
         Constraint::Length(folders_h),
-        Constraint::Length(items_h),
         Constraint::Min(0),
     ])
     .split(body[0]);
