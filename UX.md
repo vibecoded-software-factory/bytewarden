@@ -13,7 +13,12 @@ change.
 
 The router `view::mod::draw` picks a renderer per `Screen`. The terminal floor
 is **60×18** (`view::mod::is_terminal_too_small`); below it every screen is
-replaced by a centered "resize me" message.
+replaced by the centered "terminal too small" notice (`view::mod::draw_too_small`).
+This notice is the **canonical design shared verbatim with jewel and secretbase**:
+three vertically-centered lines — an `error`-colored bold `Terminal too small`
+title, a `dim` `Resize to at least {W}×{H} (currently {w}×{h})` line, and a `dim`
+`Ctrl+C to quit` hint. Only the `MIN`/`MIN_H` floor differs per app (it tracks
+each layout's real minimum).
 
 **Vault** (`view/vault.rs`) is the reference layout: a 2-column body over a
 bottom hint bar.
