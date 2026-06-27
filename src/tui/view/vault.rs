@@ -181,11 +181,9 @@ fn render_vaults(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         t,
     ));
 
-    // Separator before the named folder/collection rows.
-    rows.push(ListItem::new(Line::from(Span::styled(
-        "  ─────────────────",
-        Style::default().fg(t.muted),
-    ))));
+    // Blank spacer before the named folder/collection rows — a clean
+    // grouping gap instead of a heavy rule (matches jewel/secretbase).
+    rows.push(ListItem::new(Line::from("")));
 
     // One row per folder (alphabetised at load time). Per-folder
     // count comes from the precomputed map — see
@@ -315,10 +313,8 @@ fn render_filters(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     let mut filter_items_with_sep: Vec<ListItem> = Vec::with_capacity(filter_items.len() + 1);
     for (i, item) in filter_items.into_iter().enumerate() {
         if i == ITEM_FILTERS.len() - 1 {
-            filter_items_with_sep.push(ListItem::new(Line::from(Span::styled(
-                "  ─────────────────",
-                Style::default().fg(t.muted),
-            ))));
+            // Blank spacer before the Trash entry — clean gap, no rule.
+            filter_items_with_sep.push(ListItem::new(Line::from("")));
         }
         filter_items_with_sep.push(item);
     }
