@@ -178,6 +178,16 @@ defaults to `Color::Reset` to inherit the terminal), `placeholder`, `muted`
 `item_identity`/`item_note`/`item_ssh`/`item_favorite`. **Don't hardcode
 colors — use these.**
 
+**Presets.** Themes are built from a shared `Palette` (13 named roles) via
+`Theme::from_palette`, which maps the core roles identically to jewel and
+secretbase and derives bytewarden's starfield + item-type colors (`item_note`
+maps to the teal `cyan` role so it stays distinct from the green `success`).
+Four presets ship (`Preset::ALL`: `catppuccin-mocha` (default), `dracula`,
+`nord`, `catppuccin-latte`); `name = "<preset>"` in `[theme]` picks the base and
+per-key hex entries override it. The in-app picker cycles `Preset::next/prev`
+and applies live. Adding a preset = one `Palette` arm in `Preset::palette`
+(mirror it in all three apps).
+
 ## Branding
 
 The figlet wordmark (`view::logo`, bundled `slant.flf`) over the decorative

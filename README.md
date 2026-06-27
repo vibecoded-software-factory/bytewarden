@@ -168,7 +168,8 @@ clipboard_clear_secs = 30                  # auto-clear copied secrets (0 = disa
 
 # ── Theme (every key optional — see the next section) ────────────
 [theme]
-accent      = "#cba6f7"
+name        = "catppuccin-mocha"           # bundled preset (see Theme below)
+accent      = "#cba6f7"                    # optional overrides on top
 inactive    = "#a6adc8"
 selected_bg = "#313244"
 # … (see Theme below)
@@ -191,12 +192,29 @@ The config file and its parent directory are kept owner-only — bytewarden re-a
 
 ## Theme
 
-All colors are driven by the `[theme]` block. Every key is optional; omitting one keeps the built-in default.
+All colors are driven by the `[theme]` block. Pick a bundled **preset** with
+`name`, then override individual keys if you want. Every key is optional;
+omitting `name` keeps the shared default (Catppuccin Mocha with
+terminal-inherited text).
+
+Four presets ship — the same set in jewel and secretbase, so the three apps
+look identical:
+
+| `name` | palette |
+|---|---|
+| `catppuccin-mocha` | Catppuccin Mocha (default, dark) |
+| `dracula` | Dracula (dark) |
+| `nord` | Nord (dark) |
+| `catppuccin-latte` | Catppuccin Latte (light) |
+
+You can also switch presets live from inside the app — see the keybindings.
 
 ```toml
 [theme]
+name        = "dracula"   # bundled preset; omit for the default
+
 # ── Surface ─────────────────────────────────────────────────────
-accent      = "#cba6f7"   # active borders, cursor, highlights
+accent      = "#cba6f7"   # active borders, cursor, highlights — overrides the preset
 inactive    = "#a6adc8"   # inactive panel borders & titles
 selected_bg = "#313244"   # selected list-row background
 muted       = "#45475a"   # decorative separators / barely-visible borders
