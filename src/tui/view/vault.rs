@@ -26,9 +26,19 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     let outer = Layout::vertical([Constraint::Min(0), Constraint::Length(2)]).split(area);
     let body = Layout::horizontal([Constraint::Percentage(26), Constraint::Percentage(74)])
         .split(outer[0]);
+    // Size each sidebar panel to its content and let the leftover height
+    // fall to an empty filler at the bottom — compact, content-hugging
+    // boxes like secretbase's sidebar, instead of stretching a panel to
+    // fill (which left the Folders box tall and sparse). The folder list
+    // (and items list) scroll to their selection via `ListState`, so the
+    // caps below never hide a row.
+    let folder_rows = 3 + app.folders.len() + app.collections.len();
+    let folders_h = (folder_rows as u16 + 2).clamp(5, 14);
+    let items_h = ITEM_FILTERS.len() as u16 + 3; // filters + Trash spacer + borders
     let sidebar = Layout::vertical([
         Constraint::Length(3),
-        Constraint::Percentage(30),
+        Constraint::Length(folders_h),
+        Constraint::Length(items_h),
         Constraint::Min(0),
     ])
     .split(body[0]);
@@ -140,7 +150,7 @@ fn render_status(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         Paragraph::new(status_line).block(
             Block::default()
                 .borders(Borders::ALL)
-                .title(Span::styled("[0] Status", title_style))
+                .title(Span::styled("─[0]-Status", title_style))
                 .border_style(Style::default().fg(focus_color(sf, t.accent, t.inactive))),
         ),
         area,
@@ -239,7 +249,7 @@ fn render_vaults(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     frame.render_stateful_widget(
         List::new(rows)
             .block(titled_block(
-                "[1] Folders",
+                "─[1]-Folders",
                 &indicator,
                 focus_color(ff, t.accent, t.inactive),
                 t,
@@ -331,7 +341,7 @@ fn render_filters(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     frame.render_stateful_widget(
         List::new(filter_items_with_sep)
             .block(titled_block(
-                "[2] Items",
+                "─[2]-Items",
                 &indicator,
                 focus_color(itf, t.accent, t.inactive),
                 t,
@@ -367,7 +377,7 @@ fn render_search(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
             Block::default()
                 .borders(Borders::ALL)
                 .title(Span::styled(
-                    "[/] Search",
+                    "─[/]-Search",
                     Style::default().fg(focus_color(sf, t.accent, t.inactive)),
                 ))
                 .border_style(focus_border(sf, t.accent)),
@@ -480,7 +490,7 @@ fn render_list(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         )
         .column_spacing(2)
         .block(titled_block(
-            "[3] Vault",
+            "─[3]-Vault",
             &indicator,
             focus_color(lf, t.accent, t.inactive),
             t,
@@ -512,7 +522,7 @@ fn render_cmd_log(frame: &mut Frame, app: &App, area: ratatui::layout::Rect, cmd
     } else {
         format!("  ↑{scroll}")
     };
-    let title = format!("[4] Command Log{scroll_tag}");
+    let title = format!("─[4]-Command Log{scroll_tag}");
     let block = Block::default()
         .borders(Borders::ALL)
         .title(Span::styled(title, Style::default().fg(color)))

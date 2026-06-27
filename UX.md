@@ -46,11 +46,16 @@ The vault's focusable panels are the `screens::Focus` variants: `Status`,
 
 - Number keys `0`–`4` jump straight to a panel (`App::focus_panel`); `Tab`
   cycles (`App::cycle_focus`); `/` jumps to Search.
-- A panel is "focused" → accent border + title (`widgets::focus_color` /
-  `focus_border`); otherwise the `inactive` tint.
-- Panel titles follow the **`─[N]-Name`** form with a dim
-  **`─{selected} of {total}─`** counter in the bottom-right
-  (`widgets::titled_block`).
+- A panel is "focused" → accent **square** border + **bold** title
+  (`widgets::focus_color` / `focus_border` + `titled_block`); otherwise the
+  `inactive` tint. (Square borders, not rounded, to match jewel/secretbase.)
+- Panel titles follow the **`─[N]-Name`** form (the `[N]` doubles as the
+  number-key focus target) with a dim `{selected} of {total}` counter in the
+  bottom-right (`widgets::titled_block`). The `─[N]-` tag is the shared
+  numbered-section-border convention across the three TUIs.
+- Sidebar panels are **content-sized** (each box hugs its rows; leftover height
+  is an empty filler at the bottom) so the column reads compact like
+  secretbase's, instead of stretching one panel to fill.
 
 ## Lists & tables
 
