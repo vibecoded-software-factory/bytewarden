@@ -46,7 +46,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         Constraint::Fill(2),
         Constraint::Length(form_height),
         Constraint::Fill(1),
-        Constraint::Length(2),
+        Constraint::Length(1),
     ])
     .split(area);
     let (logo_chunk, form_chunk, lower_chunk, bar_chunk) = (c[0], c[1], c[2], c[3]);

@@ -30,7 +30,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     let outer = Layout::vertical([
         Constraint::Min(0),
         Constraint::Length(cmd_h),
-        Constraint::Length(2),
+        Constraint::Length(1),
     ])
     .split(area);
     let body = Layout::horizontal([Constraint::Percentage(26), Constraint::Percentage(74)])

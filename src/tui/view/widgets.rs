@@ -113,17 +113,12 @@ fn render_cmd_bar_inner(
     anchor: Option<&str>,
 ) {
     let _ = area; // budget is computed from the footer rect itself
-    // Match jewel/secretbase's `draw_status_strip`: a dim hint on the
-    // left and an accent-bold affordance anchored to the right edge. The
-    // anchor always wins the space contest so the user can always
-    // discover the help / settings shortcuts; the hint degrades
+    // A borderless bottom strip: a dim hint on the left and an
+    // accent-bold affordance anchored to the right edge — no top rule
+    // above it. The anchor always wins the space contest so the user can
+    // always discover the help / settings shortcuts; the hint degrades
     // full → short → truncated to fit whatever is left.
-    let block = Block::default()
-        .borders(Borders::TOP)
-        .border_style(Style::default().fg(t.muted));
-    let inner = block.inner(bar);
-    frame.render_widget(block, bar);
-
+    let inner = bar;
     let suffix = anchor.unwrap_or("");
     let total = inner.width as usize;
     // +2 gap before the anchor, +1 for the leading space on the hint.
