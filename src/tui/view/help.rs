@@ -54,17 +54,21 @@ pub fn draw_popup(frame: &mut Frame, area: Rect, app: &mut App) {
     // Title shows live position when there is overflow on either axis.
     let title = if max_y > 0 || max_x > 0 {
         format!(
-            " Help — {}  ({}/{})  (F1/Esc close) ",
+            " Help — {}  ({}/{})  F1/Esc close ",
             screen_label(&from, app),
             scroll_y + 1,
             max_y + 1,
         )
     } else {
-        format!(" Help — {} (F1 / Esc to close) ", screen_label(&from, app))
+        format!(" Help — {}  ·  F1/Esc close ", screen_label(&from, app))
     };
 
+    // Accent-bold title, matching jewel/secretbase's help overlay.
     let outer = Block::default()
-        .title(title)
+        .title(Span::styled(
+            title,
+            Style::default().fg(t.accent).add_modifier(Modifier::BOLD),
+        ))
         .borders(Borders::ALL)
         .border_type(BorderType::Double)
         .border_style(Style::default().fg(t.accent));
