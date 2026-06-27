@@ -196,8 +196,7 @@ All colors are driven by the `[theme]` block. Pick a bundled **preset** with
 `name`, then override individual keys if you want. Every key is optional;
 omitting `name` keeps the shared default (Nord with terminal-inherited text).
 
-Four presets ship — the same set in jewel and secretbase, so the three apps
-look identical:
+Four presets ship:
 
 | `name` | palette |
 |---|---|

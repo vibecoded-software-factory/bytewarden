@@ -13,12 +13,10 @@ change.
 
 The router `view::mod::draw` picks a renderer per `Screen`. The terminal floor
 is **60×18** (`view::mod::is_terminal_too_small`); below it every screen is
-replaced by the centered "terminal too small" notice (`view::mod::draw_too_small`).
-This notice is the **canonical design shared verbatim with jewel and secretbase**:
+replaced by the centered "terminal too small" notice (`view::mod::draw_too_small`):
 three vertically-centered lines — an `error`-colored bold `Terminal too small`
 title, a `dim` `Resize to at least {W}×{H} (currently {w}×{h})` line, and a `dim`
-`Ctrl+C to quit` hint. Only the `MIN`/`MIN_H` floor differs per app (it tracks
-each layout's real minimum).
+`Ctrl+C to quit` hint.
 
 **Vault** (`view/vault.rs`) is the reference layout: a 2-column body over a
 bottom hint bar.
@@ -48,19 +46,18 @@ The vault's focusable panels are the `screens::Focus` variants: `Status`,
   cycles (`App::cycle_focus`); `/` jumps to Search.
 - A panel is "focused" → accent **square** border + **bold** title
   (`widgets::focus_color` / `focus_border` + `titled_block`); otherwise the
-  `inactive` tint. (Square borders, not rounded, to match jewel/secretbase.)
+  `inactive` tint.
 - Panel titles follow the **`─[N]-Name`** form (the `[N]` doubles as the
   number-key focus target) with a dim `{selected} of {total}` counter in the
-  bottom-right (`widgets::titled_block`). The `─[N]-` tag is the shared
-  numbered-section-border convention across the three TUIs.
+  bottom-right (`widgets::titled_block`).
 - Sidebar panels are **content-sized** (each box hugs its rows; leftover height
-  is an empty filler at the bottom) so the column reads compact like
-  secretbase's, instead of stretching one panel to fill.
+  is an empty filler at the bottom) so the column stays compact instead of
+  stretching one panel to fill.
 
 ## Lists & tables
 
-bytewarden has **two list flavors** — there is no single `list_table` helper
-(unlike jewel); reuse the matching pattern:
+bytewarden has **two list flavors** — there is no single `list_table` helper;
+reuse the matching pattern:
 
 1. **The vault item list** (`render_list`) is a Ratatui **`Table`** with two
    columns: an indicators+type cell and the name. Follow its conventions:
@@ -69,8 +66,8 @@ bytewarden has **two list flavors** — there is no single `list_table` helper
      (reprompt) or `👥` (org) if at least one visible row carries it. A
      personal-only / no-favorites view collapses the dead gutter so names
      start earlier.
-   - **Size the type column to the widest visible `[label]`** (jewel's
-     `col_width` idea), clamped to 6–14, instead of a fixed pad. "Secure Note"
+   - **Size the type column to the widest visible `[label]`** (a `col_width`
+     pass over the visible rows), clamped to 6–14, instead of a fixed pad. "Secure Note"
      is shortened to `[Note]` in the list (`list_type_label`); the detail
      screen shows the full type.
    - Type tag is colored per item type (`theme.item_login/card/identity/note/
@@ -183,15 +180,14 @@ defaults to `Color::Reset` to inherit the terminal), `placeholder`, `muted`
 `item_identity`/`item_note`/`item_ssh`/`item_favorite`. **Don't hardcode
 colors — use these.**
 
-**Presets.** Themes are built from a shared `Palette` (13 named roles) via
-`Theme::from_palette`, which maps the core roles identically to jewel and
-secretbase and derives bytewarden's starfield + item-type colors (`item_note`
-maps to the teal `cyan` role so it stays distinct from the green `success`).
-Four presets ship (`Preset::ALL`: `catppuccin-mocha`, `dracula`, `nord`
-(default — `Preset::DEFAULT`), `catppuccin-latte`); `name = "<preset>"` in
-`[theme]` picks the base and per-key hex entries override it. The Settings
-picker (`F9`) applies live. Adding a preset = one `Palette` arm in
-`Preset::palette` (mirror it in all three apps).
+**Presets.** Themes are built from a `Palette` (13 named roles) via
+`Theme::from_palette`, which maps the core roles and derives the starfield +
+item-type colors (`item_note` maps to the teal `cyan` role so it stays distinct
+from the green `success`). Four presets ship (`Preset::ALL`: `catppuccin-mocha`,
+`dracula`, `nord` (default — `Preset::DEFAULT`), `catppuccin-latte`);
+`name = "<preset>"` in `[theme]` picks the base and per-key hex entries override
+it. The Settings picker (`F9`) applies live. Adding a preset = one `Palette` arm
+in `Preset::palette`.
 
 ## Settings overlay (`F9`)
 
@@ -204,8 +200,7 @@ only section is **Theme**, a preset picker that **previews live** as you move
 (`App::settings_preview_theme`) — `Enter` applies + persists `name = "<preset>"`
 to `config.toml` (`SettingsPort::write_theme_name`), `Esc`/`F9` cancels and
 restores the pre-open theme. The bottom hint bar anchors `F1: help · F9:
-settings`. Shared verbatim with jewel and secretbase; add a section by extending
-`SettingsSection`.
+settings`. Add a section by extending `SettingsSection`.
 
 ## Branding
 
