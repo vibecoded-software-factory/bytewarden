@@ -38,7 +38,8 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         Constraint::Min(0),
     ])
     .split(body[0]);
-    let cmd_h = if app.cmd_log.is_empty() { 4u16 } else { 9 };
+    // Command-log height: 6 rows (2 border + 4 visible entries).
+    let cmd_h = 6u16;
     let main = Layout::vertical([
         Constraint::Length(3),
         Constraint::Min(0),
