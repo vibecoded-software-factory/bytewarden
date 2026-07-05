@@ -15,7 +15,8 @@ use crate::tui::app::App;
 use crate::tui::screens::Focus;
 use crate::tui::view::action::action_line;
 use crate::tui::view::widgets::{
-    focus_border, focus_color, render_cmd_bar_with_help, titled_block,
+    cmdlog_height, draw_scrollbar, focus_border, focus_color, render_cmd_bar_with_help,
+    titled_block,
 };
 
 /// Renders the vault screen.
@@ -26,7 +27,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     // Command-log height: 6 rows (2 border + 4 visible entries). The log
     // is a full-width row at the bottom (spanning sidebar + main), above
     // the hint bar.
-    let cmd_h = 6u16;
+    let cmd_h = cmdlog_height(area.height);
     let outer = Layout::vertical([
         Constraint::Min(0),
         Constraint::Length(cmd_h),
@@ -500,6 +501,8 @@ fn render_list(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         area,
         &mut state,
     );
+    // Scroll cue on the right border when the list overflows.
+    draw_scrollbar(frame, area, flen, app.scroll_offset, t);
 }
 
 fn render_cmd_log(frame: &mut Frame, app: &App, area: ratatui::layout::Rect, cmd_h: u16) {
