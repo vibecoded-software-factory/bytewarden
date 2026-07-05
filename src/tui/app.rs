@@ -18,6 +18,7 @@ use std::time::{Duration, Instant};
 
 use zeroize::Zeroizing;
 
+use crate::domain::LineEditor;
 use crate::domain::LoweredItem;
 use crate::domain::filter::{CreateItemType, ITEM_FILTERS, ItemFilter};
 use crate::domain::folder::Folder;
@@ -154,22 +155,18 @@ pub struct App {
     // ── Login form ────────────────────────────────────────────────────────
     /// Current Bitwarden server URL — populated from `bw status` at
     /// boot and editable from the login screen.
-    pub server_input: String,
-    pub server_cursor: usize,
+    pub server_input: LineEditor,
     /// Server URL as last persisted by `bw config server`. Used to
     /// decide whether the field is dirty and needs a re-config call.
     pub server_committed: String,
-    pub email_input: String,
-    pub email_cursor: usize,
-    /// Master password buffer. Wrapped in [`Zeroizing`] so the bytes
-    /// are overwritten when the field is cleared (or when `App` itself
+    pub email_input: LineEditor,
+    /// Master password buffer. [`LineEditor`] is `ZeroizeOnDrop`, so the
+    /// bytes are overwritten when the field is cleared (or when `App`
     /// drops) — no plaintext copy lingers in the heap after login.
-    pub password_input: Zeroizing<String>,
-    pub password_cursor: usize,
+    pub password_input: LineEditor,
     /// One-time-code buffer. Same zeroizing rationale as
     /// `password_input` — short-lived but worth scrubbing.
-    pub otp_input: Zeroizing<String>,
-    pub otp_cursor: usize,
+    pub otp_input: LineEditor,
     /// Toggled on after the backend reports a "new device" challenge —
     /// the user has to paste the code bw e-mailed them.
     pub otp_required: bool,
@@ -415,15 +412,11 @@ impl App {
             import_formats: Vec::new(),
             active_folder: crate::tui::folders::FolderFilter::All,
             folder_selected: 0,
-            server_input: String::new(),
-            server_cursor: 0,
+            server_input: LineEditor::new(),
             server_committed: String::new(),
-            email_cursor: saved_email.chars().count(),
-            email_input: saved_email,
-            password_input: Zeroizing::new(String::new()),
-            password_cursor: 0,
-            otp_input: Zeroizing::new(String::new()),
-            otp_cursor: 0,
+            email_input: LineEditor::with_text(saved_email),
+            password_input: LineEditor::new(),
+            otp_input: LineEditor::new(),
             otp_required: false,
             two_factor_required: false,
             two_factor_method: crate::domain::TwoFactorMethod::Authenticator,
@@ -994,9 +987,7 @@ impl App {
     pub fn set_login_error(&mut self) {
         self.login_error = true;
         self.password_input.clear();
-        self.password_cursor = 0;
         self.otp_input.clear();
-        self.otp_cursor = 0;
         self.otp_required = false;
         self.two_factor_required = false;
         self.active_field = LoginField::Password;
@@ -1027,119 +1018,35 @@ impl App {
 
     // ── Login text field plumbing ─────────────────────────────────────────
 
-    /// Returns mutable refs to the (input, cursor) pair for the focused
-    /// login text field, or `None` for checkboxes.
-    ///
-    /// The password and OTP fields go through a `&mut *…` deref so the
-    /// caller sees a plain `&mut String` regardless of whether the
-    /// underlying buffer is wrapped in `Zeroizing` — keeps the input
-    /// helpers (`insert_char`, `delete_char_*`, …) generic.
-    pub fn login_text_mut(&mut self) -> Option<(&mut String, &mut usize)> {
+    /// Returns the [`LineEditor`] for the focused login text field, or
+    /// `None` for the checkbox fields. The caller drives it through
+    /// [`crate::tui::input::common::route_line_editor`] like every other
+    /// input.
+    pub fn login_editor_mut(&mut self) -> Option<&mut LineEditor> {
         match self.active_field {
-            LoginField::Server => Some((&mut self.server_input, &mut self.server_cursor)),
-            LoginField::Email => Some((&mut self.email_input, &mut self.email_cursor)),
-            LoginField::Password => Some((&mut *self.password_input, &mut self.password_cursor)),
-            LoginField::Otp => Some((&mut *self.otp_input, &mut self.otp_cursor)),
+            LoginField::Server => Some(&mut self.server_input),
+            LoginField::Email => Some(&mut self.email_input),
+            LoginField::Password => Some(&mut self.password_input),
+            LoginField::Otp => Some(&mut self.otp_input),
             _ => None,
         }
     }
 
-    /// Length (in characters) of the focused login text field.
-    pub fn login_text_len(&self) -> usize {
-        match self.active_field {
-            LoginField::Server => self.server_input.chars().count(),
-            LoginField::Email => self.email_input.chars().count(),
-            LoginField::Password => self.password_input.chars().count(),
-            LoginField::Otp => self.otp_input.chars().count(),
-            _ => 0,
-        }
-    }
-
-    pub fn insert_char(&mut self, c: char) {
-        let save = self.active_field == LoginField::Email && self.save_email;
-        if let Some((input, cursor)) = self.login_text_mut() {
-            let byte = input
-                .char_indices()
-                .nth(*cursor)
-                .map(|(b, _)| b)
-                .unwrap_or(input.len());
-            input.insert(byte, c);
-            *cursor += 1;
-        }
-        if save {
-            let e = self.email_input.clone();
+    /// Persists the e-mail when the "save e-mail" box is ticked — call
+    /// after editing the Email field so a typed address survives a
+    /// relaunch (the side effect the old `insert_char`/`delete_char_*`
+    /// carried inline).
+    pub fn persist_email_if_saving(&mut self) {
+        if self.active_field == LoginField::Email && self.save_email {
+            let e = self.email_input.text().to_string();
             self.settings.write(true, Some(&e));
-        }
-    }
-
-    pub fn delete_char_before(&mut self) {
-        let save = self.active_field == LoginField::Email && self.save_email;
-        if let Some((input, cursor)) = self.login_text_mut()
-            && *cursor > 0
-        {
-            let byte = input
-                .char_indices()
-                .nth(*cursor - 1)
-                .map(|(b, _)| b)
-                .unwrap_or(0);
-            input.remove(byte);
-            *cursor -= 1;
-        }
-        if save {
-            let e = self.email_input.clone();
-            self.settings.write(true, Some(&e));
-        }
-    }
-
-    pub fn delete_char_at(&mut self) {
-        let save = self.active_field == LoginField::Email && self.save_email;
-        if let Some((input, cursor)) = self.login_text_mut()
-            && *cursor < input.chars().count()
-        {
-            let byte = input
-                .char_indices()
-                .nth(*cursor)
-                .map(|(b, _)| b)
-                .unwrap_or(0);
-            input.remove(byte);
-        }
-        if save {
-            let e = self.email_input.clone();
-            self.settings.write(true, Some(&e));
-        }
-    }
-
-    pub fn cursor_left(&mut self) {
-        if let Some((_, cursor)) = self.login_text_mut()
-            && *cursor > 0
-        {
-            *cursor -= 1;
-        }
-    }
-    pub fn cursor_right(&mut self) {
-        let len = self.login_text_len();
-        if let Some((_, cursor)) = self.login_text_mut()
-            && *cursor < len
-        {
-            *cursor += 1;
-        }
-    }
-    pub fn cursor_home(&mut self) {
-        if let Some((_, cursor)) = self.login_text_mut() {
-            *cursor = 0;
-        }
-    }
-    pub fn cursor_end(&mut self) {
-        let len = self.login_text_len();
-        if let Some((_, cursor)) = self.login_text_mut() {
-            *cursor = len;
         }
     }
 
     pub fn toggle_save_email(&mut self) {
         self.save_email = !self.save_email;
         if self.save_email {
-            let e = self.email_input.clone();
+            let e = self.email_input.text().to_string();
             self.settings.write(true, Some(&e));
         } else {
             self.settings.write(false, None);

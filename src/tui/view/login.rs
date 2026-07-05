@@ -144,7 +144,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     let _ = (idx_otp_lbl, idx_otp_in); // silence unused-variable in non-OTP branch
 
     // ── Server ────────────────────────────────────────────────────────────
-    let server_dirty = app.server_input.trim() != app.server_committed;
+    let server_dirty = app.server_input.text().trim() != app.server_committed;
     frame.render_widget(
         Paragraph::new(Line::from(vec![
             Span::styled("Server:", Style::default().fg(t.dim)),
@@ -162,8 +162,8 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     let server_foc = app.active_field == LoginField::Server;
     frame.render_widget(
         Paragraph::new(input_with_cursor(
-            &app.server_input,
-            app.server_cursor,
+            app.server_input.text(),
+            app.server_input.cursor(),
             server_foc,
             t,
         ))
@@ -179,8 +179,8 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     let email_foc = app.active_field == LoginField::Email;
     frame.render_widget(
         Paragraph::new(input_with_cursor(
-            &app.email_input,
-            app.email_cursor,
+            app.email_input.text(),
+            app.email_input.cursor(),
             email_foc,
             t,
         ))
@@ -205,14 +205,18 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     );
     let pass_foc = app.active_field == LoginField::Password;
     let pass_line = if app.login_password_visible {
-        input_with_cursor(&app.password_input, app.password_cursor, pass_foc, t)
+        input_with_cursor(
+            app.password_input.text(),
+            app.password_input.cursor(),
+            pass_foc,
+            t,
+        )
     } else {
-        let masked_before = "●".repeat(app.password_cursor);
+        let masked_before = "●".repeat(app.password_input.cursor());
         let masked_after = "●".repeat(
             app.password_input
-                .chars()
-                .count()
-                .saturating_sub(app.password_cursor),
+                .len_chars()
+                .saturating_sub(app.password_input.cursor()),
         );
         if pass_foc {
             Line::from(vec![
@@ -221,7 +225,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
                 Span::raw(masked_after),
             ])
         } else {
-            Line::from(Span::raw("●".repeat(app.password_input.chars().count())))
+            Line::from(Span::raw("●".repeat(app.password_input.len_chars())))
         }
     };
     frame.render_widget(
@@ -258,7 +262,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         // right side so the user can tell at a glance which factor
         // is active. Cycling happens via ← → when focus is on the
         // Otp field.
-        let inner = input_with_cursor(&app.otp_input, app.otp_cursor, otp_foc, t);
+        let inner = input_with_cursor(app.otp_input.text(), app.otp_input.cursor(), otp_foc, t);
         let block = rounded_block(focus_border(otp_foc, t.accent));
         frame.render_widget(Paragraph::new(inner).block(block), f[idx_otp_in]);
 
