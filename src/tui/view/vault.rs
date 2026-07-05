@@ -128,19 +128,29 @@ fn render_hint_bar(
 fn render_status(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     let t = &app.theme;
     let sf = app.focus == Focus::Status;
-    let (title_style, status_line) = match &app.action_state {
-        ActionState::Idle => (
-            Style::default().fg(focus_color(sf, t.accent, t.inactive)),
-            Line::from(""),
-        ),
-        _ => (
-            Style::default().fg(match &app.action_state {
-                ActionState::Running(_) => t.accent,
-                ActionState::Done(_) => t.success,
-                _ => t.error,
-            }),
-            action_line(app).unwrap_or_else(|| Line::from("")),
-        ),
+    let (title_style, status_line) = if app.worker_dead {
+        // Persistent condition badge — unlike the sticky error toast
+        // (which the next keypress clears) this stays as long as the
+        // condition holds, because the worker is dead until restart.
+        (
+            t.danger_title(),
+            Line::from(Span::styled("⚠ WORKER DEAD", t.danger_title())),
+        )
+    } else {
+        match &app.action_state {
+            ActionState::Idle => (
+                Style::default().fg(focus_color(sf, t.accent, t.inactive)),
+                Line::from(""),
+            ),
+            _ => (
+                Style::default().fg(match &app.action_state {
+                    ActionState::Running(_) => t.accent,
+                    ActionState::Done(_) => t.success,
+                    _ => t.error,
+                }),
+                action_line(app).unwrap_or_else(|| Line::from("")),
+            ),
+        }
     };
     frame.render_widget(
         Paragraph::new(status_line).block(
