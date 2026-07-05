@@ -19,9 +19,11 @@ pub struct MembershipState {
 /// Opens the memberships popup — fetches organisations, then collections
 /// (two worker round-trips). The popup is shown once both arrive.
 pub fn open(app: &mut App) {
-    app.set_action(ActionState::Running("Loading memberships…".into()));
-    app.in_flight = Some(InFlight::MembershipsOrgs);
-    let _ = app.worker_tx.send(WorkerRequest::ListOrganizations);
+    app.submit(
+        InFlight::MembershipsOrgs,
+        "Loading memberships…",
+        WorkerRequest::ListOrganizations,
+    );
 }
 
 /// `bw list organizations` response — stashes the orgs and fetches the
@@ -38,8 +40,11 @@ pub fn handle_orgs(app: &mut App, r: Result<Vec<Organization>, BwError>) {
                 organizations: orgs,
                 collections: Vec::new(),
             });
-            app.in_flight = Some(InFlight::MembershipsCollections);
-            let _ = app.worker_tx.send(WorkerRequest::ListCollections);
+            // Chained step — keep the "Loading memberships…" toast, so
+            // claim the slot silently rather than through `submit`.
+            if app.begin(InFlight::MembershipsCollections) {
+                let _ = app.worker_tx.send(WorkerRequest::ListCollections);
+            }
         }
         Err(e) => {
             app.memberships = None;

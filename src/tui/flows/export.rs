@@ -95,12 +95,14 @@ pub fn commit(app: &mut App) {
         return;
     }
     let format = state.format;
-    app.set_action(ActionState::Running("Exporting…".into()));
-    app.in_flight = Some(InFlight::Export);
-    let _ = app.worker_tx.send(WorkerRequest::Export {
-        format: format.cli_arg().to_string(),
-        path,
-    });
+    app.submit(
+        InFlight::Export,
+        "Exporting…",
+        WorkerRequest::Export {
+            format: format.cli_arg().to_string(),
+            path,
+        },
+    );
 }
 
 /// `bw export` response. Closes the popup on success; keeps it open on

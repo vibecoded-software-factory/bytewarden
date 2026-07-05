@@ -236,13 +236,15 @@ pub fn commit(app: &mut App) {
             item_id,
             organization_id,
         } => {
-            app.set_action(ActionState::Running("Moving…".into()));
-            app.in_flight = Some(InFlight::MoveItem);
-            let _ = app.worker_tx.send(WorkerRequest::MoveItem {
-                item_id,
-                organization_id,
-                collection_ids: ids,
-            });
+            app.submit(
+                InFlight::MoveItem,
+                "Moving…",
+                WorkerRequest::MoveItem {
+                    item_id,
+                    organization_id,
+                    collection_ids: ids,
+                },
+            );
         }
     }
 }
@@ -255,8 +257,9 @@ pub fn handle_move(app: &mut App, r: Result<(), BwError>) {
             app.push_cmd("bw move", true, "moved into organisation");
             app.set_action(ActionState::Done("Moved ✓".into()));
             app.screen = Screen::Detail;
-            app.in_flight = Some(InFlight::MoveReloadItems);
-            let _ = app.worker_tx.send(WorkerRequest::ListItems);
+            if app.begin(InFlight::MoveReloadItems) {
+                let _ = app.worker_tx.send(WorkerRequest::ListItems);
+            }
         }
         Err(e) => {
             app.cmd_err("bw move", &e, "Move failed");

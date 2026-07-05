@@ -139,9 +139,11 @@ pub fn queue_create_item(app: &mut App) {
         }
     }
     let json = Zeroizing::new(build_create_payload(&app.create_type, &app.create_fields));
-    app.set_action(ActionState::Running("Creating…".into()));
-    app.in_flight = Some(InFlight::CreateItem);
-    let _ = app.worker_tx.send(WorkerRequest::CreateItem { json });
+    app.submit(
+        InFlight::CreateItem,
+        "Creating…",
+        WorkerRequest::CreateItem { json },
+    );
 }
 
 /// `bw create item` response.
@@ -363,13 +365,15 @@ pub fn queue_attachment_download(app: &mut App) {
     let item_id = state.item_id.clone();
     let file_name = state.file_name.clone();
     let output_path = state.path.trim().to_string();
-    app.set_action(ActionState::Running("Downloading…".into()));
-    app.in_flight = Some(InFlight::DownloadAttachment);
-    let _ = app.worker_tx.send(WorkerRequest::DownloadAttachment {
-        item_id,
-        file_name,
-        output_path,
-    });
+    app.submit(
+        InFlight::DownloadAttachment,
+        "Downloading…",
+        WorkerRequest::DownloadAttachment {
+            item_id,
+            file_name,
+            output_path,
+        },
+    );
 }
 
 /// `bw get attachment` response.
@@ -443,12 +447,14 @@ pub fn queue_delete_attachment(app: &mut App) {
     };
     let item_id = state.item_id.clone();
     let attachment_id = state.attachment_id.clone();
-    app.set_action(ActionState::Running("Deleting attachment…".into()));
-    app.in_flight = Some(InFlight::DeleteAttachment);
-    let _ = app.worker_tx.send(WorkerRequest::DeleteAttachment {
-        item_id,
-        attachment_id,
-    });
+    app.submit(
+        InFlight::DeleteAttachment,
+        "Deleting attachment…",
+        WorkerRequest::DeleteAttachment {
+            item_id,
+            attachment_id,
+        },
+    );
 }
 
 /// `bw delete attachment` response — step 1. Chains a `get item` to
@@ -464,10 +470,12 @@ pub fn handle_delete_attachment(app: &mut App, r: Result<(), BwError>) {
     match r {
         Ok(()) => {
             app.push_cmd(&cmd, true, &format!("deleted from {item_name}"));
-            app.in_flight = Some(InFlight::DeleteAttachmentRefresh {
+            // Chained best-effort refresh — keep the "Deleting…" toast.
+            if app.begin(InFlight::DeleteAttachmentRefresh {
                 item_id: item_id.clone(),
-            });
-            let _ = app.worker_tx.send(WorkerRequest::GetItemJson { item_id });
+            }) {
+                let _ = app.worker_tx.send(WorkerRequest::GetItemJson { item_id });
+            }
         }
         Err(e) => app.cmd_err(&cmd, &e, "Delete failed"),
     }
@@ -514,12 +522,14 @@ pub fn commit_attachment_upload(app: &mut App) {
         return;
     }
     let item_id = state.item_id.clone();
-    app.set_action(ActionState::Running("Uploading…".into()));
-    app.in_flight = Some(InFlight::UploadAttachment);
-    let _ = app.worker_tx.send(WorkerRequest::UploadAttachment {
-        item_id,
-        file_path: path,
-    });
+    app.submit(
+        InFlight::UploadAttachment,
+        "Uploading…",
+        WorkerRequest::UploadAttachment {
+            item_id,
+            file_path: path,
+        },
+    );
 }
 
 /// `bw create attachment` response.
@@ -893,10 +903,12 @@ pub fn cycle_field_type(app: &mut App) {
 
 /// Save edit — step 1: fetch the item JSON to patch (worker).
 pub fn queue_save_edit(app: &mut App) {
-    app.set_action(ActionState::Running("Saving…".into()));
-    app.in_flight = Some(InFlight::SaveEditFetch);
     let item_id = app.edit_item_id.clone();
-    let _ = app.worker_tx.send(WorkerRequest::GetItemJson { item_id });
+    app.submit(
+        InFlight::SaveEditFetch,
+        "Saving…",
+        WorkerRequest::GetItemJson { item_id },
+    );
 }
 
 /// Save edit — step 1 response: patch the fetched JSON and commit it.
@@ -931,11 +943,13 @@ pub fn handle_save_edit_fetch(app: &mut App, r: Result<Zeroizing<String>, BwErro
     // The patched payload still carries plaintext credentials, so wrap
     // the intermediate buffer in `Zeroizing`.
     let patched = Zeroizing::new(patch_edit_payload(&base_json, &edit_fields_resolved));
-    app.in_flight = Some(InFlight::SaveEditCommit);
-    let _ = app.worker_tx.send(WorkerRequest::EditItem {
-        item_id,
-        json: patched,
-    });
+    // Chained commit — keep the "Saving…" toast.
+    if app.begin(InFlight::SaveEditCommit) {
+        let _ = app.worker_tx.send(WorkerRequest::EditItem {
+            item_id,
+            json: patched,
+        });
+    }
 }
 
 /// Save edit — step 2 response: the committed item.
@@ -972,23 +986,21 @@ pub fn queue_delete_item(app: &mut App, permanent: bool) {
         return;
     };
     let (item_id, name) = (item.id.clone(), item.name.clone());
-    app.set_action(ActionState::Running(
-        if permanent {
-            "Deleting…"
-        } else {
-            "Trashing…"
-        }
-        .into(),
-    ));
+    let label = if permanent {
+        "Deleting…"
+    } else {
+        "Trashing…"
+    };
     app.screen = Screen::Vault;
-    app.in_flight = Some(InFlight::DeleteItem {
-        permanent,
-        item_id: item_id.clone(),
-        name,
-    });
-    let _ = app
-        .worker_tx
-        .send(WorkerRequest::DeleteItem { item_id, permanent });
+    app.submit(
+        InFlight::DeleteItem {
+            permanent,
+            item_id: item_id.clone(),
+            name,
+        },
+        label,
+        WorkerRequest::DeleteItem { item_id, permanent },
+    );
 }
 
 /// `bw delete item` response.
@@ -1024,8 +1036,9 @@ pub fn handle_delete(
             ));
             // Refresh the trash list silently so the badge count updates;
             // the "Deleted ✓" toast above survives.
-            app.in_flight = Some(InFlight::DeleteReloadTrash);
-            let _ = app.worker_tx.send(WorkerRequest::ListTrash);
+            if app.begin(InFlight::DeleteReloadTrash) {
+                let _ = app.worker_tx.send(WorkerRequest::ListTrash);
+            }
         }
         Err(e) => app.cmd_err(&cmd, &e, "Delete failed"),
     }
@@ -1047,12 +1060,14 @@ pub fn queue_restore_item(app: &mut App) {
         return;
     };
     let (item_id, name) = (item.id.clone(), item.name.clone());
-    app.set_action(ActionState::Running("Restoring…".into()));
-    app.in_flight = Some(InFlight::RestoreItem {
-        item_id: item_id.clone(),
-        name,
-    });
-    let _ = app.worker_tx.send(WorkerRequest::RestoreItem { item_id });
+    app.submit(
+        InFlight::RestoreItem {
+            item_id: item_id.clone(),
+            name,
+        },
+        "Restoring…",
+        WorkerRequest::RestoreItem { item_id },
+    );
 }
 
 /// `bw restore item` response.
@@ -1072,8 +1087,9 @@ pub fn handle_restore(app: &mut App, item_id: String, name: String, r: Result<()
             app.set_action(ActionState::Done("Restored ✓".into()));
             // Re-sync items silently so the restored entry is present; the
             // "Restored ✓" toast survives.
-            app.in_flight = Some(InFlight::RestoreReloadItems);
-            let _ = app.worker_tx.send(WorkerRequest::ListItems);
+            if app.begin(InFlight::RestoreReloadItems) {
+                let _ = app.worker_tx.send(WorkerRequest::ListItems);
+            }
         }
         Err(e) => app.cmd_err(&cmd, &e, "Restore failed"),
     }
@@ -1104,11 +1120,11 @@ pub fn queue_check_exposed(app: &mut App) {
         return;
     }
     let id = item.id.clone();
-    app.set_action(ActionState::Running("Checking HIBP…".into()));
-    app.in_flight = Some(InFlight::CheckExposed);
-    let _ = app
-        .worker_tx
-        .send(WorkerRequest::CheckExposed { item_id: id });
+    app.submit(
+        InFlight::CheckExposed,
+        "Checking HIBP…",
+        WorkerRequest::CheckExposed { item_id: id },
+    );
 }
 
 /// `bw get exposed` response. Reports the result as a coloured toast:
@@ -1143,11 +1159,13 @@ pub fn toggle_favorite(app: &mut App) {
         return;
     };
     let item_id = item.id.clone();
-    app.set_action(ActionState::Running("Updating…".into()));
-    app.in_flight = Some(InFlight::ToggleFavoriteFetch {
-        item_id: item_id.clone(),
-    });
-    let _ = app.worker_tx.send(WorkerRequest::GetItemJson { item_id });
+    app.submit(
+        InFlight::ToggleFavoriteFetch {
+            item_id: item_id.clone(),
+        },
+        "Updating…",
+        WorkerRequest::GetItemJson { item_id },
+    );
 }
 
 /// Favorite-toggle — step 1 response: flip the `favorite` flag and
@@ -1172,13 +1190,15 @@ pub fn handle_toggle_fetch(app: &mut App, item_id: String, r: Result<Zeroizing<S
         Ok(s) => Zeroizing::new(s),
         Err(e) => return app.cmd_err(&cmd, &format!("JSON serialize error: {e}"), "Failed"),
     };
-    app.in_flight = Some(InFlight::ToggleFavoriteCommit {
+    // Chained commit — keep the "Updating…" toast.
+    if app.begin(InFlight::ToggleFavoriteCommit {
         new_favorite: new_fav,
-    });
-    let _ = app.worker_tx.send(WorkerRequest::EditItem {
-        item_id,
-        json: new_json,
-    });
+    }) {
+        let _ = app.worker_tx.send(WorkerRequest::EditItem {
+            item_id,
+            json: new_json,
+        });
+    }
 }
 
 /// Favorite-toggle — step 2 response: apply the flipped flag.

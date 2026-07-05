@@ -42,10 +42,12 @@ pub fn open_for_create_field(app: &mut App, idx: usize) {
 
 /// Sends a `bw generate` request to the worker with the current options.
 pub fn request_generate(app: &mut App) {
-    app.set_action(ActionState::Running("Generating…".into()));
-    app.in_flight = Some(InFlight::Generate);
     let opts = app.generator.options.clone();
-    let _ = app.worker_tx.send(WorkerRequest::Generate { opts });
+    app.submit(
+        InFlight::Generate,
+        "Generating…",
+        WorkerRequest::Generate { opts },
+    );
 }
 
 /// `bw generate` response.
