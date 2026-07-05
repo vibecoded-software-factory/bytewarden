@@ -135,14 +135,28 @@ one branch → PR → squash-merge to `dev`.
     `dim` toward text; list rows `foreground` not `dim`) is a **visual** change
     across every screen — held until it can be verified in a real terminal,
     not shifted blind. More presets are additive and can land any time.
-- [ ] **Batch 12 — Responsiveness.** Monotonic `cmdlog_height`, `fit_segments`
-  footer, scrollbars on every overflowing region, wrapped field values,
-  modals that window by real height.
-- [ ] **Batch 13 — Adapter robustness.** OSC 52 fallback + compare-and-clear
-  in the clipboard. Atomic settings writes (temp + `rename`) + 0600/0700
-  perms. Consistent timeouts (today `bw_generator` calls `Command` without
-  one). Tolerant parsing with `skipped` diagnostics (never drop the whole
-  list on one bad row). Move `send_text` content out of argv.
+- [~] **Batch 12 — Responsiveness. (Deferred — needs runtime verification.)**
+  Every piece here is a **visual layout change** (responsive command-log
+  height, scrollbars on overflowing regions, wrapped field values, modals
+  windowed by real height) whose correctness can only be judged by rendering
+  it in a real terminal at various sizes. Shipping unverified layout risks
+  visible breakage, so this waits for a terminal-in-the-loop session rather
+  than being changed blind. (The footer already truncates via
+  `render_cmd_bar_with_help`.)
+- [x] **Batch 13 — Adapter robustness (internal, testable slice).** Made
+  settings writes **atomic** (`write_file_secure` now writes a sibling
+  `<path>.tmp` with 0600 from the first byte, `sync_all`s it, then `rename(2)`s
+  over the target — a crash mid-write leaves the old config intact). Routed
+  `bw_generator` through the shared `process::bw_run_timeout` so a hung
+  `bw generate` can't freeze the worker (it had no timeout). Both unit-tested
+  (atomic write: content + 0600 + no temp residue).
+  - *Deferred (need runtime / `bw` verification):* the **OSC 52** headless
+    clipboard fallback (writes escape sequences to stdout while Ratatui owns
+    the screen — must be verified it doesn't corrupt the display); moving
+    `send_text` content **out of argv** (needs the `bw send` stdin/file
+    interface confirmed live); **tolerant per-row list parsing** with `skipped`
+    diagnostics (a moderate parse-path change worth doing with real vault
+    fixtures).
 - [ ] **Batch 14 — Command palette (`Ctrl+P`).** Context-aware palette over
   `palette_commands`, doubling as an executable cheat-sheet; the 5th
   keybinding-sync surface.
