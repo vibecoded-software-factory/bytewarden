@@ -25,10 +25,10 @@ import/export, plus the generator, memberships and the HIBP breach check.
 2. **Change touching UI/UX?** Read [`UX.md`](UX.md) first — the canonical
    design system. Reuse its documented components; never a one-off. Update
    `UX.md` in the same change.
-3. **Keybinding added/changed?** Sync **all four** surfaces in the same
+3. **Keybinding added/changed?** Sync **all five** surfaces in the same
    change: the footer hint · `view/help.rs` popup · the `README.md` tables ·
-   `UX.md`. (A command palette, when added, becomes the fifth — see *UI
-   system*.)
+   `UX.md` · the command palette (`flows::palette::palette_commands`, see
+   *UI system*).
 4. **Before every commit** (even one-liners):
    `cargo fmt --all && cargo clippy --all-targets -- -D warnings && cargo test`
    — clippy warnings are failures; check real exit codes, don't pipe them
