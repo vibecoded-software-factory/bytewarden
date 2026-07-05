@@ -74,7 +74,6 @@ pub fn check_name_unique(
     if trimmed.is_empty() {
         return Err("Name cannot be empty.".into());
     }
-    let lower = trimmed.to_lowercase();
     let current_lower = current.map(|s| s.trim().to_lowercase());
     for other in existing {
         let other = other.as_ref();
@@ -83,7 +82,6 @@ pub fn check_name_unique(
         {
             return Err(format!("\"{trimmed}\" is already used."));
         }
-        let _ = &lower;
     }
     Ok(())
 }

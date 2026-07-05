@@ -10,7 +10,7 @@ use ratatui::{
 
 use crate::ports::GeneratorMode;
 use crate::tui::app::App;
-use crate::tui::generator::{GeneratorFocus, GeneratorState, ReturnTarget, focusable_for};
+use crate::tui::generator::{GeneratorFocus, GeneratorState, focusable_for};
 use crate::tui::view::action::action_line;
 use crate::tui::view::widgets::{focus_color, render_cmd_bar, rounded_block};
 
@@ -201,17 +201,5 @@ fn checkbox(on: bool) -> String {
         "[✓] on".into()
     } else {
         "[ ] off".into()
-    }
-}
-
-/// Surfaces the return-target type so the view can show distinct
-/// hints. (Currently the view derives this from `app.generator.return_target`
-/// directly, but the helper is kept for future use by the input layer.)
-#[allow(dead_code)]
-pub fn target_kind(target: Option<ReturnTarget>) -> &'static str {
-    match target {
-        Some(ReturnTarget::EditField(_)) => "edit",
-        Some(ReturnTarget::CreateField(_)) => "create",
-        None => "standalone",
     }
 }
