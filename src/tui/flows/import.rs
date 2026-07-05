@@ -81,7 +81,7 @@ pub fn handle(app: &mut App, r: Result<(), BwError>) {
 /// Silent post-import item reload → chains the folder reload.
 pub fn handle_reload_items(app: &mut App, r: Result<Vec<crate::domain::Item>, BwError>) {
     match r {
-        Ok(items) => super::vault::set_items(app, items),
+        Ok(items) => super::vault::set_items_keep_cursor(app, items),
         Err(e) => app.push_cmd("bw list items", false, &e),
     }
     if app.begin(InFlight::ImportReloadFolders) {

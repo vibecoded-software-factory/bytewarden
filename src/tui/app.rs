@@ -785,6 +785,37 @@ impl App {
         self.filtered_items().get(self.selected_index).copied()
     }
 
+    /// Id of the currently selected (filtered) item, if any — captured
+    /// before a reload so the cursor can be put back on the same item.
+    pub fn selected_item_id(&self) -> Option<String> {
+        self.selected_item().map(|i| i.id.clone())
+    }
+
+    /// Re-anchors the list cursor onto the item with `id` after a reload
+    /// that may have reordered or replaced the list. Falls back to
+    /// clamping the old index into range when the item is gone (deleted
+    /// elsewhere, filtered out). Keeps `scroll_offset` consistent so the
+    /// cursor stays visible. This is the invalidation contract: a
+    /// background/post-mutation refresh must never yank the cursor onto
+    /// an unrelated row just because indices shifted.
+    pub fn reanchor_selection(&mut self, id: Option<&str>) {
+        let len = self.filtered_items().len();
+        self.selected_index = match id {
+            Some(id) => self
+                .filtered_items()
+                .iter()
+                .position(|i| i.id == id)
+                .unwrap_or_else(|| self.selected_index.min(len.saturating_sub(1))),
+            None => self.selected_index.min(len.saturating_sub(1)),
+        };
+        if len == 0 {
+            self.selected_index = 0;
+        }
+        if self.selected_index < self.scroll_offset {
+            self.scroll_offset = self.selected_index;
+        }
+    }
+
     /// Rebuilds [`Self::items_lowered`] from [`Self::items`] and
     /// [`Self::trashed_lowered`] from [`Self::trashed_items`]. Called
     /// after any mutation that could touch a searchable field
@@ -1308,6 +1339,42 @@ mod tests {
         // Just claimed — nowhere near the budget, so the slot stays.
         app.watchdog_release_stuck_request();
         assert!(app.is_busy());
+    }
+
+    #[test]
+    fn reanchor_selection_follows_the_item_by_id() {
+        let (mut app, _req_rx, _resp_tx) = fresh_app();
+        app.items = vec![
+            item("a", "A", 1, None),
+            item("b", "B", 1, None),
+            item("c", "C", 1, None),
+        ];
+        app.rebuild_caches();
+        app.selected_index = 1; // "b"
+        assert_eq!(app.selected_item_id().as_deref(), Some("b"));
+        // The list comes back reordered — the cursor must follow "b".
+        app.items = vec![
+            item("c", "C", 1, None),
+            item("b", "B", 1, None),
+            item("a", "A", 1, None),
+        ];
+        app.rebuild_caches();
+        app.reanchor_selection(Some("b"));
+        assert_eq!(app.selected_item().map(|i| i.id.clone()), Some("b".into()));
+    }
+
+    #[test]
+    fn reanchor_clamps_when_the_item_is_gone() {
+        let (mut app, _req_rx, _resp_tx) = fresh_app();
+        app.items = vec![item("a", "A", 1, None), item("b", "B", 1, None)];
+        app.rebuild_caches();
+        app.selected_index = 1; // "b"
+        // "b" deleted elsewhere — the list is now shorter.
+        app.items = vec![item("a", "A", 1, None)];
+        app.rebuild_caches();
+        app.reanchor_selection(Some("b"));
+        assert_eq!(app.selected_index, 0);
+        assert!(app.selected_item().is_some());
     }
 
     fn item(id: &str, name: &str, item_type: u8, folder: Option<&str>) -> Item {
