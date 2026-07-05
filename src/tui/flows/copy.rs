@@ -89,9 +89,11 @@ pub fn copy_password_to_clipboard(app: &mut App) {
 
 /// Fetches and copies the selected item's TOTP code (worker round-trip).
 pub fn request_copy_totp(app: &mut App, item_id: String) {
-    app.set_action(ActionState::Running("Copying TOTP…".into()));
-    app.in_flight = Some(InFlight::CopyTotp);
-    let _ = app.worker_tx.send(WorkerRequest::GetTotp { item_id });
+    app.submit(
+        InFlight::CopyTotp,
+        "Copying TOTP…",
+        WorkerRequest::GetTotp { item_id },
+    );
 }
 
 /// `bw get totp` response — writes the code to the clipboard.

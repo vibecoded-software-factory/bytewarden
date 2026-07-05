@@ -22,8 +22,11 @@ use crate::tui::worker::{InFlight, WorkerRequest};
 /// Kicks off the boot sequence: `bw status` on the worker. The response
 /// handler routes to a resume, the locked login form, or fresh login.
 pub fn request_resume(app: &mut App) {
-    app.in_flight = Some(InFlight::BootStatus);
-    let _ = app.worker_tx.send(WorkerRequest::Status);
+    // The caller already set the "Checking session…" splash toast, so
+    // claim the slot silently rather than overriding it via `submit`.
+    if app.begin(InFlight::BootStatus) {
+        let _ = app.worker_tx.send(WorkerRequest::Status);
+    }
 }
 
 /// Boot `bw status` response.
@@ -63,9 +66,11 @@ pub fn handle_boot_status(app: &mut App, r: Result<VaultInfo, BwError>) {
                 app.email_cursor = email.chars().count();
                 app.email_input = email;
             }
-            app.in_flight = Some(InFlight::ResumeItems);
-            app.set_action(ActionState::Running("Resuming session…".into()));
-            let _ = app.worker_tx.send(WorkerRequest::ListItems);
+            app.submit(
+                InFlight::ResumeItems,
+                "Resuming session…",
+                WorkerRequest::ListItems,
+            );
         }
         VaultStatus::Locked => {
             app.authenticated = true;
@@ -89,8 +94,10 @@ pub fn handle_resume_items(app: &mut App, r: Result<Vec<Item>, BwError>) {
             app.items = items;
             app.sort_items();
             app.push_cmd("bw list items", true, &format!("{count} items loaded"));
-            app.in_flight = Some(InFlight::ResumeSessionData);
-            let _ = app.worker_tx.send(WorkerRequest::ParallelSessionData);
+            // Chained step — keep the "Resuming session…" toast.
+            if app.begin(InFlight::ResumeSessionData) {
+                let _ = app.worker_tx.send(WorkerRequest::ParallelSessionData);
+            }
         }
         Err(e) => {
             // The session key was present but the backend rejected it
@@ -212,32 +219,44 @@ pub fn attempt_login(app: &mut App) {
 fn request_login(app: &mut App) {
     let email = app.email_input.clone();
     let password = app.password_input.clone();
-    app.set_action(ActionState::Running("Logging in…".into()));
 
     if app.otp_required || app.two_factor_required {
         let code = Zeroizing::new(app.otp_input.trim().to_string());
         if app.two_factor_required {
-            app.in_flight = Some(InFlight::LoginTwoFactor);
-            let _ = app.worker_tx.send(WorkerRequest::LoginTwoFactor {
-                email,
-                password,
-                code,
-                method: app.two_factor_method,
-            });
+            let method = app.two_factor_method;
+            app.submit(
+                InFlight::LoginTwoFactor,
+                "Logging in…",
+                WorkerRequest::LoginTwoFactor {
+                    email,
+                    password,
+                    code,
+                    method,
+                },
+            );
         } else {
-            app.in_flight = Some(InFlight::LoginOtp);
-            let _ = app.worker_tx.send(WorkerRequest::LoginOtp {
-                email,
-                password,
-                otp: code,
-            });
+            app.submit(
+                InFlight::LoginOtp,
+                "Logging in…",
+                WorkerRequest::LoginOtp {
+                    email,
+                    password,
+                    otp: code,
+                },
+            );
         }
     } else if app.authenticated {
-        app.in_flight = Some(InFlight::Unlock);
-        let _ = app.worker_tx.send(WorkerRequest::Unlock { password });
+        app.submit(
+            InFlight::Unlock,
+            "Logging in…",
+            WorkerRequest::Unlock { password },
+        );
     } else {
-        app.in_flight = Some(InFlight::Login);
-        let _ = app.worker_tx.send(WorkerRequest::Login { email, password });
+        app.submit(
+            InFlight::Login,
+            "Logging in…",
+            WorkerRequest::Login { email, password },
+        );
     }
 }
 
@@ -354,9 +373,11 @@ fn on_login_success(app: &mut App, session_key: &str) {
     }
     app.password_input.clear();
     app.password_cursor = 0;
-    app.in_flight = Some(InFlight::PostLoginItems);
-    app.set_action(ActionState::Running("Loading vault…".into()));
-    let _ = app.worker_tx.send(WorkerRequest::ListItems);
+    app.submit(
+        InFlight::PostLoginItems,
+        "Loading vault…",
+        WorkerRequest::ListItems,
+    );
 }
 
 /// Post-login: items loaded → fetch the secondary session data.
@@ -367,8 +388,10 @@ pub fn handle_post_login_items(app: &mut App, r: Result<Vec<Item>, BwError>) {
             app.items = items;
             app.sort_items();
             app.push_cmd("bw list items", true, &format!("{count} items loaded"));
-            app.in_flight = Some(InFlight::PostLoginSessionData);
-            let _ = app.worker_tx.send(WorkerRequest::ParallelSessionData);
+            // Chained step — keep the "Loading vault…" toast.
+            if app.begin(InFlight::PostLoginSessionData) {
+                let _ = app.worker_tx.send(WorkerRequest::ParallelSessionData);
+            }
         }
         Err(e) => {
             // Login succeeded but the first list failed — land the user
@@ -397,9 +420,11 @@ pub fn api_key_login(app: &mut App) {
         ));
         return;
     }
-    app.set_action(ActionState::Running("API-key login…".into()));
-    app.in_flight = Some(InFlight::LoginApiKey);
-    let _ = app.worker_tx.send(WorkerRequest::LoginApiKey);
+    app.submit(
+        InFlight::LoginApiKey,
+        "API-key login…",
+        WorkerRequest::LoginApiKey,
+    );
 }
 
 /// `bw login --apikey` response (vault left Locked).
@@ -419,11 +444,11 @@ pub fn handle_api_key(app: &mut App, r: Result<(), BwError>) {
 
 /// SSO login via `bw login --sso` (opens the browser on the worker).
 pub fn sso_login(app: &mut App) {
-    app.set_action(ActionState::Running(
-        "SSO login (check your browser)…".into(),
-    ));
-    app.in_flight = Some(InFlight::LoginSso);
-    let _ = app.worker_tx.send(WorkerRequest::LoginSso);
+    app.submit(
+        InFlight::LoginSso,
+        "SSO login (check your browser)…",
+        WorkerRequest::LoginSso,
+    );
 }
 
 /// `bw login --sso` response (vault left Locked).
@@ -448,9 +473,10 @@ pub fn handle_sso(app: &mut App, r: Result<(), BwError>) {
 /// fire-and-forget so the worker drops its key in the background.
 pub fn lock_vault(app: &mut App) {
     let _ = app.worker_tx.send(WorkerRequest::Lock);
-    // Drop any in-flight ticket so a late response can't repopulate the
-    // list after we've cleared it.
+    // Fire-and-forget: drop any in-flight ticket (and its watchdog timer)
+    // so a late response can't repopulate the list after we've cleared it.
     app.in_flight = None;
+    app.request_started = None;
     session_file::clear();
     app.session_marker = None;
     app.screen = Screen::Login;
@@ -483,9 +509,11 @@ pub fn commit_server_change(app: &mut App) {
         app.active_field = LoginField::Server;
         return;
     }
-    app.set_action(ActionState::Running("Setting server…".into()));
-    app.in_flight = Some(InFlight::SetServer);
-    let _ = app.worker_tx.send(WorkerRequest::SetServer { url });
+    app.submit(
+        InFlight::SetServer,
+        "Setting server…",
+        WorkerRequest::SetServer { url },
+    );
 }
 
 /// `bw config server` response.
@@ -512,9 +540,7 @@ pub fn handle_set_server(app: &mut App, r: Result<(), BwError>) {
 
 /// Logs out of the current account.
 pub fn logout(app: &mut App) {
-    app.set_action(ActionState::Running("Logging out…".into()));
-    app.in_flight = Some(InFlight::Logout);
-    let _ = app.worker_tx.send(WorkerRequest::Logout);
+    app.submit(InFlight::Logout, "Logging out…", WorkerRequest::Logout);
 }
 
 /// `bw logout` response.
@@ -556,9 +582,11 @@ pub fn handle_logout(app: &mut App, r: Result<(), BwError>) {
 
 /// Fetches the current user's fingerprint phrase.
 pub fn show_fingerprint(app: &mut App) {
-    app.set_action(ActionState::Running("Fetching fingerprint…".into()));
-    app.in_flight = Some(InFlight::Fingerprint);
-    let _ = app.worker_tx.send(WorkerRequest::GetFingerprint);
+    app.submit(
+        InFlight::Fingerprint,
+        "Fetching fingerprint…",
+        WorkerRequest::GetFingerprint,
+    );
 }
 
 /// `bw get fingerprint me` response.

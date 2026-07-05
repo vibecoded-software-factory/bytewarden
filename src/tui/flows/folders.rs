@@ -16,8 +16,10 @@ use crate::tui::worker::{InFlight, WorkerRequest};
 /// Queues a silent folder reload (worker). The caller has already set the
 /// toast it wants the user to keep seeing.
 pub fn request_reload_folders_silent(app: &mut App) {
-    app.in_flight = Some(InFlight::FolderReload);
-    let _ = app.worker_tx.send(WorkerRequest::ListFolders);
+    // Silent — preserve the caller's toast, so claim via `begin`.
+    if app.begin(InFlight::FolderReload) {
+        let _ = app.worker_tx.send(WorkerRequest::ListFolders);
+    }
 }
 
 /// `bw list folders` response — applies the list silently (preserves the
@@ -192,16 +194,18 @@ pub fn commit_name_popup(app: &mut App) {
 
     match state.purpose.clone() {
         FolderNamePurpose::Create => {
-            app.set_action(ActionState::Running("Creating folder…".into()));
-            app.in_flight = Some(InFlight::CreateFolder);
-            let _ = app.worker_tx.send(WorkerRequest::CreateFolder { name });
+            app.submit(
+                InFlight::CreateFolder,
+                "Creating folder…",
+                WorkerRequest::CreateFolder { name },
+            );
         }
         FolderNamePurpose::Rename { folder_id } => {
-            app.set_action(ActionState::Running("Renaming folder…".into()));
-            app.in_flight = Some(InFlight::EditFolder);
-            let _ = app
-                .worker_tx
-                .send(WorkerRequest::EditFolder { folder_id, name });
+            app.submit(
+                InFlight::EditFolder,
+                "Renaming folder…",
+                WorkerRequest::EditFolder { folder_id, name },
+            );
         }
     }
 }
@@ -284,12 +288,12 @@ pub fn confirm_delete(app: &mut App) {
         app.folder_selected = 0;
         app.rebuild_filtered_cache();
     }
-    app.set_action(ActionState::Running("Deleting folder…".into()));
     app.screen = crate::tui::screens::Screen::Vault;
-    app.in_flight = Some(InFlight::DeleteFolder { name });
-    let _ = app
-        .worker_tx
-        .send(WorkerRequest::DeleteFolder { folder_id: id });
+    app.submit(
+        InFlight::DeleteFolder { name },
+        "Deleting folder…",
+        WorkerRequest::DeleteFolder { folder_id: id },
+    );
 }
 
 /// `bw delete folder` response. Items previously in the folder aren't
@@ -301,8 +305,9 @@ pub fn handle_delete(app: &mut App, name: String, r: Result<(), BwError>) {
             app.set_action(ActionState::Done(format!("Folder \"{name}\" deleted ✓")));
             // Items' folder_id pointers changed → reload items, then
             // folders. Both silent so the toast survives.
-            app.in_flight = Some(InFlight::FolderDeleteReloadItems);
-            let _ = app.worker_tx.send(WorkerRequest::ListItems);
+            if app.begin(InFlight::FolderDeleteReloadItems) {
+                let _ = app.worker_tx.send(WorkerRequest::ListItems);
+            }
         }
         Err(e) => app.cmd_err("bw delete folder", &e, "Delete folder failed"),
     }

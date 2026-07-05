@@ -83,9 +83,11 @@ pub fn verify_and_run(app: &mut App) {
     // state is kept so the response handler can read the deferred action
     // and, on failure, re-enable the error strip.
     let password = Zeroizing::new(state.input.as_str().to_string());
-    app.set_action(ActionState::Running("Verifying…".into()));
-    app.in_flight = Some(InFlight::RepromptUnlock);
-    let _ = app.worker_tx.send(WorkerRequest::Unlock { password });
+    app.submit(
+        InFlight::RepromptUnlock,
+        "Verifying…",
+        WorkerRequest::Unlock { password },
+    );
 }
 
 /// `bw unlock` (reprompt) response. On success runs the deferred action;

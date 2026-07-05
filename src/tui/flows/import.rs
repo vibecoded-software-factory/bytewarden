@@ -52,9 +52,11 @@ pub fn commit(app: &mut App) {
         return;
     }
 
-    app.set_action(ActionState::Running("Importing…".into()));
-    app.in_flight = Some(InFlight::Import);
-    let _ = app.worker_tx.send(WorkerRequest::Import { format, path });
+    app.submit(
+        InFlight::Import,
+        "Importing…",
+        WorkerRequest::Import { format, path },
+    );
 }
 
 /// `bw import` response. On success, closes the popup and silently
@@ -68,8 +70,9 @@ pub fn handle(app: &mut App, r: Result<(), BwError>) {
             app.import = None;
             app.screen = Screen::Vault;
             // Fresh data — reload items then folders (both silent).
-            app.in_flight = Some(InFlight::ImportReloadItems);
-            let _ = app.worker_tx.send(WorkerRequest::ListItems);
+            if app.begin(InFlight::ImportReloadItems) {
+                let _ = app.worker_tx.send(WorkerRequest::ListItems);
+            }
         }
         Err(e) => app.cmd_err(&cmd, &e, "Import failed"),
     }
@@ -81,8 +84,9 @@ pub fn handle_reload_items(app: &mut App, r: Result<Vec<crate::domain::Item>, Bw
         Ok(items) => super::vault::set_items(app, items),
         Err(e) => app.push_cmd("bw list items", false, &e),
     }
-    app.in_flight = Some(InFlight::ImportReloadFolders);
-    let _ = app.worker_tx.send(WorkerRequest::ListFolders);
+    if app.begin(InFlight::ImportReloadFolders) {
+        let _ = app.worker_tx.send(WorkerRequest::ListFolders);
+    }
 }
 
 /// Silent post-import folder reload.

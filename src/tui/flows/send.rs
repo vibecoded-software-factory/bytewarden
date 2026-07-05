@@ -61,13 +61,15 @@ pub fn commit(app: &mut App) {
         return;
     }
 
-    app.set_action(ActionState::Running("Creating Send…".into()));
-    app.in_flight = Some(InFlight::SendText);
-    let _ = app.worker_tx.send(WorkerRequest::SendText {
-        name,
-        days,
-        content,
-    });
+    app.submit(
+        InFlight::SendText,
+        "Creating Send…",
+        WorkerRequest::SendText {
+            name,
+            days,
+            content,
+        },
+    );
 }
 
 /// `bw send` response — copies the resulting URL to the clipboard.

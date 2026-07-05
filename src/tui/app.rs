@@ -14,7 +14,7 @@
 //! to thin getters/mutators.
 
 use std::sync::mpsc::{Receiver, Sender};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use zeroize::Zeroizing;
 
@@ -221,7 +221,22 @@ pub struct App {
     /// worker thread. `Some` ⇒ busy; input is gated and a new request
     /// must not be queued until the matching response clears it. Multi-step
     /// flows chain by setting a fresh ticket from a response handler.
+    /// Claim it through [`Self::submit`] / [`Self::begin`], never by
+    /// assigning directly — that's what stamps the watchdog timer and
+    /// enforces the single-in-flight + worker-dead guards.
     pub in_flight: Option<InFlight>,
+    /// When the current in-flight request was claimed. Drives the
+    /// [`Self::watchdog_release_stuck_request`] backstop so a lost ticket
+    /// (worker died mid-call, response dropped) can't gate input forever.
+    pub request_started: Option<Instant>,
+    /// Latched once the worker response channel closes — every worker
+    /// thread is gone, so no response will ever arrive. [`Self::begin`]
+    /// refuses while set and a persistent error is shown.
+    pub worker_dead: bool,
+    /// Configurable `bw list items` wall-clock budget (from settings),
+    /// used to size the watchdog so a legitimately slow load on a huge
+    /// vault isn't mistaken for a lost ticket.
+    pub list_items_timeout_secs: u64,
 
     // ── Auto-lock ─────────────────────────────────────────────────────────
     pub auto_lock: bool,
@@ -430,6 +445,9 @@ impl App {
             action_state: ActionState::Idle,
             action_tick: 0,
             in_flight: None,
+            request_started: None,
+            worker_dead: false,
+            list_items_timeout_secs: cfg.list_items_timeout_secs,
             auto_lock: cfg.auto_lock,
             lock_after_secs: cfg.lock_after_secs,
             last_activity: Instant::now(),
@@ -478,6 +496,99 @@ impl App {
     /// input handlers gate most keys so a second request can't be queued.
     pub fn is_busy(&self) -> bool {
         self.in_flight.is_some()
+    }
+
+    // ── Worker request lifecycle ──────────────────────────────────────────
+
+    /// Claims the in-flight slot for `slot` and stamps the watchdog timer,
+    /// returning `true`. Refuses (returns `false`, leaving any current
+    /// request untouched) when the worker is dead or a request is already
+    /// in flight.
+    ///
+    /// Input is already gated while busy (`input::busy_blocks`), but
+    /// `begin` is the belt-and-suspenders guard against a *programmatic*
+    /// double-send (e.g. an auto-refresh racing a user action) silently
+    /// overwriting `in_flight` and desynchronising the ticket ↔ response
+    /// ordering. Every `request_*` flow claims the slot through this
+    /// (usually via [`Self::submit`]) rather than assigning `in_flight`
+    /// directly. Use bare `begin` only for a *silent* request that must
+    /// not set a `Running` toast (the post-mutation reloads).
+    pub fn begin(&mut self, slot: InFlight) -> bool {
+        if self.worker_dead {
+            self.set_action(ActionState::Error(
+                "worker thread died — restart bytewarden".into(),
+            ));
+            return false;
+        }
+        if self.in_flight.is_some() {
+            self.push_cmd("worker request", false, "busy — request ignored");
+            return false;
+        }
+        self.in_flight = Some(slot);
+        self.request_started = Some(Instant::now());
+        true
+    }
+
+    /// Starts a worker request end-to-end: claims the slot ([`Self::begin`]),
+    /// shows the `Running` toast, and sends on the worker lane. A failed
+    /// send (worker gone) releases the slot and routes through
+    /// [`Self::on_worker_dead`] instead of leaving the UI busy forever.
+    /// Returns whether the request was dispatched — the shared body of
+    /// every non-silent `request_*` flow.
+    pub fn submit(&mut self, slot: InFlight, label: &str, req: WorkerRequest) -> bool {
+        if !self.begin(slot) {
+            return false;
+        }
+        self.set_action(ActionState::Running(label.to_string()));
+        if self.worker_tx.send(req).is_err() {
+            self.in_flight = None;
+            self.on_worker_dead();
+            return false;
+        }
+        true
+    }
+
+    /// Unwedges the UI after the worker response channel closed — every
+    /// worker thread is gone, so no response will ever arrive. Releases the
+    /// in-flight slot (otherwise `busy_blocks` swallows keys forever) and
+    /// surfaces a persistent error, once.
+    pub fn on_worker_dead(&mut self) {
+        if self.worker_dead {
+            return;
+        }
+        self.worker_dead = true;
+        self.in_flight = None;
+        self.request_started = None;
+        self.set_action(ActionState::Error(
+            "worker thread died — bw calls disabled; restart bytewarden".into(),
+        ));
+        self.push_cmd("worker", false, "response channel closed — worker died");
+    }
+
+    /// Watchdog for a lost in-flight ticket: every `bw` call has a per-op
+    /// timeout, so a claimed slot must resolve within the largest plausible
+    /// budget. If it doesn't (worker died mid-call, response dropped),
+    /// release the slot so the UI doesn't stay busy forever. Called once
+    /// per run-loop tick.
+    pub fn watchdog_release_stuck_request(&mut self) {
+        let Some(started) = self.request_started else {
+            return;
+        };
+        if self.in_flight.is_none() {
+            return;
+        }
+        // Above every fixed per-op timeout (≤60 s) and the configurable
+        // list budget, plus generous slack — it only ever fires on a
+        // genuinely lost ticket, not a slow-but-live call.
+        let budget = self.list_items_timeout_secs.max(90).saturating_add(60);
+        if started.elapsed() > Duration::from_secs(budget) {
+            self.in_flight = None;
+            self.request_started = None;
+            self.set_action(ActionState::Error(
+                "request got no response in time — released".into(),
+            ));
+            self.push_cmd("worker watchdog", false, "abandoned in-flight request");
+        }
     }
 
     // ── Activity / navigation ─────────────────────────────────────────────
@@ -1109,7 +1220,95 @@ mod tests {
     use super::*;
     use crate::domain::LoweredItem;
     use crate::domain::item::{Item, LoginData};
+    use crate::ports::{BwError, UserSettings};
     use crate::tui::folders::FolderFilter;
+    use std::sync::mpsc::channel;
+
+    struct NoopClipboard;
+    impl ClipboardPort for NoopClipboard {
+        fn write(&self, _: &str) -> Result<(), BwError> {
+            Ok(())
+        }
+    }
+
+    struct DefaultSettings;
+    impl SettingsPort for DefaultSettings {
+        fn read(&self) -> UserSettings {
+            UserSettings::default()
+        }
+        fn write(&self, _: bool, _: Option<&str>) {}
+        fn write_auto_lock(&self, _: bool) {}
+        fn write_keep_session(&self, _: bool) {}
+        fn write_theme_name(&self, _: &str) {}
+        fn config_dir(&self) -> std::path::PathBuf {
+            std::path::PathBuf::from(".")
+        }
+    }
+
+    /// Builds an `App` wired to live-but-inert channels. Returns the
+    /// worker-request receiver (so a request `submit`s to a connected
+    /// channel) and the response sender (kept alive so `App::worker_rx`
+    /// stays connected) — hold both for the duration of the test.
+    fn fresh_app() -> (App, Receiver<WorkerRequest>, Sender<WorkerResponse>) {
+        let (worker_tx, req_rx) = channel::<WorkerRequest>();
+        let (resp_tx, worker_rx) = channel::<WorkerResponse>();
+        let app = App::new(
+            worker_tx,
+            worker_rx,
+            Box::new(NoopClipboard),
+            Box::new(DefaultSettings),
+        );
+        (app, req_rx, resp_tx)
+    }
+
+    #[test]
+    fn begin_enforces_single_in_flight() {
+        let (mut app, _req_rx, _resp_tx) = fresh_app();
+        assert!(app.begin(InFlight::LoadItems));
+        assert!(app.is_busy());
+        // A second claim is refused while one is in flight, and the
+        // original ticket survives (no silent clobber).
+        assert!(!app.begin(InFlight::Sync));
+        assert_eq!(app.in_flight, Some(InFlight::LoadItems));
+    }
+
+    #[test]
+    fn begin_refuses_when_worker_dead() {
+        let (mut app, _req_rx, _resp_tx) = fresh_app();
+        app.on_worker_dead();
+        assert!(app.worker_dead);
+        assert!(!app.begin(InFlight::LoadItems));
+        assert!(app.in_flight.is_none());
+    }
+
+    #[test]
+    fn submit_dispatches_toast_and_request() {
+        let (mut app, req_rx, _resp_tx) = fresh_app();
+        assert!(app.submit(InFlight::Sync, "Syncing…", WorkerRequest::Sync));
+        assert!(app.is_busy());
+        assert!(matches!(app.action_state, ActionState::Running(_)));
+        assert!(app.request_started.is_some());
+        // The request actually reached the worker channel.
+        assert!(matches!(req_rx.try_recv(), Ok(WorkerRequest::Sync)));
+    }
+
+    #[test]
+    fn submit_on_dead_channel_marks_worker_dead() {
+        let (mut app, req_rx, _resp_tx) = fresh_app();
+        drop(req_rx); // the worker is gone — the send will fail
+        assert!(!app.submit(InFlight::Sync, "Syncing…", WorkerRequest::Sync));
+        assert!(app.worker_dead);
+        assert!(app.in_flight.is_none());
+    }
+
+    #[test]
+    fn watchdog_leaves_a_fresh_request_alone() {
+        let (mut app, _req_rx, _resp_tx) = fresh_app();
+        app.submit(InFlight::Sync, "Syncing…", WorkerRequest::Sync);
+        // Just claimed — nowhere near the budget, so the slot stays.
+        app.watchdog_release_stuck_request();
+        assert!(app.is_busy());
+    }
 
     fn item(id: &str, name: &str, item_type: u8, folder: Option<&str>) -> Item {
         Item {

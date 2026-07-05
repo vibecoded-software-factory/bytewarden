@@ -34,9 +34,11 @@ pub(crate) fn set_trash(app: &mut App, items: Vec<Item>) {
 
 /// Loads the full vault list with a "Loading…" spinner.
 pub fn request_load_items(app: &mut App) {
-    app.set_action(ActionState::Running("Loading vault…".into()));
-    app.in_flight = Some(InFlight::LoadItems);
-    let _ = app.worker_tx.send(WorkerRequest::ListItems);
+    app.submit(
+        InFlight::LoadItems,
+        "Loading vault…",
+        WorkerRequest::ListItems,
+    );
 }
 
 pub fn handle_load_items(app: &mut App, r: Result<Vec<Item>, BwError>) {
@@ -54,9 +56,11 @@ pub fn handle_load_items(app: &mut App, r: Result<Vec<Item>, BwError>) {
 /// Loads trashed items with a "Loading…" spinner — used when the user
 /// picks the Trash filter.
 pub fn request_load_trash(app: &mut App) {
-    app.set_action(ActionState::Running("Loading trash…".into()));
-    app.in_flight = Some(InFlight::LoadTrash);
-    let _ = app.worker_tx.send(WorkerRequest::ListTrash);
+    app.submit(
+        InFlight::LoadTrash,
+        "Loading trash…",
+        WorkerRequest::ListTrash,
+    );
 }
 
 pub fn handle_load_trash(app: &mut App, r: Result<Vec<Item>, BwError>) {
@@ -80,8 +84,11 @@ pub fn handle_load_trash(app: &mut App, r: Result<Vec<Item>, BwError>) {
 /// Queues a silent vault-list refresh. The caller has already set the
 /// toast it wants the user to keep seeing.
 pub fn request_reload_items_silent(app: &mut App) {
-    app.in_flight = Some(InFlight::ReloadItemsSilent);
-    let _ = app.worker_tx.send(WorkerRequest::ListItems);
+    // Silent — the caller's prior toast must survive, so claim the slot
+    // through `begin` (no `Running` override).
+    if app.begin(InFlight::ReloadItemsSilent) {
+        let _ = app.worker_tx.send(WorkerRequest::ListItems);
+    }
 }
 
 pub fn handle_reload_items_silent(app: &mut App, r: Result<Vec<Item>, BwError>) {
@@ -99,9 +106,7 @@ pub fn handle_reload_items_silent(app: &mut App, r: Result<Vec<Item>, BwError>) 
 
 /// Queues a vault sync.
 pub fn request_sync(app: &mut App) {
-    app.set_action(ActionState::Running("Syncing…".into()));
-    app.in_flight = Some(InFlight::Sync);
-    let _ = app.worker_tx.send(WorkerRequest::Sync);
+    app.submit(InFlight::Sync, "Syncing…", WorkerRequest::Sync);
 }
 
 pub fn handle_sync(app: &mut App, r: Result<(), BwError>) {
@@ -110,8 +115,9 @@ pub fn handle_sync(app: &mut App, r: Result<(), BwError>) {
             app.push_cmd("bw sync", true, "vault synced");
             app.set_action(ActionState::Done("Synced ✓".into()));
             // Refresh silently so the "Synced ✓" toast survives.
-            app.in_flight = Some(InFlight::SyncReload);
-            let _ = app.worker_tx.send(WorkerRequest::ListItems);
+            if app.begin(InFlight::SyncReload) {
+                let _ = app.worker_tx.send(WorkerRequest::ListItems);
+            }
         }
         Err(e) => app.cmd_err("bw sync", &e, "Sync failed"),
     }

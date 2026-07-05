@@ -18,12 +18,15 @@ one branch → PR → squash-merge to `dev`.
   (`bw_cli/mod.rs`, `process.rs`); `Display` + `std::error::Error`; the
   command log renders the classified error. Login challenges stay in the
   domain `LoginOutcome` (an `Auth` variant is deferred — see CLAUDE.md).
-- [ ] **Batch 3 — Execution discipline (`App::submit`).** `App::submit(slot,
+- [x] **Batch 3 — Execution discipline (`App::submit`).** `App::submit(slot,
   label, req)` = `begin` + `Running` toast + send; a failed send routes
-  through `on_worker_dead`. Add `begin` (refuses double-send / dead worker),
-  `on_worker_dead`, `watchdog_release_stuck_request` (per tick). Detect the
-  dead worker in the run loop (`TryRecvError::Disconnected`) with a persistent
-  badge. Migrate every `request_*` to `submit`.
+  through `on_worker_dead`. Added `begin` (refuses double-send / dead worker),
+  `on_worker_dead`, `watchdog_release_stuck_request` (per tick, budget from
+  the list-items timeout). Run loop detects `TryRecvError::Disconnected` →
+  `on_worker_dead`. Every `request_*` migrated to `submit` (non-silent) or
+  bare `begin` (silent reloads); the fire-and-forget lock stays a bare send.
+  New unit tests cover the single-in-flight / worker-dead / dispatch
+  invariants.
 - [ ] **Batch 4 — `LineEditor` + shared input.** `domain::LineEditor`
   (UTF-8-safe byte cursor, word ops `Ctrl+W`/`Ctrl+U`/`Ctrl+←→`/`Ctrl+A`/
   `Ctrl+E`, `ZeroizeOnDrop`). `input::common`: `route_line_editor`,
