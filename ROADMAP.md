@@ -97,9 +97,19 @@ one branch → PR → squash-merge to `dev`.
     concrete need (or a quieter moment) rather than risking wide regressions
     blind. The one rebuild-path-per-cache discipline is already documented in
     CLAUDE.md and honored.
-- [ ] **Batch 9 — Unified field model (detail/edit).** One source of truth for
-  field order (today `detail_fields.rs` and `edit_field.rs` diverge). Kill the
-  hand-walked positional field enumeration in `copy_selected_field`.
+- [x] **Batch 9 — Kill the hand-walked copy enumeration.** Replaced
+  `copy_selected_field`'s brittle `idx += 1` walk (which duplicated the detail
+  renderer's field order and silently forgot attachment rows) with a pure
+  `detail_copy_targets(item) -> Vec<CopyTarget>` that mirrors
+  `build_detail_fields` row-for-row; the copy handler just indexes it and
+  dispatches by target kind. A unit test **pins** the two to the same length
+  (login/card/ssh), so they can't drift again — and attachment rows are now
+  handled explicitly (they copied nothing before).
+  - *Deferred:* fully merging `detail_fields.rs` and `edit_field.rs` into one
+    builder is a large model change (the two are different projections — masked
+    read display vs editable form with per-field kind/cursor), high-risk to do
+    blind. The copy-order divergence (the concrete bug) is fixed and pinned;
+    the broader merge waits for a runtime-verifiable moment.
 - [ ] **Batch 10 — Background lane.** Silent reloads (post-delete/import/move,
   idle resync) off the user's slot, routed by response variant.
 
