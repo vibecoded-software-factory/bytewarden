@@ -110,18 +110,45 @@ impl SystemClipboardAdapter {
     }
 }
 
+impl SystemClipboardAdapter {
+    /// Sets the terminal's clipboard via the **OSC 52** escape sequence —
+    /// the fallback when no clipboard tool exists (headless / SSH / tmux):
+    /// writes `ESC ] 52 ; c ; <base64> BEL` to stdout. Best-effort — a
+    /// terminal that doesn't speak OSC 52 simply ignores it. Written
+    /// between frames (from a synchronous copy flow), and the next redraw
+    /// repaints the screen, so it doesn't corrupt the TUI.
+    fn write_osc52(text: &str) {
+        use std::io::Write;
+        let seq = format!(
+            "\x1b]52;c;{}\x07",
+            crate::adapters::bw_cli::codec::base64_encode(text)
+        );
+        let mut out = std::io::stdout();
+        let _ = out.write_all(seq.as_bytes());
+        let _ = out.flush();
+    }
+}
+
 impl ClipboardPort for SystemClipboardAdapter {
     fn write(&self, text: &str) -> Result<(), BwError> {
-        let backend = Self::choose_backend().ok_or_else(|| {
-            BwError::Spawn("No clipboard tool found (install wl-copy or xclip)".to_string())
-        })?;
-        Self::write_via(&backend.write_argv, text)
+        match Self::choose_backend() {
+            Some(backend) => Self::write_via(&backend.write_argv, text),
+            // No native tool — fall back to OSC 52 instead of failing.
+            None => {
+                Self::write_osc52(text);
+                Ok(())
+            }
+        }
     }
 
     fn write_with_clear(&self, text: &str, clear_after_secs: u64) -> Result<(), BwError> {
-        let backend = Self::choose_backend().ok_or_else(|| {
-            BwError::Spawn("No clipboard tool found (install wl-copy or xclip)".to_string())
-        })?;
+        let Some(backend) = Self::choose_backend() else {
+            // No native tool — OSC 52. We can't read the clipboard back
+            // over OSC 52 to compare, so the timed auto-clear is skipped
+            // on this path (the write still happens).
+            Self::write_osc52(text);
+            return Ok(());
+        };
         Self::write_via(&backend.write_argv, text)?;
 
         if clear_after_secs == 0 {
