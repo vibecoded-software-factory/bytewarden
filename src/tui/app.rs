@@ -613,7 +613,10 @@ impl App {
     /// preview — no persistence. Called whenever the picker moves.
     pub fn settings_preview_theme(&mut self) {
         if let Some(&p) = theme::Preset::ALL.get(self.settings_theme_idx) {
-            self.theme = Theme::from_palette(&p.palette());
+            self.theme = theme::adapt(
+                Theme::from_palette(&p.palette()),
+                theme::ColorCaps::detect(),
+            );
         }
     }
 
@@ -621,7 +624,10 @@ impl App {
     /// `name = "<preset>"` to `config.toml`, and closes the overlay.
     pub fn settings_confirm_theme(&mut self) {
         if let Some(&p) = theme::Preset::ALL.get(self.settings_theme_idx) {
-            self.theme = Theme::from_palette(&p.palette());
+            self.theme = theme::adapt(
+                Theme::from_palette(&p.palette()),
+                theme::ColorCaps::detect(),
+            );
             self.settings.write_theme_name(p.name());
             self.push_cmd("theme", true, &format!("saved {}", p.name()));
             self.set_action(ActionState::Done(format!("Theme: {}", p.label())));

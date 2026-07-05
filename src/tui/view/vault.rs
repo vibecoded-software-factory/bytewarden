@@ -509,7 +509,7 @@ fn render_cmd_log(frame: &mut Frame, app: &App, area: ratatui::layout::Rect, cmd
     let visible = (cmd_h as usize).saturating_sub(2);
     let total = app.cmd_log.len();
     // Entry-based scroll-back with a `↑N` tag — the shared command-log
-    // convention across the three TUIs. One line per entry:
+    // convention. One line per entry:
     // `✓ <cmd>  →  <detail>` (was a two-line `$ cmd` / `icon detail`).
     let scroll = app.cmd_log_scroll.min(total.saturating_sub(visible));
     let scroll_tag = if scroll == 0 {
