@@ -66,8 +66,8 @@ pub struct Theme {
 ///
 /// The core roles map straight onto the shared `Theme` fields;
 /// [`Theme::from_palette`] maps the remaining roles to bytewarden's own
-/// domain colors (the splash starfield + per-item-type accents). This is what keeps
-/// the palettes coherent across the three apps.
+/// domain colors (the splash starfield + per-item-type accents), so every
+/// preset gets a coherent set for free.
 #[derive(Debug, Clone, Copy)]
 pub struct Palette {
     pub base: Color,
@@ -85,10 +85,9 @@ pub struct Palette {
     pub orange: Color,
 }
 
-/// A bundled, named theme. The default (and the shared default across
-/// the three TUIs) is [`Preset::CatppuccinMocha`]. Selected via
-/// `name = "<preset>"` in the `[theme]` section of `config.toml`, or
-/// live from the in-app theme picker.
+/// A bundled, named theme. The default is [`Preset::DEFAULT`] (Nord).
+/// Selected via `name = "<preset>"` in the `[theme]` section of
+/// `config.toml`, or live from the in-app theme picker.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Preset {
     CatppuccinMocha,
@@ -106,8 +105,7 @@ impl Preset {
         Preset::CatppuccinLatte,
     ];
 
-    /// The shared default preset across the three TUIs — used when the
-    /// config names no preset.
+    /// The default preset — used when the config names no preset.
     pub const DEFAULT: Preset = Preset::Nord;
 
     /// The stable config key (lower-kebab) written to `config.toml`.
@@ -280,25 +278,153 @@ fn mix(a: Color, b: Color, t: f32) -> Color {
 
 impl Default for Theme {
     fn default() -> Self {
-        // The shared default across the three TUIs is Catppuccin Mocha,
-        // but `foreground` stays `Reset` so text inherits the terminal
-        // until the user opts into a full preset (via `name = …` or the
-        // in-app picker).
+        // Built from the default preset ([`Preset::DEFAULT`] = Nord), but
+        // `foreground` stays `Reset` so text inherits the terminal until
+        // the user opts into a full preset (via `name = …` or the in-app
+        // picker).
         let mut t = Theme::from_palette(&Preset::DEFAULT.palette());
         t.foreground = Color::Reset;
         t
     }
 }
 
-/// Loads the theme from the `[theme]` section of `<config_dir>/config.toml`.
+/// Loads the theme from the `[theme]` section of `<config_dir>/config.toml`,
+/// then **adapts it to the terminal's color capability** (see
+/// [`ColorCaps`]) so a headless / low-color terminal gets a deterministic
+/// downgrade instead of whatever the emulator would approximate.
 ///
-/// Returns [`Theme::default`] when the file or section is missing.
+/// Returns the (adapted) [`Theme::default`] when the file or section is
+/// missing.
 pub fn load(config_dir: &Path) -> Theme {
+    adapt(load_unadapted(config_dir), ColorCaps::detect())
+}
+
+/// The theme exactly as configured, before terminal-capability
+/// adaptation — kept separate so palette hex values stay exact for the
+/// picker preview and the tests.
+fn load_unadapted(config_dir: &Path) -> Theme {
     let file = config_dir.join("config.toml");
-    let Ok(text) = std::fs::read_to_string(&file) else {
-        return Theme::default();
+    match std::fs::read_to_string(&file) {
+        Ok(text) => parse_theme_section(&text),
+        Err(_) => Theme::default(),
+    }
+}
+
+/// The terminal's color capability, detected once from the environment.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ColorCaps {
+    /// `NO_COLOR` set — collapse every hue to a grayscale tier so meaning
+    /// comes from brightness + bold/dim, never from a color the terminal
+    /// won't show.
+    Mono,
+    /// No truecolor hint — quantize every RGB to the nearest xterm-256
+    /// index deterministically (instead of leaving it to the emulator).
+    Indexed256,
+    /// `COLORTERM=truecolor|24bit` — pass RGB through untouched.
+    True,
+}
+
+impl ColorCaps {
+    /// Detects the capability from `NO_COLOR` / `COLORTERM`.
+    pub fn detect() -> ColorCaps {
+        if std::env::var("NO_COLOR").is_ok_and(|v| !v.is_empty()) {
+            return ColorCaps::Mono;
+        }
+        match std::env::var("COLORTERM") {
+            Ok(v) if v.contains("truecolor") || v.contains("24bit") => ColorCaps::True,
+            _ => ColorCaps::Indexed256,
+        }
+    }
+}
+
+/// Adapts every color of `theme` to `caps`. Applied at *application*
+/// time (boot + the live picker), never inside `from_palette`, so the
+/// palette values stay exact. `Color::Reset` and named colors pass
+/// through every mode (the inherit-terminal contract).
+pub fn adapt(theme: Theme, caps: ColorCaps) -> Theme {
+    match caps {
+        ColorCaps::True => theme,
+        ColorCaps::Indexed256 => map_colors(theme, quantize_256),
+        ColorCaps::Mono => map_colors(theme, to_gray),
+    }
+}
+
+/// Applies `f` to **every** color field of the theme. Listed explicitly
+/// so a newly-added field can't silently skip adaptation.
+fn map_colors(t: Theme, f: fn(Color) -> Color) -> Theme {
+    Theme {
+        accent: f(t.accent),
+        inactive: f(t.inactive),
+        selected_bg: f(t.selected_bg),
+        success: f(t.success),
+        error: f(t.error),
+        dim: f(t.dim),
+        foreground: f(t.foreground),
+        placeholder: f(t.placeholder),
+        muted: f(t.muted),
+        star_dim: f(t.star_dim),
+        star_mid: f(t.star_mid),
+        star_bright: f(t.star_bright),
+        item_login: f(t.item_login),
+        item_card: f(t.item_card),
+        item_identity: f(t.item_identity),
+        item_note: f(t.item_note),
+        item_ssh: f(t.item_ssh),
+        item_favorite: f(t.item_favorite),
+    }
+}
+
+/// NO_COLOR: luma-weighted brightness → one of four named gray tiers.
+/// Non-RGB colors (`Reset`, named) pass through unchanged.
+fn to_gray(c: Color) -> Color {
+    let Color::Rgb(r, g, b) = c else {
+        return c;
     };
-    parse_theme_section(&text)
+    let luma = (2 * r as u32 + 3 * g as u32 + b as u32) / 6;
+    match luma {
+        0..=63 => Color::Black,
+        64..=127 => Color::DarkGray,
+        128..=191 => Color::Gray,
+        _ => Color::White,
+    }
+}
+
+/// Quantizes an RGB color to the nearest xterm-256 index — whichever of
+/// the 6×6×6 color cube (16–231) or the grayscale ramp (232–255) is
+/// closer in squared error. Non-RGB colors pass through unchanged.
+fn quantize_256(c: Color) -> Color {
+    let Color::Rgb(r, g, b) = c else {
+        return c;
+    };
+    const LEVELS: [u8; 6] = [0, 95, 135, 175, 215, 255];
+    let nearest_cube = |v: u8| -> (usize, u8) {
+        let mut best = (0usize, LEVELS[0]);
+        let mut best_err = i32::MAX;
+        for (i, &l) in LEVELS.iter().enumerate() {
+            let e = (l as i32 - v as i32).abs();
+            if e < best_err {
+                best_err = e;
+                best = (i, l);
+            }
+        }
+        best
+    };
+    let (ri, rl) = nearest_cube(r);
+    let (gi, gl) = nearest_cube(g);
+    let (bi, bl) = nearest_cube(b);
+    let cube_idx = 16 + 36 * ri + 6 * gi + bi;
+    let sq = |a: u8, x: u8| (a as i32 - x as i32).pow(2);
+    let cube_err = sq(rl, r) + sq(gl, g) + sq(bl, b);
+    // Grayscale ramp: indices 232..=255 hold values 8, 18, …, 238.
+    let avg = (r as i32 + g as i32 + b as i32) / 3;
+    let gidx = (((avg - 8) as f32 / 10.0).round() as i32).clamp(0, 23);
+    let gv = (8 + gidx * 10) as u8;
+    let gray_err = sq(gv, r) + sq(gv, g) + sq(gv, b);
+    if gray_err < cube_err {
+        Color::Indexed((232 + gidx) as u8)
+    } else {
+        Color::Indexed(cube_idx as u8)
+    }
 }
 
 /// Returns the [`Preset`] named in the `[theme]` section of
@@ -441,6 +567,42 @@ mod tests {
     #[test]
     fn parse_hex_roundtrips_known_value() {
         assert_eq!(parse_hex("#cba6f7"), Color::Rgb(0xcb, 0xa6, 0xf7));
+    }
+
+    #[test]
+    fn to_gray_maps_by_brightness_and_passes_non_rgb() {
+        assert_eq!(to_gray(Color::Rgb(255, 255, 255)), Color::White);
+        assert_eq!(to_gray(Color::Rgb(0, 0, 0)), Color::Black);
+        assert_eq!(to_gray(Color::Rgb(160, 160, 160)), Color::Gray);
+        assert_eq!(to_gray(Color::Rgb(90, 90, 90)), Color::DarkGray);
+        // Reset / named colors are never touched (the inherit contract).
+        assert_eq!(to_gray(Color::Reset), Color::Reset);
+    }
+
+    #[test]
+    fn quantize_256_picks_ramp_for_grays_and_cube_for_hues() {
+        // A neutral gray should land on the grayscale ramp (232..=255).
+        match quantize_256(Color::Rgb(130, 130, 130)) {
+            Color::Indexed(i) => assert!((232..=255).contains(&i), "expected ramp, got {i}"),
+            other => panic!("expected Indexed, got {other:?}"),
+        }
+        // A saturated hue should land on the 6×6×6 cube (16..=231).
+        match quantize_256(Color::Rgb(255, 0, 0)) {
+            Color::Indexed(i) => assert!((16..=231).contains(&i), "expected cube, got {i}"),
+            other => panic!("expected Indexed, got {other:?}"),
+        }
+        assert_eq!(quantize_256(Color::Reset), Color::Reset);
+    }
+
+    #[test]
+    fn adapt_true_is_a_passthrough_and_reset_survives_every_mode() {
+        let t = Theme::from_palette(&Preset::Nord.palette());
+        assert_eq!(adapt(t.clone(), ColorCaps::True).accent, t.accent);
+        // `foreground: Reset` must survive mono + indexed adaptation.
+        let mut r = t.clone();
+        r.foreground = Color::Reset;
+        assert_eq!(adapt(r.clone(), ColorCaps::Mono).foreground, Color::Reset);
+        assert_eq!(adapt(r, ColorCaps::Indexed256).foreground, Color::Reset);
     }
 
     #[test]

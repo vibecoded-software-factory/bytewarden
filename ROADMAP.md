@@ -110,16 +110,31 @@ one branch → PR → squash-merge to `dev`.
     read display vs editable form with per-field kind/cursor), high-risk to do
     blind. The copy-order divergence (the concrete bug) is fixed and pinned;
     the broader merge waits for a runtime-verifiable moment.
-- [ ] **Batch 10 — Background lane.** Silent reloads (post-delete/import/move,
-  idle resync) off the user's slot, routed by response variant.
+- [~] **Batch 10 — Background lane. (Deferred — low ROI for bytewarden.)**
+  The second worker lane exists in the north star to serve the *idle inbox
+  resync* and the *push stream* — **bytewarden has neither** (the vault only
+  changes via the user's own actions or an explicit sync). The post-mutation
+  silent reloads gate input only briefly, right after a user action. A second
+  worker thread + variant-based response routing carries real threading risk
+  for a marginal benefit, so it's parked. Revisit if bytewarden ever adds a
+  periodic auto-sync.
 
 ## Theme, responsiveness, robustness
 
-- [ ] **Batch 11 — Theme.** Legibility hierarchy (5 tiers): `inactive`/`dim`
-  lifted out of the dark band; list rows render `foreground`, not `dim`.
-  `ColorCaps::detect` + `adapt` (NO_COLOR mono, xterm-256 quantization,
-  truecolor passthrough). More presets; fix the stale "Mocha" vs Nord-default
-  comment.
+- [x] **Batch 11 — Theme: terminal color-capability adaptation.** Added
+  `ColorCaps::{Mono, Indexed256, True}` + `detect()` (from `NO_COLOR` /
+  `COLORTERM`) and `theme::adapt`, applied at boot (`load`) and in the live
+  picker: `NO_COLOR` collapses every hue to a grayscale tier (`to_gray`), a
+  non-truecolor terminal gets every RGB **deterministically quantized** to the
+  nearest xterm-256 index (`quantize_256`, cube vs ramp by squared error), and
+  truecolor passes through. `foreground: Reset` survives every mode. A
+  `map_colors` lists every field explicitly so none can skip adaptation. Fixed
+  the stale "Mocha"/"three TUIs" theme comments and swept the **last
+  cross-project references** out of `src/`. Pure functions unit-tested.
+  - *Deferred:* the legibility-hierarchy re-derivation (lifting `inactive`/
+    `dim` toward text; list rows `foreground` not `dim`) is a **visual** change
+    across every screen — held until it can be verified in a real terminal,
+    not shifted blind. More presets are additive and can land any time.
 - [ ] **Batch 12 — Responsiveness.** Monotonic `cmdlog_height`, `fit_segments`
   footer, scrollbars on every overflowing region, wrapped field values,
   modals that window by real height.
