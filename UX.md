@@ -127,18 +127,26 @@ always indexes the filtered cache and is re-anchored **by id** after a reload,
 never left dangling by index. See `CLAUDE.md` → *State & invalidation
 contracts* for the full rebuild table.
 
-## Chrome & widgets (`view::widgets` + `view::mod`)
+## Chrome & widgets (`view::widgets`)
 
-**Rounded borders everywhere (hard rule).** Every section panel and popup uses
-`BorderType::Rounded`, set once in `titled_block` / `list_table` / the picker
-chrome — position (the `MODAL_*` band) and the title style say "overlay", not
-a heavier border.
+**Border convention (hard rule).** **Section panels are square**
+(`widgets::titled_block`, `Borders::ALL`, no `BorderType::Rounded`) — the
+numbered `─[N]-Name` title and the accent-when-focused border carry the
+identity, so a heavy/rounded frame isn't needed and the columns line up
+crisply. **Popups, field cards and pickers are rounded**
+(`widgets::rounded_block` / `render_field_card`) — the rounded frame + the
+centered `MODAL_*` band is what says "overlay". Don't mix: a new panel is
+square via `titled_block`; a new overlay/card is rounded via `rounded_block`.
 
-- `view::mod::titled_block(title, focused, app)` / `disabled_block(title,
-  app)` — the bordered rounded panel (focused = accent+bold, available =
-  `inactive`, unavailable = `muted`). Used for every panel.
+- `widgets::titled_block(title, bottom, focused, theme)` — the square section
+  panel: focused → accent border + **bold** title, else the `inactive` tint.
+  `focused` is passed explicitly (the widget never reverse-engineers it from
+  the color). Used for every panel.
 - `widgets::focus_style(theme, focused)` — the **single** focused/unfocused
-  chrome decision; everything that shows focus consumes it.
+  chrome decision (`Theme::emphasis()` when focused, else `inactive`);
+  `titled_block` and anything else that shows focus consume it.
+- `widgets::rounded_block(style)` — the rounded frame for popups / field
+  value boxes.
 - `widgets::list_table` / `list_title` / `middle_ellipsis` /
   `trim_end_ellipsis` / `table_row_at` — the list renderer + sizing helpers.
 - `widgets::draw_search_box(...)` — the `─[/]-Search` box; placeholder when

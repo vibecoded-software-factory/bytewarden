@@ -8,7 +8,7 @@
 
 use ratatui::{
     Frame,
-    layout::{Constraint, Layout, Rect},
+    layout::Rect,
     style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, BorderType, Borders, Clear, Paragraph},
@@ -17,7 +17,7 @@ use ratatui::{
 use crate::tui::app::App;
 use crate::tui::screens::{Focus, Screen};
 use crate::tui::theme::Theme;
-use crate::tui::view::widgets::help_line;
+use crate::tui::view::widgets::{center_rect_pct, help_line};
 
 /// Renders the keyboard-shortcut help popup, scoped to whichever screen
 /// the user opened it from.
@@ -31,7 +31,7 @@ pub fn draw_popup(frame: &mut Frame, area: Rect, app: &mut App) {
     let from = app.help_from.clone().unwrap_or(Screen::Vault);
     let lines = build_lines(&from, &app.focus, t);
 
-    let popup = centered(64, 80, area);
+    let popup = center_rect_pct(64, 80, area);
     frame.render_widget(Clear, popup);
 
     // Inner viewport excludes the double border (1 row/col on each side).
@@ -63,7 +63,7 @@ pub fn draw_popup(frame: &mut Frame, area: Rect, app: &mut App) {
         format!(" Help — {}  ·  F1/Esc close ", screen_label(&from, app))
     };
 
-    // Accent-bold title, matching jewel/secretbase's help overlay.
+    // Accent-bold title.
     let outer = Block::default()
         .title(Span::styled(
             title,
@@ -522,20 +522,4 @@ fn global_footer(t: &Theme) -> Line<'static> {
         "  F9: settings (theme…)  ·  j/k ↑↓ PgUp/PgDn: scroll  ·  h/l ←→: pan  ·  Home/End: top/bottom  ·  F1/Esc: close",
         Style::default().fg(t.dim),
     ))
-}
-
-/// Centered popup rect — both width and height as percentages of `area`.
-fn centered(width_pct: u16, height_pct: u16, area: Rect) -> Rect {
-    let v = Layout::vertical([
-        Constraint::Percentage((100 - height_pct) / 2),
-        Constraint::Percentage(height_pct),
-        Constraint::Percentage((100 - height_pct) / 2),
-    ])
-    .split(area);
-    Layout::horizontal([
-        Constraint::Percentage((100 - width_pct) / 2),
-        Constraint::Percentage(width_pct),
-        Constraint::Percentage((100 - width_pct) / 2),
-    ])
-    .split(v[1])[1]
 }

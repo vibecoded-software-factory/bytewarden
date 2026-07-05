@@ -24,6 +24,24 @@ pub fn focus_border(focused: bool, accent: Color) -> Style {
     }
 }
 
+/// The single focused-vs-unfocused chrome [`Style`]: accent + bold when
+/// focused, the `inactive` tint otherwise. Panels resolve "what focus
+/// looks like" through this rather than assembling it inline.
+pub fn focus_style(t: &Theme, focused: bool) -> Style {
+    if focused {
+        t.emphasis()
+    } else {
+        Style::default().fg(t.inactive)
+    }
+}
+
+/// The keybind-letter [`Style`] (accent + bold) — every shortcut glyph
+/// in the help popup, footer hints and legends reads the same through
+/// this.
+pub fn key_style(t: &Theme) -> Style {
+    t.emphasis()
+}
+
 /// Rounded-border [`Block`] with the supplied border style.
 pub fn rounded_block(border_style: Style) -> Block<'static> {
     Block::default()
@@ -32,14 +50,15 @@ pub fn rounded_block(border_style: Style) -> Block<'static> {
         .border_style(border_style)
 }
 
-/// Rounded block with a top-left title and a dim bottom-right counter.
-pub fn titled_block(title: &str, bottom: &str, col: Color, t: &Theme) -> Block<'static> {
-    // Match jewel/secretbase: square borders (not rounded) and a
-    // bold title when the panel is focused. `col` is the focus color the
-    // caller already resolved (accent when focused, else inactive), so a
-    // `col == accent` test recovers the focused state for the bold.
+/// Square-bordered section [`Block`] with a top-left title and a dim
+/// bottom-right counter. Focused → accent border + **bold** title;
+/// otherwise the `inactive` tint. `focused` is passed explicitly so the
+/// widget never has to reverse-engineer it. (Section panels are square;
+/// popups / field cards use the rounded [`rounded_block`].)
+pub fn titled_block(title: &str, bottom: &str, focused: bool, t: &Theme) -> Block<'static> {
+    let col = if focused { t.accent } else { t.inactive };
     let mut title_style = Style::default().fg(col);
-    if col == t.accent {
+    if focused {
         title_style = title_style.add_modifier(Modifier::BOLD);
     }
     Block::default()
@@ -272,6 +291,23 @@ pub fn center_rect(width_pct: u16, height: u16, area: Rect) -> Rect {
         Constraint::Fill(1),
         Constraint::Length(height),
         Constraint::Fill(1),
+    ])
+    .split(area);
+    Layout::horizontal([
+        Constraint::Percentage((100 - width_pct) / 2),
+        Constraint::Percentage(width_pct),
+        Constraint::Percentage((100 - width_pct) / 2),
+    ])
+    .split(v[1])[1]
+}
+
+/// Like [`center_rect`] but with the **height as a percentage** of
+/// `area` too (both axes proportional) — the help popup's geometry.
+pub fn center_rect_pct(width_pct: u16, height_pct: u16, area: Rect) -> Rect {
+    let v = Layout::vertical([
+        Constraint::Percentage((100 - height_pct) / 2),
+        Constraint::Percentage(height_pct),
+        Constraint::Percentage((100 - height_pct) / 2),
     ])
     .split(area);
     Layout::horizontal([

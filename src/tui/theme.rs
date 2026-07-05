@@ -28,7 +28,7 @@
 
 use std::path::Path;
 
-use ratatui::style::Color;
+use ratatui::style::{Color, Modifier, Style};
 
 /// Resolved color palette.
 #[derive(Debug, Clone)]
@@ -64,10 +64,9 @@ pub struct Theme {
 
 /// A named base palette — the raw colors a [`Preset`] is built from.
 ///
-/// The same 13 roles exist verbatim in all three sibling TUIs
-/// (bytewarden, jewel, secretbase), so the shared/core `Theme` fields
-/// map identically across them; each app maps the remaining roles to
-/// its own domain colors in [`Theme::from_palette`]. This is what keeps
+/// The core roles map straight onto the shared `Theme` fields;
+/// [`Theme::from_palette`] maps the remaining roles to bytewarden's own
+/// domain colors (the splash starfield + per-item-type accents). This is what keeps
 /// the palettes coherent across the three apps.
 #[derive(Debug, Clone, Copy)]
 pub struct Palette {
@@ -218,11 +217,24 @@ impl Preset {
 }
 
 impl Theme {
-    /// Builds a full theme from a base [`Palette`]. The core fields map
-    /// identically across the three TUIs; the bytewarden-specific fields
-    /// (the splash starfield + the per-item-type accent colors) are
-    /// derived from the palette roles so every preset gets a coherent
-    /// set for free.
+    /// Accent + bold — the emphasis / interaction style (focused panel
+    /// titles, the `▶` cursor, keybind letters, the active identity).
+    /// The one place that assembly lives, instead of inline everywhere.
+    pub fn emphasis(&self) -> Style {
+        Style::default()
+            .fg(self.accent)
+            .add_modifier(Modifier::BOLD)
+    }
+
+    /// Error + bold — destructive headlines and danger badges.
+    pub fn danger_title(&self) -> Style {
+        Style::default().fg(self.error).add_modifier(Modifier::BOLD)
+    }
+
+    /// Builds a full theme from a base [`Palette`]. The core roles map
+    /// from the palette; the bytewarden-specific fields (the splash
+    /// starfield + the per-item-type accent colors) are derived from the
+    /// palette roles so every preset gets a coherent set for free.
     pub fn from_palette(p: &Palette) -> Theme {
         Theme {
             accent: p.accent,
@@ -429,6 +441,21 @@ mod tests {
     #[test]
     fn parse_hex_roundtrips_known_value() {
         assert_eq!(parse_hex("#cba6f7"), Color::Rgb(0xcb, 0xa6, 0xf7));
+    }
+
+    #[test]
+    fn emphasis_is_accent_bold_and_danger_is_error_bold() {
+        let t = Theme {
+            accent: Color::Rgb(1, 2, 3),
+            error: Color::Rgb(9, 8, 7),
+            ..Theme::default()
+        };
+        let e = t.emphasis();
+        assert_eq!(e.fg, Some(Color::Rgb(1, 2, 3)));
+        assert!(e.add_modifier.contains(Modifier::BOLD));
+        let d = t.danger_title();
+        assert_eq!(d.fg, Some(Color::Rgb(9, 8, 7)));
+        assert!(d.add_modifier.contains(Modifier::BOLD));
     }
 
     #[test]

@@ -1,8 +1,7 @@
 //! Settings overlay renderer — a section sidebar plus the active
 //! section's panel, centered over the originating screen. Today the only
 //! section is Theme (a live-previewing preset picker); new sections slot
-//! into the sidebar without changing the layout. Shared design with
-//! jewel and secretbase.
+//! into the sidebar without changing the layout.
 
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
