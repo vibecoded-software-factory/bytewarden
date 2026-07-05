@@ -1,5 +1,7 @@
 //! Export-popup state.
 
+use crate::domain::LineEditor;
+
 /// Output formats accepted by `bw export --format`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ExportFormat {
@@ -61,8 +63,7 @@ pub enum ExportFocus {
 #[derive(Debug, Clone)]
 pub struct ExportState {
     pub format: ExportFormat,
-    pub path: String,
-    pub path_cursor: usize,
+    pub path: LineEditor,
     pub focus: ExportFocus,
 }
 
@@ -71,12 +72,9 @@ impl ExportState {
     /// `~/Downloads/bytewarden-export-YYYYMMDD-HHMMSS.<ext>`.
     pub fn new() -> Self {
         let format = ExportFormat::Json;
-        let path = default_output_path(format);
-        let path_cursor = path.chars().count();
         Self {
             format,
-            path,
-            path_cursor,
+            path: LineEditor::with_text(default_output_path(format)),
             focus: ExportFocus::Format,
         }
     }
@@ -85,8 +83,7 @@ impl ExportState {
     /// — used after the user cycles the format so they get a sensible
     /// extension without having to retype.
     pub fn refresh_default_path(&mut self) {
-        self.path = default_output_path(self.format);
-        self.path_cursor = self.path.chars().count();
+        self.path.set(default_output_path(self.format));
     }
 }
 

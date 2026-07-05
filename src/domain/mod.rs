@@ -17,6 +17,7 @@ pub mod filter;
 pub mod folder;
 pub mod identity;
 pub mod item;
+pub mod line_editor;
 pub mod membership;
 pub mod search;
 pub mod validation;
@@ -29,6 +30,7 @@ pub use item::{
     Attachment, CardData, Field, IdentityData, Item, LoginData, SshKeyData, UriData, UriMatch,
     item_type_label,
 };
+pub use line_editor::LineEditor;
 pub use membership::{Collection, Organization};
 pub use search::{LoweredItem, fuzzy_score, fuzzy_score_lowered};
 pub use vault_info::{LoginOutcome, TwoFactorMethod, VaultInfo, VaultStatus};

@@ -5,6 +5,7 @@
 //! sidebar stays in sync without the user having to hit refresh.
 
 use crate::domain::Folder;
+use crate::domain::LineEditor;
 use crate::ports::BwError;
 use crate::tui::action::ActionState;
 use crate::tui::app::App;
@@ -116,9 +117,7 @@ pub enum FolderNamePurpose {
 #[derive(Debug, Clone)]
 pub struct FolderNameState {
     /// Text being typed.
-    pub input: String,
-    /// Cursor position (character index).
-    pub cursor: usize,
+    pub input: LineEditor,
     /// What to do when the user hits Enter.
     pub purpose: FolderNamePurpose,
 }
@@ -126,8 +125,7 @@ pub struct FolderNameState {
 impl FolderNameState {
     fn fresh(purpose: FolderNamePurpose, prefill: &str) -> Self {
         Self {
-            input: prefill.to_string(),
-            cursor: prefill.chars().count(),
+            input: LineEditor::with_text(prefill),
             purpose,
         }
     }
@@ -170,7 +168,7 @@ pub fn commit_name_popup(app: &mut App) {
     let Some(state) = app.folder_name.as_ref() else {
         return;
     };
-    let name = state.input.trim().to_string();
+    let name = state.input.text().trim().to_string();
     if name.is_empty() {
         app.set_action(ActionState::Error("Folder name cannot be empty.".into()));
         return;

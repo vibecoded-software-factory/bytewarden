@@ -10,7 +10,7 @@ use ratatui::{
 
 use crate::tui::app::App;
 use crate::tui::export::{ExportFocus, ExportFormat};
-use crate::tui::view::widgets::{center_rect, cursor_line, rounded_block};
+use crate::tui::view::widgets::{center_rect, editor_line, rounded_block};
 
 /// Renders the export popup.
 pub fn draw_popup(frame: &mut Frame, area: Rect, app: &App) {
@@ -80,7 +80,7 @@ pub fn draw_popup(frame: &mut Frame, area: Rect, app: &App) {
     );
     let path_focus = state.focus == ExportFocus::Path;
     let path_line = if path_focus {
-        cursor_line(&state.path, state.path_cursor, t)
+        editor_line(&state.path, t)
     } else {
         Line::from(Span::styled(
             state.path.as_str(),

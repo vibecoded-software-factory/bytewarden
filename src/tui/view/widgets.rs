@@ -199,6 +199,14 @@ pub fn cursor_line(display: &str, cursor: usize, t: &Theme) -> Line<'static> {
     ])
 }
 
+/// Renders a [`LineEditor`] as a one-line span with the block cursor —
+/// the single popup text-input renderer. Thin wrapper over
+/// [`cursor_line`] so callers pass the editor, not a `(text, cursor)`
+/// pair.
+pub fn editor_line(editor: &crate::domain::LineEditor, t: &Theme) -> Line<'static> {
+    cursor_line(editor.text(), editor.cursor(), t)
+}
+
 /// Renders a labelled checkbox (☐ / ☑).
 pub fn render_checkbox(
     frame: &mut Frame,

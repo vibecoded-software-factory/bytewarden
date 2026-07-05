@@ -41,7 +41,7 @@ pub fn commit(app: &mut App) {
         return;
     };
     let format = state.current_format().to_string();
-    let path = state.path.trim().to_string();
+    let path = state.path.text().trim().to_string();
     if path.is_empty() {
         app.set_action(ActionState::Error("Input path cannot be empty.".into()));
         return;

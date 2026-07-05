@@ -10,7 +10,7 @@
 //! fresh prompt, which matches the official Bitwarden GUI behaviour
 //! and the user's stated preference.
 
-use zeroize::Zeroizing;
+use crate::domain::LineEditor;
 
 /// What action to run after the user successfully reverifies their
 /// master password. The popup carries one of these so it knows which
@@ -39,17 +39,14 @@ pub enum ProtectedAction {
 
 /// Buffer for the in-flight reprompt popup.
 ///
-/// `input` is wrapped in [`Zeroizing`] so the master-password buffer
-/// gets scrubbed when the popup drops — same hygiene as the login
-/// form's password field.
+/// `input` is a [`LineEditor`], which is `ZeroizeOnDrop`, so the
+/// master-password buffer gets scrubbed when the popup drops — same
+/// hygiene as the login form's password field.
 #[derive(Debug)]
 pub struct RepromptState {
-    /// Typed master password. Wrapped so the bytes are overwritten
-    /// when the popup closes (Esc, success, or failure clearing the
-    /// buffer to retry).
-    pub input: Zeroizing<String>,
-    /// Cursor position as a *character* index.
-    pub cursor: usize,
+    /// Typed master password. Scrubbed when the popup closes (Esc,
+    /// success, or failure clearing the buffer to retry).
+    pub input: LineEditor,
     /// What to run once verification succeeds.
     pub after: ProtectedAction,
     /// `true` after a failed verify — the view shows an error strip
@@ -67,8 +64,7 @@ impl RepromptState {
     /// Builds a fresh popup state for the given protected action.
     pub fn new(after: ProtectedAction, origin: crate::tui::screens::Screen) -> Self {
         Self {
-            input: Zeroizing::new(String::new()),
-            cursor: 0,
+            input: LineEditor::new(),
             after,
             error: false,
             origin,

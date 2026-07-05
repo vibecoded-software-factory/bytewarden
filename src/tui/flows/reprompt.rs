@@ -115,7 +115,6 @@ pub fn handle_unlock(app: &mut App, r: Result<String, BwError>) {
             if let Some(s) = app.reprompt.as_mut() {
                 s.error = true;
                 s.input.clear();
-                s.cursor = 0;
             }
         }
     }

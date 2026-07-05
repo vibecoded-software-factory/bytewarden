@@ -1,5 +1,6 @@
 //! Create / edit / delete / restore / favorite flows.
 
+use crate::domain::LineEditor;
 use crate::ports::BwError;
 use serde_json::Value;
 use zeroize::Zeroizing;
@@ -222,9 +223,7 @@ pub fn enter_edit_mode(app: &mut App) {
 #[derive(Debug, Clone)]
 pub struct AttachmentUploadState {
     /// Filesystem path the user wants to upload.
-    pub path: String,
-    /// Cursor in the path field (character index).
-    pub path_cursor: usize,
+    pub path: LineEditor,
     /// Item the attachment will be uploaded to.
     pub item_id: String,
     /// Item display name — surfaced in the popup header so the user
@@ -242,8 +241,7 @@ pub fn open_attachment_upload(app: &mut App) {
         return;
     };
     app.attachment_upload = Some(AttachmentUploadState {
-        path: String::new(),
-        path_cursor: 0,
+        path: LineEditor::new(),
         item_id: item.id.clone(),
         item_name: item.name.clone(),
     });
@@ -262,9 +260,7 @@ pub fn cancel_attachment_upload(app: &mut App) {
 #[derive(Debug, Clone)]
 pub struct AttachmentDownloadState {
     /// Filesystem path the user wants to write the file to.
-    pub path: String,
-    /// Cursor in the path field (character index).
-    pub path_cursor: usize,
+    pub path: LineEditor,
     /// Item the attachment belongs to.
     pub item_id: String,
     /// Item display name — surfaced in the popup header.
@@ -337,8 +333,7 @@ pub fn open_attachment_download(app: &mut App) {
     };
     let path = default_download_path(&att.file_name);
     app.attachment_download = Some(AttachmentDownloadState {
-        path_cursor: path.chars().count(),
-        path,
+        path: LineEditor::with_text(path),
         item_id: item.id.clone(),
         item_name: item.name.clone(),
         file_name: att.file_name.clone(),
@@ -358,13 +353,13 @@ pub fn queue_attachment_download(app: &mut App) {
     let Some(state) = app.attachment_download.as_ref() else {
         return;
     };
-    if state.path.trim().is_empty() {
+    if state.path.text().trim().is_empty() {
         app.set_action(ActionState::Error("Output path cannot be empty.".into()));
         return;
     }
     let item_id = state.item_id.clone();
     let file_name = state.file_name.clone();
-    let output_path = state.path.trim().to_string();
+    let output_path = state.path.text().trim().to_string();
     app.submit(
         InFlight::DownloadAttachment,
         "Downloading…",
@@ -384,7 +379,7 @@ pub fn handle_download_attachment(app: &mut App, r: Result<(), BwError>) {
     let item_id = state.item_id.clone();
     let item_name = state.item_name.clone();
     let file_name = state.file_name.clone();
-    let path = state.path.trim().to_string();
+    let path = state.path.text().trim().to_string();
     let cmd = format!("bw get attachment {file_name} --itemid {item_id} --output <path>");
     match r {
         Ok(()) => {
@@ -516,7 +511,7 @@ pub fn commit_attachment_upload(app: &mut App) {
     let Some(state) = app.attachment_upload.as_ref() else {
         return;
     };
-    let path = state.path.trim().to_string();
+    let path = state.path.text().trim().to_string();
     if path.is_empty() {
         app.set_action(ActionState::Error("File path cannot be empty.".into()));
         return;
@@ -561,9 +556,7 @@ pub fn handle_upload_attachment(app: &mut App, r: Result<crate::domain::Item, Bw
 #[derive(Debug, Clone)]
 pub struct RenameFieldState {
     /// New label being typed.
-    pub input: String,
-    /// Cursor position as a *character* index.
-    pub cursor: usize,
+    pub input: LineEditor,
     /// Index of the edit-form row being renamed. The flow validates
     /// it is still a custom row at commit time, so a pending rename
     /// across an unrelated mutation simply no-ops.
@@ -576,8 +569,7 @@ impl RenameFieldState {
     /// require retyping the whole name.
     fn new(target_idx: usize, current: &str) -> Self {
         Self {
-            input: current.to_string(),
-            cursor: current.chars().count(),
+            input: LineEditor::with_text(current),
             target_idx,
         }
     }
@@ -609,7 +601,7 @@ pub fn commit_rename_field(app: &mut App) {
     let Some(state) = app.rename_field.take() else {
         return;
     };
-    let new_label = state.input.trim().to_string();
+    let new_label = state.input.text().trim().to_string();
     if new_label.is_empty() {
         // Re-open the popup with the same buffer so the user can fix
         // it instead of losing whatever they had typed.

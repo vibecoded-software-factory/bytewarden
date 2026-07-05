@@ -38,24 +38,26 @@ pub fn cycle_format(app: &mut App) {
     let Some(state) = app.export.as_mut() else {
         return;
     };
-    let old_default_prefix = state.path.starts_with(
-        &state
-            .path
+    let text = state.path.text();
+    let old_default_prefix = text.starts_with(
+        &text
             .rsplit_once('-')
             .map(|(p, _)| p.to_string())
             .unwrap_or_default(),
     );
+    let dot = text.rfind('.');
+    let looks_default = text.contains("bytewarden-export-");
     state.format = state.format.next();
     // Only auto-refresh the path when the user hasn't edited it.
     // Heuristic: keep the prefix `bytewarden-export-` and the unix
     // timestamp; just swap the extension.
     if old_default_prefix
-        && state.path.contains("bytewarden-export-")
-        && let Some(dot) = state.path.rfind('.')
+        && looks_default
+        && let Some(dot) = dot
     {
-        state.path.truncate(dot + 1);
-        state.path.push_str(state.format.extension());
-        state.path_cursor = state.path.chars().count();
+        let mut new_path = state.path.text()[..dot + 1].to_string();
+        new_path.push_str(state.format.extension());
+        state.path.set(new_path);
     }
 }
 
@@ -66,7 +68,7 @@ pub fn commit(app: &mut App) {
     let Some(state) = app.export.as_ref() else {
         return;
     };
-    let path = state.path.trim().to_string();
+    let path = state.path.text().trim().to_string();
     if path.is_empty() {
         app.set_action(ActionState::Error("Output path cannot be empty.".into()));
         return;
@@ -109,7 +111,7 @@ pub fn commit(app: &mut App) {
 /// failure so the user can fix the path and retry.
 pub fn handle(app: &mut App, r: Result<(), BwError>) {
     let (path, format) = match app.export.as_ref() {
-        Some(s) => (s.path.trim().to_string(), s.format),
+        Some(s) => (s.path.text().trim().to_string(), s.format),
         None => return,
     };
     let cmd = format!("bw export --format {} --output <path>", format.cli_arg());

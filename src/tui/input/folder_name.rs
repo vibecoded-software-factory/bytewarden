@@ -16,44 +16,5 @@ pub fn handle(app: &mut App, key: KeyEvent) {
     let Some(state) = app.folder_name.as_mut() else {
         return;
     };
-    match key.code {
-        KeyCode::Left if state.cursor > 0 => {
-            state.cursor -= 1;
-        }
-        KeyCode::Right if state.cursor < state.input.chars().count() => {
-            state.cursor += 1;
-        }
-        KeyCode::Home => state.cursor = 0,
-        KeyCode::End => state.cursor = state.input.chars().count(),
-        KeyCode::Backspace if state.cursor > 0 => {
-            let byte = state
-                .input
-                .char_indices()
-                .nth(state.cursor - 1)
-                .map(|(b, _)| b)
-                .unwrap_or(0);
-            state.input.remove(byte);
-            state.cursor -= 1;
-        }
-        KeyCode::Delete if state.cursor < state.input.chars().count() => {
-            let byte = state
-                .input
-                .char_indices()
-                .nth(state.cursor)
-                .map(|(b, _)| b)
-                .unwrap_or(0);
-            state.input.remove(byte);
-        }
-        KeyCode::Char(c) => {
-            let byte = state
-                .input
-                .char_indices()
-                .nth(state.cursor)
-                .map(|(b, _)| b)
-                .unwrap_or(state.input.len());
-            state.input.insert(byte, c);
-            state.cursor += 1;
-        }
-        _ => {}
-    }
+    crate::tui::input::common::route_line_editor(&mut state.input, key);
 }
