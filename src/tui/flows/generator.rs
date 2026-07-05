@@ -1,5 +1,6 @@
 //! Open / regenerate / copy / use flows for the password generator.
 
+use crate::ports::BwError;
 use crate::ports::GeneratorMode;
 use crate::tui::action::ActionState;
 use crate::tui::app::App;
@@ -48,7 +49,7 @@ pub fn request_generate(app: &mut App) {
 }
 
 /// `bw generate` response.
-pub fn handle(app: &mut App, r: Result<String, String>) {
+pub fn handle(app: &mut App, r: Result<String, BwError>) {
     match r {
         Ok(value) => {
             let cmd = describe_cmd(&app.generator.options);

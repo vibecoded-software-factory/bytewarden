@@ -6,6 +6,7 @@
 //! "≥1 selection" rule that bw enforces for org items and copies the
 //! chosen UUIDs back into the matching `EditField`.
 
+use crate::ports::BwError;
 use crate::tui::action::ActionState;
 use crate::tui::app::App;
 use crate::tui::assign_collections::{AssignCollectionsPurpose, AssignCollectionsState};
@@ -248,7 +249,7 @@ pub fn commit(app: &mut App) {
 
 /// `bw move` response. On success the vault is reloaded silently so the
 /// `👥` indicator and collection rows light up.
-pub fn handle_move(app: &mut App, r: Result<(), String>) {
+pub fn handle_move(app: &mut App, r: Result<(), BwError>) {
     match r {
         Ok(()) => {
             app.push_cmd("bw move", true, "moved into organisation");
@@ -265,7 +266,7 @@ pub fn handle_move(app: &mut App, r: Result<(), String>) {
 }
 
 /// Silent post-move item reload.
-pub fn handle_move_reload(app: &mut App, r: Result<Vec<crate::domain::Item>, String>) {
+pub fn handle_move_reload(app: &mut App, r: Result<Vec<crate::domain::Item>, BwError>) {
     match r {
         Ok(items) => super::vault::set_items(app, items),
         Err(e) => app.push_cmd("bw list items", false, &e),

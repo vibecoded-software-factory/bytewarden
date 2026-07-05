@@ -11,13 +11,13 @@ one branch → PR → squash-merge to `dev`.
 
 - [x] **Batch 1 — Normative spec.** Rewrite `CLAUDE.md` and `UX.md` as the
   target of the restructuring. *(PR #5)*
-- [ ] **Batch 2 — `BwError` (typed errors).** Add `ports/error.rs` with
+- [x] **Batch 2 — `BwError` (typed errors).** Added `ports/error.rs` with
   `BwError` (`Spawn` · `Timeout{label,secs}` · `Exit{stderr,status}` ·
-  `InvalidJson` · `Auth(AuthChallenge)` · `Shape` · `Internal`). Move every
-  port method from `Result<_, String>` to `Result<_, BwError>`. Classify at
-  the boundary (`bw_cli/mod.rs`, `process.rs`, `json.rs`); isolate the
-  login-prompt string-matching behind `Auth`. `Display` + `std::error::Error`;
-  the command log stores the classified error.
+  `InvalidJson` · `Shape` · `Internal`). Every port method moved from
+  `Result<_, String>` to `Result<_, BwError>`, classified at the boundary
+  (`bw_cli/mod.rs`, `process.rs`); `Display` + `std::error::Error`; the
+  command log renders the classified error. Login challenges stay in the
+  domain `LoginOutcome` (an `Auth` variant is deferred — see CLAUDE.md).
 - [ ] **Batch 3 — Execution discipline (`App::submit`).** `App::submit(slot,
   label, req)` = `begin` + `Running` toast + send; a failed send routes
   through `on_worker_dead`. Add `begin` (refuses double-send / dead worker),

@@ -165,12 +165,17 @@ instead:
 - `Timeout { label, secs }` — wall-clock budget exceeded, child killed.
 - `Exit { stderr, status }` — non-zero exit; stderr passed through verbatim.
 - `InvalidJson { detail }` — stdout wasn't the JSON we expected.
-- `Auth(AuthChallenge)` — the login path needs a device-verification OTP or a
-  permanent 2FA code (replaces today's brittle prompt-string matching where
-  possible; keep the substring classifier only where `bw` gives no structured
-  signal, isolated behind this variant).
-- `Shape(String)` — parsed, exit 0, but an expected field was missing.
-- `Internal(String)` — an adapter/worker panic captured via `catch_unwind`.
+- `Shape(String)` — parsed, exit 0, but an expected field/shape was missing.
+- `Internal(String)` — an adapter/worker panic captured via `catch_unwind`,
+  or an internal precondition failure (e.g. a session-required call while
+  the vault is locked).
+
+Login challenges (a device-verification OTP, a permanent 2FA code) are **not**
+a `BwError` — they're a successful-but-incomplete outcome modelled by the
+domain `LoginOutcome` (`NeedsDeviceVerification` / `NeedsTwoFactor`). The
+brittle prompt-string classification stays isolated in the adapter
+(`combined_outcome`); a future batch may lift it into a dedicated `Auth`
+variant if `bw` ever exposes a structured signal.
 
 `BwError` implements `Display` (human-readable, for the toast + command log)
 and `std::error::Error`. The command log stores the classified error; the

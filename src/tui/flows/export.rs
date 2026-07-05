@@ -1,5 +1,6 @@
 //! Vault-export popup flow.
 
+use crate::ports::BwError;
 use crate::tui::action::ActionState;
 use crate::tui::app::App;
 use crate::tui::export::{ExportFocus, ExportState};
@@ -104,7 +105,7 @@ pub fn commit(app: &mut App) {
 
 /// `bw export` response. Closes the popup on success; keeps it open on
 /// failure so the user can fix the path and retry.
-pub fn handle(app: &mut App, r: Result<(), String>) {
+pub fn handle(app: &mut App, r: Result<(), BwError>) {
     let (path, format) = match app.export.as_ref() {
         Some(s) => (s.path.trim().to_string(), s.format),
         None => return,

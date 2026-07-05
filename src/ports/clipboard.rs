@@ -1,5 +1,6 @@
 //! System clipboard port.
 
+use super::BwError;
 /// Abstraction over the operating-system clipboard.
 ///
 /// Implementations can shell out to `wl-copy`/`xclip`/`pbcopy`, link to a
@@ -11,7 +12,7 @@ pub trait ClipboardPort {
     ///
     /// Returns an error string when no clipboard backend is available
     /// or when the underlying command fails to start.
-    fn write(&self, text: &str) -> Result<(), String>;
+    fn write(&self, text: &str) -> Result<(), BwError>;
 
     /// Writes `text` and arranges for it to be cleared after
     /// `clear_after_secs` seconds, *if and only if* the clipboard
@@ -26,7 +27,7 @@ pub trait ClipboardPort {
     /// The default impl forwards to [`Self::write`] so adapters that
     /// don't support auto-clear (e.g. test fakes) keep working without
     /// having to opt in.
-    fn write_with_clear(&self, text: &str, clear_after_secs: u64) -> Result<(), String> {
+    fn write_with_clear(&self, text: &str, clear_after_secs: u64) -> Result<(), BwError> {
         let _ = clear_after_secs;
         self.write(text)
     }
@@ -45,7 +46,7 @@ mod tests {
         last: RefCell<Option<String>>,
     }
     impl ClipboardPort for FakeClipboard {
-        fn write(&self, text: &str) -> Result<(), String> {
+        fn write(&self, text: &str) -> Result<(), BwError> {
             *self.last.borrow_mut() = Some(text.to_string());
             Ok(())
         }

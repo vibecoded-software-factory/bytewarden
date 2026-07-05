@@ -1,5 +1,6 @@
 //! Vault-import popup flow.
 
+use crate::ports::BwError;
 use crate::tui::action::ActionState;
 use crate::tui::app::App;
 use crate::tui::import::{ImportFocus, ImportState};
@@ -58,7 +59,7 @@ pub fn commit(app: &mut App) {
 
 /// `bw import` response. On success, closes the popup and silently
 /// reloads items then folders so the new content shows up.
-pub fn handle(app: &mut App, r: Result<(), String>) {
+pub fn handle(app: &mut App, r: Result<(), BwError>) {
     let cmd = "bw import".to_string();
     match r {
         Ok(()) => {
@@ -75,7 +76,7 @@ pub fn handle(app: &mut App, r: Result<(), String>) {
 }
 
 /// Silent post-import item reload → chains the folder reload.
-pub fn handle_reload_items(app: &mut App, r: Result<Vec<crate::domain::Item>, String>) {
+pub fn handle_reload_items(app: &mut App, r: Result<Vec<crate::domain::Item>, BwError>) {
     match r {
         Ok(items) => super::vault::set_items(app, items),
         Err(e) => app.push_cmd("bw list items", false, &e),
@@ -85,6 +86,6 @@ pub fn handle_reload_items(app: &mut App, r: Result<Vec<crate::domain::Item>, St
 }
 
 /// Silent post-import folder reload.
-pub fn handle_reload_folders(app: &mut App, r: Result<Vec<crate::domain::Folder>, String>) {
+pub fn handle_reload_folders(app: &mut App, r: Result<Vec<crate::domain::Folder>, BwError>) {
     super::folders::handle_reload(app, r);
 }

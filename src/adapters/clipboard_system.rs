@@ -17,7 +17,7 @@ use std::time::Duration;
 
 use zeroize::Zeroizing;
 
-use crate::ports::ClipboardPort;
+use crate::ports::{BwError, ClipboardPort};
 
 /// Default clipboard adapter — picks the right tool at call time and
 /// pipes the payload into it via stdin (the payload never appears on a
@@ -72,7 +72,7 @@ impl SystemClipboardAdapter {
     }
 
     /// Pipes `text` into the configured write tool via stdin.
-    fn write_via(argv: &[&str], text: &str) -> Result<(), String> {
+    fn write_via(argv: &[&str], text: &str) -> Result<(), BwError> {
         let mut cmd = Command::new(argv[0]);
         for a in &argv[1..] {
             cmd.arg(a);
@@ -81,7 +81,9 @@ impl SystemClipboardAdapter {
             .stdout(Stdio::null())
             .stderr(Stdio::null());
 
-        let mut child = cmd.spawn().map_err(|e| format!("spawn failed: {e}"))?;
+        let mut child = cmd
+            .spawn()
+            .map_err(|e| BwError::Spawn(format!("spawn failed: {e}")))?;
         if let Some(mut stdin) = child.stdin.take() {
             let _ = stdin.write_all(text.as_bytes());
         }
@@ -109,15 +111,17 @@ impl SystemClipboardAdapter {
 }
 
 impl ClipboardPort for SystemClipboardAdapter {
-    fn write(&self, text: &str) -> Result<(), String> {
-        let backend = Self::choose_backend()
-            .ok_or_else(|| "No clipboard tool found (install wl-copy or xclip)".to_string())?;
+    fn write(&self, text: &str) -> Result<(), BwError> {
+        let backend = Self::choose_backend().ok_or_else(|| {
+            BwError::Spawn("No clipboard tool found (install wl-copy or xclip)".to_string())
+        })?;
         Self::write_via(&backend.write_argv, text)
     }
 
-    fn write_with_clear(&self, text: &str, clear_after_secs: u64) -> Result<(), String> {
-        let backend = Self::choose_backend()
-            .ok_or_else(|| "No clipboard tool found (install wl-copy or xclip)".to_string())?;
+    fn write_with_clear(&self, text: &str, clear_after_secs: u64) -> Result<(), BwError> {
+        let backend = Self::choose_backend().ok_or_else(|| {
+            BwError::Spawn("No clipboard tool found (install wl-copy or xclip)".to_string())
+        })?;
         Self::write_via(&backend.write_argv, text)?;
 
         if clear_after_secs == 0 {

@@ -1,5 +1,6 @@
 //! Create / edit / delete / restore / favorite flows.
 
+use crate::ports::BwError;
 use serde_json::Value;
 use zeroize::Zeroizing;
 
@@ -144,7 +145,7 @@ pub fn queue_create_item(app: &mut App) {
 }
 
 /// `bw create item` response.
-pub fn handle_create(app: &mut App, r: Result<crate::domain::Item, String>) {
+pub fn handle_create(app: &mut App, r: Result<crate::domain::Item, BwError>) {
     let cmd = "bw create item".to_string();
     match r {
         Ok(item) => {
@@ -372,7 +373,7 @@ pub fn queue_attachment_download(app: &mut App) {
 }
 
 /// `bw get attachment` response.
-pub fn handle_download_attachment(app: &mut App, r: Result<(), String>) {
+pub fn handle_download_attachment(app: &mut App, r: Result<(), BwError>) {
     let Some(state) = app.attachment_download.as_ref() else {
         return;
     };
@@ -452,7 +453,7 @@ pub fn queue_delete_attachment(app: &mut App) {
 
 /// `bw delete attachment` response — step 1. Chains a `get item` to
 /// refresh the in-memory copy so the detail row count drops.
-pub fn handle_delete_attachment(app: &mut App, r: Result<(), String>) {
+pub fn handle_delete_attachment(app: &mut App, r: Result<(), BwError>) {
     let Some(state) = app.attachment_delete.as_ref() else {
         return;
     };
@@ -476,7 +477,7 @@ pub fn handle_delete_attachment(app: &mut App, r: Result<(), String>) {
 pub fn handle_delete_attachment_refresh(
     app: &mut App,
     item_id: String,
-    r: Result<Zeroizing<String>, String>,
+    r: Result<Zeroizing<String>, BwError>,
 ) {
     let file_name = app
         .attachment_delete
@@ -522,7 +523,7 @@ pub fn commit_attachment_upload(app: &mut App) {
 }
 
 /// `bw create attachment` response.
-pub fn handle_upload_attachment(app: &mut App, r: Result<crate::domain::Item, String>) {
+pub fn handle_upload_attachment(app: &mut App, r: Result<crate::domain::Item, BwError>) {
     let Some(state) = app.attachment_upload.as_ref() else {
         return;
     };
@@ -899,7 +900,7 @@ pub fn queue_save_edit(app: &mut App) {
 }
 
 /// Save edit — step 1 response: patch the fetched JSON and commit it.
-pub fn handle_save_edit_fetch(app: &mut App, r: Result<Zeroizing<String>, String>) {
+pub fn handle_save_edit_fetch(app: &mut App, r: Result<Zeroizing<String>, BwError>) {
     let item_id = app.edit_item_id.clone();
     let cmd = format!("bw edit item {item_id}");
     let base_json = match r {
@@ -938,7 +939,7 @@ pub fn handle_save_edit_fetch(app: &mut App, r: Result<Zeroizing<String>, String
 }
 
 /// Save edit — step 2 response: the committed item.
-pub fn handle_save_edit_commit(app: &mut App, r: Result<crate::domain::Item, String>) {
+pub fn handle_save_edit_commit(app: &mut App, r: Result<crate::domain::Item, BwError>) {
     let item_id = app.edit_item_id.clone();
     let cmd = format!("bw edit item {item_id}");
     match r {
@@ -996,7 +997,7 @@ pub fn handle_delete(
     permanent: bool,
     item_id: String,
     name: String,
-    r: Result<(), String>,
+    r: Result<(), BwError>,
 ) {
     let perm_str = if permanent { " --permanent" } else { "" };
     let cmd = format!("bw delete item {item_id}{perm_str}");
@@ -1031,7 +1032,7 @@ pub fn handle_delete(
 }
 
 /// Silent post-delete trash reload.
-pub fn handle_delete_reload_trash(app: &mut App, r: Result<Vec<crate::domain::Item>, String>) {
+pub fn handle_delete_reload_trash(app: &mut App, r: Result<Vec<crate::domain::Item>, BwError>) {
     match r {
         Ok(items) => {
             vault::set_trash(app, items);
@@ -1055,7 +1056,7 @@ pub fn queue_restore_item(app: &mut App) {
 }
 
 /// `bw restore item` response.
-pub fn handle_restore(app: &mut App, item_id: String, name: String, r: Result<(), String>) {
+pub fn handle_restore(app: &mut App, item_id: String, name: String, r: Result<(), BwError>) {
     let cmd = format!("bw restore item {item_id}");
     match r {
         Ok(()) => {
@@ -1079,7 +1080,7 @@ pub fn handle_restore(app: &mut App, item_id: String, name: String, r: Result<()
 }
 
 /// Silent post-restore item reload.
-pub fn handle_restore_reload(app: &mut App, r: Result<Vec<crate::domain::Item>, String>) {
+pub fn handle_restore_reload(app: &mut App, r: Result<Vec<crate::domain::Item>, BwError>) {
     match r {
         Ok(items) => vault::set_items(app, items),
         Err(e) => app.push_cmd("bw list items", false, &e),
@@ -1114,7 +1115,7 @@ pub fn queue_check_exposed(app: &mut App) {
 ///
 /// * `0` hits — green ✓ "Not in any known breach".
 /// * `1+`     — error (red) "Found in N breaches — rotate this password".
-pub fn handle_check_exposed(app: &mut App, r: Result<u32, String>) {
+pub fn handle_check_exposed(app: &mut App, r: Result<u32, BwError>) {
     let cmd = "bw get exposed".to_string();
     match r {
         Ok(0) => {
@@ -1152,7 +1153,7 @@ pub fn toggle_favorite(app: &mut App) {
 /// Favorite-toggle — step 1 response: flip the `favorite` flag and
 /// commit. The flip lives here (not on the port) because it's app-level
 /// logic any backend would perform the same way.
-pub fn handle_toggle_fetch(app: &mut App, item_id: String, r: Result<Zeroizing<String>, String>) {
+pub fn handle_toggle_fetch(app: &mut App, item_id: String, r: Result<Zeroizing<String>, BwError>) {
     let cmd = format!("bw edit item {item_id}");
     let json = match r {
         Ok(j) => j,
@@ -1184,7 +1185,7 @@ pub fn handle_toggle_fetch(app: &mut App, item_id: String, r: Result<Zeroizing<S
 pub fn handle_toggle_commit(
     app: &mut App,
     new_favorite: bool,
-    r: Result<crate::domain::Item, String>,
+    r: Result<crate::domain::Item, BwError>,
 ) {
     let cmd = "bw edit item".to_string();
     match r {

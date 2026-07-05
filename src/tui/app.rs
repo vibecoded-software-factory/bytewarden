@@ -790,17 +790,23 @@ impl App {
     /// appended to `~/.bytewarden.log` for offline troubleshooting —
     /// see [`crate::tui::debug_log`]. The check is cheap when the env
     /// var is unset, so leaving it off costs nothing.
-    pub fn push_cmd(&mut self, cmd: &str, ok: bool, detail: &str) {
+    pub fn push_cmd(&mut self, cmd: &str, ok: bool, detail: &(impl std::fmt::Display + ?Sized)) {
+        // `detail` is `&dyn Display` so a typed `BwError`, a `&str`
+        // literal and a `&format!(…)` result all pass without the caller
+        // stringifying first — the classified error carries its own
+        // message. (`dyn` rather than a generic so an unsized `&str`
+        // coerces cleanly and existing `&e` call sites stay unchanged.)
+        let detail = detail.to_string();
         // The vault lives on the worker thread, so we can't call
         // `session_key()` here. Redact against the cached `session_marker`
         // (set from the login / unlock response handlers). The `bw` argv
         // never carries the key anyway — this is defense-in-depth.
         let redacted = redact_cmd(cmd, self.session_marker.as_deref().map(|s| s.as_str()));
-        crate::tui::debug_log::append(&redacted, ok, detail);
+        crate::tui::debug_log::append(&redacted, ok, &detail);
         self.cmd_log.push(CmdEntry {
             cmd: redacted,
             ok,
-            detail: detail.to_string(),
+            detail,
         });
         if self.cmd_log.len() > CMD_LOG_LIMIT {
             self.cmd_log.remove(0);
@@ -826,8 +832,12 @@ impl App {
 
     /// Logs a failed `bw` command and surfaces the error in the feedback
     /// strip.
-    pub fn cmd_err(&mut self, cmd: &str, e: &str, label: &str) {
-        self.push_cmd(cmd, false, e);
+    pub fn cmd_err(&mut self, cmd: &str, e: &(impl std::fmt::Display + ?Sized), label: &str) {
+        // Accepts a typed `BwError` (or any `Display`) by reference — the
+        // existing `&e` call sites stay unchanged. Rendered once for both
+        // the command log and the feedback strip.
+        let e = e.to_string();
+        self.push_cmd(cmd, false, &e);
         self.set_action(ActionState::Error(format!("{label}: {e}")));
     }
 

@@ -5,6 +5,7 @@
 //! sidebar stays in sync without the user having to hit refresh.
 
 use crate::domain::Folder;
+use crate::ports::BwError;
 use crate::tui::action::ActionState;
 use crate::tui::app::App;
 use crate::tui::folders::{filter_for_row, row_count, row_for_filter};
@@ -22,7 +23,7 @@ pub fn request_reload_folders_silent(app: &mut App) {
 /// `bw list folders` response — applies the list silently (preserves the
 /// prior toast). Sorts alphabetically and snaps the highlight back to the
 /// row matching the active filter.
-pub fn handle_reload(app: &mut App, r: Result<Vec<Folder>, String>) {
+pub fn handle_reload(app: &mut App, r: Result<Vec<Folder>, BwError>) {
     match r {
         Ok(folders) => {
             let count = folders.len();
@@ -206,7 +207,7 @@ pub fn commit_name_popup(app: &mut App) {
 }
 
 /// `bw create folder` response.
-pub fn handle_create(app: &mut App, r: Result<Folder, String>) {
+pub fn handle_create(app: &mut App, r: Result<Folder, BwError>) {
     match r {
         Ok(folder) => {
             app.push_cmd(
@@ -228,7 +229,7 @@ pub fn handle_create(app: &mut App, r: Result<Folder, String>) {
 }
 
 /// `bw edit folder` response.
-pub fn handle_edit(app: &mut App, r: Result<Folder, String>) {
+pub fn handle_edit(app: &mut App, r: Result<Folder, BwError>) {
     match r {
         Ok(folder) => {
             app.push_cmd(
@@ -293,7 +294,7 @@ pub fn confirm_delete(app: &mut App) {
 
 /// `bw delete folder` response. Items previously in the folder aren't
 /// deleted — bw clears their `folder_id`, so both lists are reloaded.
-pub fn handle_delete(app: &mut App, name: String, r: Result<(), String>) {
+pub fn handle_delete(app: &mut App, name: String, r: Result<(), BwError>) {
     match r {
         Ok(()) => {
             app.push_cmd("bw delete folder", true, &format!("deleted: {name}"));
@@ -308,7 +309,7 @@ pub fn handle_delete(app: &mut App, name: String, r: Result<(), String>) {
 }
 
 /// Silent post-folder-delete item reload → chains the folder reload.
-pub fn handle_delete_reload_items(app: &mut App, r: Result<Vec<crate::domain::Item>, String>) {
+pub fn handle_delete_reload_items(app: &mut App, r: Result<Vec<crate::domain::Item>, BwError>) {
     match r {
         Ok(items) => super::vault::set_items(app, items),
         Err(e) => app.push_cmd("bw list items", false, &e),

@@ -1,5 +1,6 @@
 //! Send-create popup flow.
 
+use crate::ports::BwError;
 use crate::tui::action::ActionState;
 use crate::tui::app::App;
 use crate::tui::screens::Screen;
@@ -70,7 +71,7 @@ pub fn commit(app: &mut App) {
 }
 
 /// `bw send` response — copies the resulting URL to the clipboard.
-pub fn handle(app: &mut App, r: Result<String, String>) {
+pub fn handle(app: &mut App, r: Result<String, BwError>) {
     let days = app.send_create.as_ref().map(|s| s.days).unwrap_or(0);
     let cmd = format!("bw send -n <name> -d {days} <content>");
     match r {

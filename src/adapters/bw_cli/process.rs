@@ -1,5 +1,6 @@
 //! Thin wrappers around `std::process::Command` for `bw` invocations.
 
+use crate::ports::BwError;
 use std::io::{Read, Write};
 use std::process::{Child, Command, Output, Stdio};
 use std::time::{Duration, Instant};
@@ -65,7 +66,7 @@ fn full_args<'a>(args: &'a [&'a str]) -> Vec<&'a str> {
 /// `std::process::Child::wait_with_output` does this internally; we
 /// reimplement the same pattern here because we also need a wall-clock
 /// deadline, which `wait_with_output` does not expose.
-fn wait_with_timeout(mut child: Child, secs: u64, label: &str) -> Result<Output, String> {
+fn wait_with_timeout(mut child: Child, secs: u64, label: &str) -> Result<Output, BwError> {
     let deadline = Instant::now() + Duration::from_secs(secs);
 
     // Take ownership of the pipe handles up front so the reader
@@ -90,7 +91,7 @@ fn wait_with_timeout(mut child: Child, secs: u64, label: &str) -> Result<Output,
     loop {
         match child
             .try_wait()
-            .map_err(|e| format!("bw wait error: {e}"))?
+            .map_err(|e| BwError::Internal(format!("bw wait error: {e}")))?
         {
             Some(status) => {
                 let stdout = stdout_thread
@@ -114,7 +115,10 @@ fn wait_with_timeout(mut child: Child, secs: u64, label: &str) -> Result<Output,
                     // bounded — no risk of compounding the user's wait.
                     let _ = stdout_thread.and_then(|t| t.join().ok());
                     let _ = stderr_thread.and_then(|t| t.join().ok());
-                    return Err(format!("{label} timed out after {secs}s"));
+                    return Err(BwError::Timeout {
+                        label: label.to_string(),
+                        secs,
+                    });
                 }
                 std::thread::sleep(Duration::from_millis(50));
             }
@@ -125,7 +129,7 @@ fn wait_with_timeout(mut child: Child, secs: u64, label: &str) -> Result<Output,
 /// Runs `bw <args>` and returns the raw [`Output`].
 ///
 /// Spawn errors are mapped to a `String` so callers can use `?` against
-/// the same `Result<_, String>` shape used throughout the adapter.
+/// the same `Result<_, BwError>` shape used throughout the adapter.
 ///
 /// `--nointeraction` is prepended automatically; callers do not need
 /// (and should not) pass it themselves.
@@ -135,7 +139,7 @@ fn wait_with_timeout(mut child: Child, secs: u64, label: &str) -> Result<Output,
 /// `bw` process can never freeze the TUI permanently. The timeout
 /// is two orders of magnitude above the expected runtime so it
 /// only ever fires if something is genuinely broken.
-pub fn bw_run(args: &[&str]) -> Result<Output, String> {
+pub fn bw_run(args: &[&str]) -> Result<Output, BwError> {
     bw_run_timeout(args, LOCAL_OP_FALLBACK_TIMEOUT)
 }
 
@@ -145,7 +149,7 @@ pub fn bw_run(args: &[&str]) -> Result<Output, String> {
 /// item CRUD, HIBP check, attachment up/download, …). Local-only ops
 /// (unlock, list cached items, get TOTP from the local store) keep
 /// using [`bw_run`] without a deadline — they are fast and uninterruptible.
-pub fn bw_run_timeout(args: &[&str], secs: u64) -> Result<Output, String> {
+pub fn bw_run_timeout(args: &[&str], secs: u64) -> Result<Output, BwError> {
     let child = Command::new("bw")
         .args(full_args(args))
         // Null out stdin explicitly. With `--nointeraction` bw should
@@ -157,7 +161,7 @@ pub fn bw_run_timeout(args: &[&str], secs: u64) -> Result<Output, String> {
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .map_err(|e| format!("Could not run bw: {e}"))?;
+        .map_err(|e| BwError::Spawn(format!("Could not run bw: {e}")))?;
     wait_with_timeout(child, secs, "bw")
 }
 
@@ -178,7 +182,7 @@ pub fn bw_run_timeout(args: &[&str], secs: u64) -> Result<Output, String> {
 /// Passing a password as a positional argument leaks it into `ps aux`
 /// for the lifetime of the child process. The env-var path keeps the
 /// secret out of the process command line entirely.
-pub fn bw_run_with_password(args: &[&str], password: &str) -> Result<Output, String> {
+pub fn bw_run_with_password(args: &[&str], password: &str) -> Result<Output, BwError> {
     bw_run_with_password_timeout(args, password, LOCAL_OP_FALLBACK_TIMEOUT)
 }
 
@@ -188,7 +192,7 @@ pub fn bw_run_with_password_timeout(
     args: &[&str],
     password: &str,
     secs: u64,
-) -> Result<Output, String> {
+) -> Result<Output, BwError> {
     let child = Command::new("bw")
         .args(full_args(args))
         .env(BW_PASSWORD_ENV, password)
@@ -197,7 +201,7 @@ pub fn bw_run_with_password_timeout(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .map_err(|e| format!("Could not run bw: {e}"))?;
+        .map_err(|e| BwError::Spawn(format!("Could not run bw: {e}")))?;
     wait_with_timeout(child, secs, "bw")
 }
 
@@ -213,7 +217,7 @@ pub fn bw_run_with_password_timeout(
 /// Used for local-only session-bearing reads (`bw list items`,
 /// `bw list folders`, `bw get totp`, …) — same
 /// [`LOCAL_OP_FALLBACK_TIMEOUT`] as [`bw_run`].
-pub fn bw_run_with_session(args: &[&str], session: &str) -> Result<Output, String> {
+pub fn bw_run_with_session(args: &[&str], session: &str) -> Result<Output, BwError> {
     bw_run_with_session_timeout(args, session, LOCAL_OP_FALLBACK_TIMEOUT)
 }
 
@@ -224,7 +228,7 @@ pub fn bw_run_with_session_timeout(
     args: &[&str],
     session: &str,
     secs: u64,
-) -> Result<Output, String> {
+) -> Result<Output, BwError> {
     let child = Command::new("bw")
         .args(full_args(args))
         .env(BW_SESSION_ENV, session)
@@ -233,7 +237,7 @@ pub fn bw_run_with_session_timeout(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .map_err(|e| format!("Could not run bw: {e}"))?;
+        .map_err(|e| BwError::Spawn(format!("Could not run bw: {e}")))?;
     wait_with_timeout(child, secs, "bw")
 }
 
@@ -253,7 +257,7 @@ pub fn bw_run_with_password_and_stdin(
     args: &[&str],
     password: &str,
     stdin_input: &str,
-) -> Result<Output, String> {
+) -> Result<Output, BwError> {
     let mut child = Command::new("bw")
         .args(args)
         .env(BW_PASSWORD_ENV, password)
@@ -261,7 +265,7 @@ pub fn bw_run_with_password_and_stdin(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .map_err(|e| format!("Could not run bw: {e}"))?;
+        .map_err(|e| BwError::Spawn(format!("Could not run bw: {e}")))?;
 
     if let Some(mut sin) = child.stdin.take() {
         // Errors writing to stdin (broken pipe if bw exits early) are
@@ -274,7 +278,7 @@ pub fn bw_run_with_password_and_stdin(
 
     child
         .wait_with_output()
-        .map_err(|e| format!("bw wait error: {e}"))
+        .map_err(|e| BwError::Internal(format!("bw wait error: {e}")))
 }
 
 /// Like [`bw_run_with_password_and_stdin`] but with a wall-clock
@@ -285,7 +289,7 @@ pub fn bw_run_with_password_and_stdin_timeout(
     password: &str,
     stdin_input: &str,
     secs: u64,
-) -> Result<Output, String> {
+) -> Result<Output, BwError> {
     let mut child = Command::new("bw")
         .args(args)
         .env(BW_PASSWORD_ENV, password)
@@ -293,7 +297,7 @@ pub fn bw_run_with_password_and_stdin_timeout(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .map_err(|e| format!("Could not run bw: {e}"))?;
+        .map_err(|e| BwError::Spawn(format!("Could not run bw: {e}")))?;
 
     if let Some(mut sin) = child.stdin.take() {
         let _ = sin.write_all(stdin_input.as_bytes());
@@ -349,7 +353,7 @@ mod tests {
         let res = wait_with_timeout(child, 1, "test");
         let elapsed = started.elapsed();
         assert!(res.is_err());
-        let msg = res.unwrap_err();
+        let msg = res.unwrap_err().to_string();
         assert!(msg.contains("test"));
         assert!(msg.contains("timed out"));
         // The polling loop sleeps 50 ms between checks, so the actual

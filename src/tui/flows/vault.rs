@@ -10,6 +10,7 @@
 //!   (Deleted ✓, Synced ✓, …) survives instead of being clobbered.
 
 use crate::domain::item::Item;
+use crate::ports::BwError;
 use crate::tui::action::ActionState;
 use crate::tui::app::App;
 use crate::tui::worker::{InFlight, WorkerRequest};
@@ -38,7 +39,7 @@ pub fn request_load_items(app: &mut App) {
     let _ = app.worker_tx.send(WorkerRequest::ListItems);
 }
 
-pub fn handle_load_items(app: &mut App, r: Result<Vec<Item>, String>) {
+pub fn handle_load_items(app: &mut App, r: Result<Vec<Item>, BwError>) {
     match r {
         Ok(items) => {
             let n = items.len();
@@ -58,7 +59,7 @@ pub fn request_load_trash(app: &mut App) {
     let _ = app.worker_tx.send(WorkerRequest::ListTrash);
 }
 
-pub fn handle_load_trash(app: &mut App, r: Result<Vec<Item>, String>) {
+pub fn handle_load_trash(app: &mut App, r: Result<Vec<Item>, BwError>) {
     match r {
         Ok(items) => {
             let n = items.len();
@@ -83,7 +84,7 @@ pub fn request_reload_items_silent(app: &mut App) {
     let _ = app.worker_tx.send(WorkerRequest::ListItems);
 }
 
-pub fn handle_reload_items_silent(app: &mut App, r: Result<Vec<Item>, String>) {
+pub fn handle_reload_items_silent(app: &mut App, r: Result<Vec<Item>, BwError>) {
     match r {
         Ok(items) => {
             let n = items.len();
@@ -103,7 +104,7 @@ pub fn request_sync(app: &mut App) {
     let _ = app.worker_tx.send(WorkerRequest::Sync);
 }
 
-pub fn handle_sync(app: &mut App, r: Result<(), String>) {
+pub fn handle_sync(app: &mut App, r: Result<(), BwError>) {
     match r {
         Ok(()) => {
             app.push_cmd("bw sync", true, "vault synced");
@@ -116,7 +117,7 @@ pub fn handle_sync(app: &mut App, r: Result<(), String>) {
     }
 }
 
-pub fn handle_sync_reload(app: &mut App, r: Result<Vec<Item>, String>) {
+pub fn handle_sync_reload(app: &mut App, r: Result<Vec<Item>, BwError>) {
     match r {
         Ok(items) => {
             let n = items.len();
