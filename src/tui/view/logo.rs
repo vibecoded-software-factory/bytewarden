@@ -17,8 +17,9 @@ use crate::tui::view::starfield::{build_star_line, star_char_at};
 /// has no external file dependency.
 const SLANT_FONT: &str = include_str!("../assets/slant.flf");
 
-/// Crate version string for the centered subtitle.
-const VERSION: &str = "v1.0.0";
+/// Crate version string for the centered subtitle — sourced from
+/// `Cargo.toml` so it can never drift from the actual build.
+const VERSION: &str = concat!("v", env!("CARGO_PKG_VERSION"));
 
 /// Renders the logo + version + surrounding starfield into `area`.
 pub fn render(frame: &mut Frame, app: &App, area: Rect) {

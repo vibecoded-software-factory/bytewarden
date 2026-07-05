@@ -73,10 +73,9 @@ pub struct Item {
     /// Free-form notes attached to any item.
     pub notes: Option<String>,
 
-    /// Folder identifier — currently unused by the UI but retained for
-    /// future folder-tree support.
+    /// Folder identifier. Drives the Folders-sidebar filter and the
+    /// "(No folder)" bucket.
     #[serde(rename = "folderId")]
-    #[allow(dead_code)]
     pub folder_id: Option<String>,
 
     /// Bitwarden organisation that owns this item, when shared. `None`

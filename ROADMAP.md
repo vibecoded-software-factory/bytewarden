@@ -160,10 +160,38 @@ one branch → PR → squash-merge to `dev`.
 - [ ] **Batch 14 — Command palette (`Ctrl+P`).** Context-aware palette over
   `palette_commands`, doubling as an executable cheat-sheet; the 5th
   keybinding-sync surface.
-- [ ] **Batch 15 — Final cleanup.** Stale annotations (`Item::folder_id`
-  `dead_code`, `VaultInfo::last_sync/server_url`, `check_name_unique` dead
-  computation, `bold()`/`target_kind()`, hardcoded `VERSION`). Test coverage
-  for all new pure logic on `App`/`domain`. **Delete this `ROADMAP.md`.**
+- [x] **Batch 15 — Final cleanup.** Removed the stale `#[allow(dead_code)]` +
+  wrong comment on `Item::folder_id` (it *is* used — folder filtering) and on
+  `VaultInfo::server_url` (seeded into the Login form); accurate notes on the
+  genuinely-unread `last_sync`. Deleted the dead `let lower` computation in
+  `check_name_unique`, the unused `widgets::bold()` and `view::generator::
+  target_kind()` helpers. `logo::VERSION` now derives from `CARGO_PKG_VERSION`
+  (`concat!("v", …)`) so it can't drift from the build. Test coverage for the
+  new pure logic landed with each batch.
+  - **`ROADMAP.md` is intentionally *not* deleted yet** — the batches below
+    are deferred, not done, and this file is their record. Delete it once the
+    deferred backlog is resolved (or explicitly dropped).
+
+---
+
+## Deferred backlog (resolve before deleting this file)
+
+Each was a deliberate call — deferred for **runtime verification** (can't judge
+a visual/behavioral change without driving the TUI with `bw` in a real
+terminal), for a **pending decision**, or as **low-ROI/high-churn** for
+bytewarden specifically. None are blockers; the shipped batches are green
+(fmt + clippy `-D warnings` + tests).
+
+- **Whole batches:** Batch 10 (background lane — low ROI: no idle/push refresh),
+  Batch 12 (responsiveness — all visual layout), Batch 14 (command palette —
+  new feature + open decision).
+- **Deferred halves:** decompose the `App` god-object (8); merge the
+  detail/edit field builders (9); legibility-hierarchy re-derivation + more
+  presets (11); OSC 52 clipboard + `send_text`-out-of-argv + tolerant per-row
+  parsing (13); login-field `LineEditor` migration (4).
+- **Runtime pass owed:** the keybinding gradient (7) and the sticky-error /
+  worker-dead badge (6) changed behavior verified by reading, not by driving
+  the TUI — worth a live smoke test.
 
 ## Open decisions (settle before touching them)
 

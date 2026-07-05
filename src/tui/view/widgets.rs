@@ -326,8 +326,3 @@ pub fn help_line<'a>(key: &'a str, desc: &'a str, t: &Theme) -> Line<'a> {
         Span::styled(desc, Style::default().fg(t.foreground)),
     ])
 }
-
-/// Modifier shorthand used in title strings.
-pub fn bold() -> Modifier {
-    Modifier::BOLD
-}

@@ -79,12 +79,12 @@ pub struct VaultInfo {
     /// Logged-in user e-mail (if any).
     pub user_email: Option<String>,
 
-    /// ISO timestamp of the last successful sync.
-    #[allow(dead_code)]
+    /// ISO timestamp of the last successful sync. Parsed from
+    /// `bw status` for completeness; not surfaced in the UI yet.
     pub last_sync: Option<String>,
 
     /// Bitwarden server URL — non-default for self-hosted instances.
-    #[allow(dead_code)]
+    /// Seeded into the Login form's Server field at boot.
     pub server_url: Option<String>,
 }
 
