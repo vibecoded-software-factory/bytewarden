@@ -196,14 +196,26 @@ All colors are driven by the `[theme]` block. Pick a bundled **preset** with
 `name`, then override individual keys if you want. Every key is optional;
 omitting `name` keeps the shared default (Nord with terminal-inherited text).
 
-Four presets ship:
+Fourteen presets ship (dark first, light last):
 
 | `name` | palette |
 |---|---|
 | `nord` | Nord (default, dark) |
-| `catppuccin-mocha` | Catppuccin Mocha (dark) |
+| `catppuccin-mocha` · `catppuccin-macchiato` · `catppuccin-frappe` | Catppuccin (dark) |
 | `dracula` | Dracula (dark) |
+| `tokyonight` | Tokyo Night (dark) |
+| `gruvbox-dark` | Gruvbox Dark |
+| `rose-pine` | Rosé Pine (dark) |
+| `everforest` | Everforest (dark) |
+| `one-dark` | One Dark |
+| `solarized-dark` | Solarized Dark |
 | `catppuccin-latte` | Catppuccin Latte (light) |
+| `rose-pine-dawn` | Rosé Pine Dawn (light) |
+| `solarized-light` | Solarized Light (light) |
+
+Themes also **adapt to the terminal's color capability**: `NO_COLOR` collapses
+to grayscale, a non-truecolor terminal (`COLORTERM` unset) gets each color
+quantized to the nearest xterm-256 index, and truecolor passes through.
 
 You can also switch presets live from inside the app — open **Settings** with
 `F9` (Theme section), preview with `↑/↓`, `Enter` saves.
