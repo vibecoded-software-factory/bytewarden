@@ -19,6 +19,7 @@ pub mod login;
 pub mod logo;
 pub mod logout_confirm;
 pub mod memberships;
+pub mod palette;
 pub mod rename_field;
 pub mod reprompt;
 pub mod send_create;
@@ -209,6 +210,20 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
                 _ => detail::draw(frame, app),
             }
             assign_collections::draw_popup(frame, frame.area(), app);
+        }
+        Screen::CommandPalette => {
+            // Opened from the vault or the detail screen (its state
+            // records which), drawn underneath the centered modal.
+            let origin = app
+                .palette
+                .as_ref()
+                .map(|s| s.origin.clone())
+                .unwrap_or(Screen::Vault);
+            match origin {
+                Screen::Detail => detail::draw(frame, app),
+                _ => vault::draw(frame, app),
+            }
+            palette::draw(frame, app);
         }
     }
 }

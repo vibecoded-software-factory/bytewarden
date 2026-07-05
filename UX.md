@@ -225,16 +225,22 @@ Popups are centered and **always drawn over their base screen** by
 - **Memberships** (`Memberships`) is a read-only picker: organisations with
   their collections, pre-sorted; `Esc`/`Enter`/`q` close.
 
-## Command palette (rewrite target)
+## Command palette (`Ctrl+P`)
 
-A `Ctrl+P` command palette (`Screen::CommandPalette`) is a target of the
-restructuring — a fuzzy query over a **context-aware** action list
-(`flows::palette::palette_commands`: only the actions valid where you are),
-each row showing its keybinding right-aligned so the palette doubles as an
-executable cheat-sheet. It shares the `draw_picker_modal` skeleton and calls
-the very same `flows::*` the keybinding would. When added, it becomes the
-**fifth** keybinding-sync surface (footer · `F1` help · README tables · this
-file · `palette_commands`) — keep all five in sync on every keybinding change.
+A `Ctrl+P` command palette (`Screen::CommandPalette`, `view::palette`) — a
+fuzzy query (substring over the label) over a **context-aware** action list
+(`flows::palette::palette_commands`: the app-wide verbs always, the item verbs
+only with a selected non-trashed item), each row showing its keybinding
+right-aligned so the palette doubles as an **executable cheat-sheet**. Opens
+from the Vault or Detail; `↑↓` / `Ctrl+J`/`Ctrl+K` pick, `Enter` restores the
+origin screen and runs the highlighted command — the *very same* `flows::*` the
+keybinding would call (`PaletteCommand.run: fn(&mut App)`), so it can never
+diverge. `Esc` / `Ctrl+P` cancel. Centered modal (`center_rect`, `Clear`,
+rounded accent block).
+
+It is the **fifth** keybinding-sync surface: footer hints · `F1` help · README
+tables · this file · **`flows::palette::palette_commands`** — keep all five in
+sync on every keybinding / action change.
 
 ## Help popup
 
@@ -276,7 +282,7 @@ weight of the action before you press it. Every screen follows the same tiers:
   through the navigable confirm, which is the guard — and `Shift+D` (inside
   that confirm, non-trash) is the explicit permanent-delete.
 - **`Ctrl` = global** — works from any focus, never confused with typed text:
-  `Ctrl+C` quit (the **only** quit), `Ctrl+P` command palette (target),
+  `Ctrl+C` quit (the **only** quit), `Ctrl+P` command palette,
   `Ctrl+W`/`Ctrl+U` word ops in every input.
 - **`Alt+letter` = app-wide command.** bytewarden focuses panels with `0`–`4`
   (not `Alt`), so `Alt` is free for the vault-wide commands that fire from any
@@ -299,8 +305,8 @@ feel like a pro TUI instead of chord soup. The vim layer is a contract: the
 → back) and **never destroys typed text**. During the transition the old
 `Alt+letter` row shortcuts still work as aliases, but **bare is canonical**.
 The footer shows only a few keys; the full per-screen list lives in the help
-popup, the `README.md` tables and (when added) the command palette — **keep
-all four in sync** whenever a key changes.
+popup, the `README.md` tables and the command palette (`Ctrl+P`) — **keep all
+five surfaces in sync** whenever a key changes.
 
 ## Theme (`tui::theme`)
 

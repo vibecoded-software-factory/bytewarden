@@ -317,6 +317,11 @@ pub struct App {
     /// outside the popup.
     pub reprompt: Option<crate::tui::reprompt::RepromptState>,
 
+    // ── Command palette state ─────────────────────────────────────────────
+    /// Buffer for the in-flight command palette (`Ctrl+P`). `None`
+    /// outside the palette.
+    pub palette: Option<crate::tui::flows::palette::PaletteState>,
+
     /// Transient flag set by [`crate::tui::flows::reprompt::run_protected_action`]
     /// just before re-entering the protected flow. Consumed by the
     /// reprompt guards in `flows::copy` so the deferred action runs
@@ -468,6 +473,7 @@ impl App {
             memberships: None,
             assign_collections: None,
             reprompt: None,
+            palette: None,
             reprompt_verified: false,
             help_from: None,
             help_scroll: (0, 0),
@@ -1252,6 +1258,32 @@ mod tests {
         // Just claimed — nowhere near the budget, so the slot stays.
         app.watchdog_release_stuck_request();
         assert!(app.is_busy());
+    }
+
+    #[test]
+    fn command_palette_filters_moves_and_cancels() {
+        use crate::tui::flows::palette;
+        let (mut app, _req_rx, _resp_tx) = fresh_app();
+        app.screen = Screen::Vault;
+        palette::open(&mut app);
+        // Vault context with no selected item → the app-wide commands only.
+        let total = app.palette.as_ref().unwrap().all.len();
+        assert!(total >= 11, "expected the app-wide commands, got {total}");
+        assert_eq!(app.screen, Screen::CommandPalette);
+
+        // Typing narrows the filtered set by label substring.
+        app.palette.as_mut().unwrap().query.insert_str("sync");
+        palette::rebuild_filter(&mut app);
+        assert_eq!(app.palette.as_ref().unwrap().filtered.len(), 1);
+
+        // Selection clamps within the filtered list.
+        palette::move_selection(&mut app, 10);
+        assert_eq!(app.palette.as_ref().unwrap().selected, 0);
+
+        // Cancel restores the origin screen and drops the state.
+        palette::cancel(&mut app);
+        assert!(app.palette.is_none());
+        assert_eq!(app.screen, Screen::Vault);
     }
 
     #[test]

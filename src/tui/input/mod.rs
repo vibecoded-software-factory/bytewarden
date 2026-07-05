@@ -22,6 +22,7 @@ pub mod logout_confirm;
 pub mod memberships;
 pub mod mouse;
 pub mod nav;
+pub mod palette;
 pub mod rename_field;
 pub mod reprompt;
 pub mod send_create;
@@ -149,6 +150,19 @@ pub fn handle_events(app: &mut App, ev: Event) {
                     return;
                 }
             }
+            // Global command palette (Ctrl+P) — toggles the fuzzy,
+            // context-aware action list. Opens from the vault / detail
+            // (where the actions apply) and closes when already open. A
+            // UI overlay, so it sits before the busy gate like F1 / F9.
+            if key.code == KeyCode::Char('p') && key.modifiers == KeyModifiers::CONTROL {
+                if app.screen == Screen::CommandPalette {
+                    crate::tui::flows::palette::cancel(app);
+                    return;
+                } else if matches!(app.screen, Screen::Vault | Screen::Detail) {
+                    crate::tui::flows::palette::open(app);
+                    return;
+                }
+            }
             // While a worker request is in flight, swallow every key but
             // Esc so a second request can't be queued mid-flight.
             if busy_blocks(app.is_busy(), &key) {
@@ -177,6 +191,7 @@ pub fn handle_events(app: &mut App, ev: Event) {
                 Screen::Memberships => memberships::handle(app, key),
                 Screen::RepromptUnlock => reprompt::handle(app, key),
                 Screen::AssignCollections => assign_collections::handle(app, key),
+                Screen::CommandPalette => palette::handle(app, key),
             }
         }
         Event::Mouse(mouse) => mouse::handle(app, mouse),

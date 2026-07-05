@@ -280,6 +280,11 @@ fn vault_sections(out: &mut Vec<Line<'static>>, focus: &Focus, t: &Theme) {
         t,
     ));
     out.push(help_line("Tab", "Cycle to the next panel", t));
+    out.push(help_line(
+        "Ctrl+P",
+        "Command palette — fuzzy-search & run any action",
+        t,
+    ));
     out.push(blank());
     out.push(section("Vault — actions (Alt)", t));
     out.push(help_line("Alt+S", "Sync vault with the server", t));

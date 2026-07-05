@@ -56,6 +56,9 @@ pub enum Screen {
     /// more collections of its owning organisation. Opened with
     /// `Alt+L` from the edit-mode "Collections" row.
     AssignCollections,
+    /// Command palette overlay — a fuzzy-searchable list of context-aware
+    /// actions, opened with `Ctrl+P`.
+    CommandPalette,
 }
 
 /// Panels inside the [`Screen::Vault`] layout that can hold focus.

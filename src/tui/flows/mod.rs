@@ -23,6 +23,7 @@ pub mod import;
 pub mod item_json;
 pub mod items;
 pub mod memberships;
+pub mod palette;
 pub mod reprompt;
 pub mod send;
 pub mod vault;
