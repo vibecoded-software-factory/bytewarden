@@ -84,10 +84,19 @@ one branch → PR → squash-merge to `dev`.
 
 ## State & coherence
 
-- [ ] **Batch 8 — Invalidation contracts.** Formalize the footgun table: one
-  rebuild path per cache, cursor re-anchored **by id** after a reload.
-  Decompose the `App` god-object (popup state as sub-structs / per-screen
-  state, not flat `Option<XState>`).
+- [x] **Batch 8 — Invalidation contract (cursor re-anchor by id).** Added
+  `App::selected_item_id` + `App::reanchor_selection(id)` and the
+  `flows::vault::set_items_keep_cursor` wrapper; wired every background /
+  post-mutation refresh (silent reload, sync, import, move, folder-delete,
+  manual load) through it so the cursor follows the same item **by id** across
+  a reorder/reload instead of jumping to whatever index it held. The
+  intentional-reset paths (create → new item, restore → top) keep plain
+  `set_items`. Unit-tested (follows-by-id + clamps-when-gone).
+  - *Deferred:* decomposing the `App` god-object into per-screen sub-structs
+    is a large, high-churn, low-visible-ROI refactor — parked until a
+    concrete need (or a quieter moment) rather than risking wide regressions
+    blind. The one rebuild-path-per-cache discipline is already documented in
+    CLAUDE.md and honored.
 - [ ] **Batch 9 — Unified field model (detail/edit).** One source of truth for
   field order (today `detail_fields.rs` and `edit_field.rs` diverge). Kill the
   hand-walked positional field enumeration in `copy_selected_field`.

@@ -271,7 +271,7 @@ pub fn handle_move(app: &mut App, r: Result<(), BwError>) {
 /// Silent post-move item reload.
 pub fn handle_move_reload(app: &mut App, r: Result<Vec<crate::domain::Item>, BwError>) {
     match r {
-        Ok(items) => super::vault::set_items(app, items),
+        Ok(items) => super::vault::set_items_keep_cursor(app, items),
         Err(e) => app.push_cmd("bw list items", false, &e),
     }
 }

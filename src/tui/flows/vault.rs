@@ -16,10 +16,22 @@ use crate::tui::app::App;
 use crate::tui::worker::{InFlight, WorkerRequest};
 
 /// Replaces the in-memory item list and rebuilds the search/filter
-/// caches (via `sort_items`).
+/// caches (via `sort_items`). Does **not** touch the cursor — for the
+/// paths that set their own selection afterwards (create, restore).
 pub(crate) fn set_items(app: &mut App, items: Vec<Item>) {
     app.items = items;
     app.sort_items();
+}
+
+/// Like [`set_items`] but **preserves the user's cursor on the same item
+/// by id** across the reload — the invalidation contract for every
+/// background / post-mutation refresh where the list changes underneath
+/// the user (silent reload, sync, import, move, folder-delete, manual
+/// F5). Capture the id first, replace, then re-anchor.
+pub(crate) fn set_items_keep_cursor(app: &mut App, items: Vec<Item>) {
+    let prev = app.selected_item_id();
+    set_items(app, items);
+    app.reanchor_selection(prev.as_deref());
 }
 
 /// Replaces the trash list (sorted) and rebuilds caches.
@@ -45,7 +57,7 @@ pub fn handle_load_items(app: &mut App, r: Result<Vec<Item>, BwError>) {
     match r {
         Ok(items) => {
             let n = items.len();
-            set_items(app, items);
+            set_items_keep_cursor(app, items);
             app.push_cmd("bw list items", true, &format!("{n} items loaded"));
             app.set_action(ActionState::Idle);
         }
@@ -95,7 +107,7 @@ pub fn handle_reload_items_silent(app: &mut App, r: Result<Vec<Item>, BwError>) 
     match r {
         Ok(items) => {
             let n = items.len();
-            set_items(app, items);
+            set_items_keep_cursor(app, items);
             app.push_cmd("bw list items", true, &format!("{n} items loaded"));
         }
         Err(e) => app.cmd_err("bw list items", &e, "Load failed"),
@@ -127,7 +139,7 @@ pub fn handle_sync_reload(app: &mut App, r: Result<Vec<Item>, BwError>) {
     match r {
         Ok(items) => {
             let n = items.len();
-            set_items(app, items);
+            set_items_keep_cursor(app, items);
             app.push_cmd("bw list items", true, &format!("{n} items loaded"));
         }
         Err(e) => app.cmd_err("bw list items", &e, "Load failed"),
