@@ -34,6 +34,23 @@ fn bw_exit(out: &std::process::Output) -> BwError {
     BwError::exit(stderr_str(out), out.status.code())
 }
 
+/// Parses a JSON array **row by row**, keeping every element that
+/// decodes and skipping the ones that don't — a single malformed record
+/// (a new field, a schema quirk in some `bw` version) can't lock the
+/// user out of the whole list. Falls back to an [`BwError::InvalidJson`]
+/// only when the top level isn't a JSON array at all.
+fn parse_list_tolerant<T: serde::de::DeserializeOwned>(
+    json: &str,
+    what: &str,
+) -> Result<Vec<T>, BwError> {
+    let rows: Vec<serde_json::Value> = serde_json::from_str(json)
+        .map_err(|e| BwError::InvalidJson(format!("Error parsing {what} JSON: {e}")))?;
+    Ok(rows
+        .into_iter()
+        .filter_map(|v| serde_json::from_value(v).ok())
+        .collect())
+}
+
 // ── Timeout budgets ──────────────────────────────────────────────────────
 //
 // Numbers are deliberate, not magic: each one is the longest a healthy
@@ -455,8 +472,7 @@ impl VaultPort for BwCliAdapter {
         let timeout = self.list_items_timeout;
         let out = bw_run_with_session_timeout(&["list", "items"], &session, timeout)?;
         if out.status.success() {
-            serde_json::from_str::<Vec<Item>>(&stdout_str(&out))
-                .map_err(|e| BwError::InvalidJson(format!("Error parsing items JSON: {e}")))
+            parse_list_tolerant::<Item>(&stdout_str(&out), "items")
         } else {
             Err(bw_exit(&out))
         }
@@ -469,8 +485,7 @@ impl VaultPort for BwCliAdapter {
         let timeout = self.list_items_timeout;
         let out = bw_run_with_session_timeout(&["list", "items", "--trash"], &session, timeout)?;
         if out.status.success() {
-            serde_json::from_str::<Vec<Item>>(&stdout_str(&out))
-                .map_err(|e| BwError::InvalidJson(format!("Error parsing trash JSON: {e}")))
+            parse_list_tolerant::<Item>(&stdout_str(&out), "trash")
         } else {
             Err(bw_exit(&out))
         }
@@ -597,8 +612,7 @@ impl VaultPort for BwCliAdapter {
         let session = self.session()?.to_string();
         let out = bw_run_with_session(&["list", "folders"], &session)?;
         if out.status.success() {
-            serde_json::from_str::<Vec<Folder>>(&stdout_str(&out))
-                .map_err(|e| BwError::InvalidJson(format!("Error parsing folders JSON: {e}")))
+            parse_list_tolerant::<Folder>(&stdout_str(&out), "folders")
         } else {
             Err(bw_exit(&out))
         }
@@ -830,8 +844,7 @@ impl VaultPort for BwCliAdapter {
         let session = self.session()?.to_string();
         let out = bw_run_with_session(&["list", "organizations"], &session)?;
         if out.status.success() {
-            serde_json::from_str::<Vec<Organization>>(&stdout_str(&out))
-                .map_err(|e| BwError::InvalidJson(format!("Error parsing organizations JSON: {e}")))
+            parse_list_tolerant::<Organization>(&stdout_str(&out), "organizations")
         } else {
             Err(bw_exit(&out))
         }
@@ -842,8 +855,7 @@ impl VaultPort for BwCliAdapter {
         let session = self.session()?.to_string();
         let out = bw_run_with_session(&["list", "collections"], &session)?;
         if out.status.success() {
-            serde_json::from_str::<Vec<Collection>>(&stdout_str(&out))
-                .map_err(|e| BwError::InvalidJson(format!("Error parsing collections JSON: {e}")))
+            parse_list_tolerant::<Collection>(&stdout_str(&out), "collections")
         } else {
             Err(bw_exit(&out))
         }
@@ -932,6 +944,31 @@ impl VaultPort for BwCliAdapter {
 mod tests {
     use super::*;
     use crate::ports::VaultPort;
+
+    #[test]
+    fn tolerant_parse_skips_bad_rows_and_keeps_the_rest() {
+        let json = r#"[
+            {"id":"1","name":"a","type":1},
+            {"broken":true},
+            {"id":"2","name":"b","type":1}
+        ]"#;
+        let items: Vec<Item> = parse_list_tolerant(json, "items").unwrap();
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0].id, "1");
+        assert_eq!(items[1].id, "2");
+    }
+
+    #[test]
+    fn tolerant_parse_errors_only_when_the_top_level_is_not_an_array() {
+        assert!(parse_list_tolerant::<Item>("not json", "items").is_err());
+        assert!(parse_list_tolerant::<Item>("{}", "items").is_err());
+        // An empty array is fine — zero rows, no error.
+        assert!(
+            parse_list_tolerant::<Item>("[]", "items")
+                .unwrap()
+                .is_empty()
+        );
+    }
 
     #[test]
     fn classifies_device_verification_prompts() {
