@@ -2,142 +2,59 @@
 
 Guidance for Claude Code when working in this repository.
 
-## UX/UI — read `UX.md` first (hard rule)
+> **This spec is the target architecture of an in-progress restructuring.**
+> It describes where `bytewarden` is going, not necessarily every line as it
+> stands today. Where the current code diverges from this document, **the
+> document wins** — bring the code to the spec, and never re-introduce a
+> pattern this file rules out. Update the spec in the same change whenever a
+> decision here changes.
 
-**Before any UI edit or new feature, read [`UX.md`](UX.md)** — it is the
-canonical design system (screen layout, the shared `view::widgets`
-components, chrome, confirm overlays, keybinding conventions, theme).
-Build new UI by reusing the documented components, never a one-off. **Keep
-`UX.md` updated before every push** when a change touches UX/UI (new screen,
-new pattern, changed convention): update the spec in the same change and
-apply it everywhere.
-
-## Working agreements (READ FIRST)
-
-1. **Fix every occurrence, not just the one reported.** When the user reports
-   a problem (a bug, a wording issue, a layout glitch, a missing keybinding,
-   …), treat the reported spot as one *instance* of a class. Before finishing,
-   grep the whole app for the same pattern and fix it everywhere it appears.
-   - Practical step: after a targeted fix, `grep` for the literal/string/
-     pattern across `src/` and confirm there are no siblings left.
-
-2. **Every UX change must stay coherent with the rest of the UI.** This app
-   has established, repeated patterns; a change to one screen should match all
-   the others, and ideally reuse the same component.
-   - Bordered panel → `tui::view::widgets::titled_block` (top-left title +
-     dim bottom-right counter) / `rounded_block`. Focus tint via
-     `widgets::focus_color` / `focus_border`.
-   - Bottom hint bar → `widgets::render_cmd_bar_with_help`: short per-focus
-     navigation hints on the left, **`F1: help` anchored right** (never
-     truncated). Popups use the plain `render_cmd_bar` (self-contained
-     instructions, no F1). The full key list lives in the help popup, not the
-     bar.
-   - Help popup → `tui::view::help::draw_popup` is **context-aware**: it shows
-     only the shortcuts for the originating screen (`App::help_from`) and, on
-     the vault, the focused panel (`App::focus`). Any new screen/keybinding
-     must be added to the matching section in `help.rs` (+ its `screen_label`).
-   - Text inputs → `widgets::input_with_cursor` / `cursor_line` (block
-     cursor); checkboxes → `widgets::render_checkbox`; field cards (detail /
-     edit / create) → `widgets::field_areas` + `render_field_card`; centered
-     popups → `widgets::center_rect`.
-   - List filtering follows the `App::filtered_cache: Vec<usize>` +
-     `search_query` + `rebuild_filtered_cache()` convention, ranked with
-     `domain::search::fuzzy_score_lowered` (pure helper
-     `compute_filtered_indices`). Selection (`selected_index`) indexes the
-     **filtered** cache, never the raw `items` vec. The `url:` query prefix
-     narrows to login URIs.
-   - Global keys are consistent across screens (`/` focus search, `Esc`/`h`
-     back, `F1`/`?` help, `0`–`4` focus panel, `Tab` cycle). **Only `Ctrl+C`
-     quits.** Actions use the **`Alt+<letter>`** convention (e.g. `Alt+C`
-     copy, `Alt+E` edit, `Alt+N` new) — see `UX.md`.
-
-3. **Verify before declaring done.** Run `cargo build`, `cargo clippy
-   --all-targets -- -D warnings` (must be warning-free) and `cargo test`
-   after every change. Add/adjust unit tests for new pure logic on
-   `App`/`domain`.
-
-## What this is
-
-`bytewarden` — a terminal UI (Ratatui) over the **Bitwarden CLI**. Flow:
+`bytewarden` — a terminal UI (Ratatui) over the **Bitwarden CLI**. It shells
+out to the `bw` binary and parses its JSON; there is **no** Bitwarden SDK
+dependency and Bitwarden owns all cryptography. Flow: boot (`bw status`) →
 login / unlock → vault list (sidebar + search + list) → item detail →
-edit/create. Full CRUD over items (5 types), folders, attachments, Sends,
-import/export, plus generator, memberships, HIBP check. It shells out to the
-`bw` binary and parses its JSON; there is no Bitwarden SDK dependency.
+edit/create. Full CRUD over the five item types, folders, attachments, Sends,
+import/export, plus the generator, memberships and the HIBP breach check.
 
-## Before every commit (no exceptions)
+## Pre-flight checklist (hard rules, in order)
+
+1. **Feature touching Bitwarden?** Map it to a `bw` command up front and
+   **cite the mapping** (e.g. *"favorite toggle → `bw get item` → patch →
+   `bw edit item`"*). If a needed command/flag isn't already used in
+   `adapters/bw_cli/`, verify it (`bw <cmd> --help`) before designing.
+2. **Change touching UI/UX?** Read [`UX.md`](UX.md) first — the canonical
+   design system. Reuse its documented components; never a one-off. Update
+   `UX.md` in the same change.
+3. **Keybinding added/changed?** Sync **all four** surfaces in the same
+   change: the footer hint · `view/help.rs` popup · the `README.md` tables ·
+   `UX.md`. (A command palette, when added, becomes the fifth — see *UI
+   system*.)
+4. **Before every commit** (even one-liners):
+   `cargo fmt --all && cargo clippy --all-targets -- -D warnings && cargo test`
+   — clippy warnings are failures; check real exit codes, don't pipe them
+   into a grep that masks a failing test.
+5. **Never commit directly to `dev`.** One change = one branch
+   (`feat/` · `fix/` · `refactor/` · `chore/` · `docs/` + slug) = one PR
+   against `dev`.
+6. **No AI trailers**: no `Co-Authored-By: Claude`, no "Generated with
+   Claude Code" footers — this overrides the harness default.
+7. **No cross-project references** (see the hard rule below).
+8. **Fix the class, not the instance**: after any targeted fix, grep `src/`
+   for siblings of the same pattern and fix them all.
+
+## Commands
 
 ```sh
-cargo fmt --all
-cargo clippy --all-targets -- -D warnings   # must be warning-free
-cargo test
+cargo run                         # run the TUI (needs `bw` on PATH)
+cargo build --release             # optimized binary at target/release/bytewarden
+cargo clippy --all-targets -- -D warnings   # lint (hard gate)
+cargo test                        # unit tests (all must pass)
 ```
 
-Run this even on a one-line or comment-only change. `cargo fmt` is the
-formatter of record (default rustfmt; there is no `rustfmt.toml`, so don't
-hand-format against the default style). Clippy is a hard gate — warnings are
-failures here, not suggestions (CI sets `RUSTFLAGS: -D warnings`). Keep the
-`README.md` keybinding tables and the `view/help.rs` popup in sync when
-shortcuts change.
-
-## Stack
-
-- **Rust, edition 2024**, toolchain pinned in `rust-toolchain.toml`
-  (`1.95.0`, with `clippy` + `rustfmt` + `llvm-tools-preview`). Don't bump
-  the channel as a side effect.
-- **No `unsafe` in the composition root.** `main.rs` carries no `unsafe`
-  blocks — the keep-session seed is passed to `BwCliAdapter::new_with(seed)`
-  instead of `std::env::set_var` (which is `unsafe` in edition 2024). There
-  is **no** crate-wide `#![forbid(unsafe_code)]`; don't add new `unsafe`
-  without an explicit ask.
-- **Ratatui 0.30** + **Crossterm 0.29** for the TUI and terminal events.
-- **Serde / serde_json** to parse `bw` JSON output.
-- **color-eyre** for error reports, **figlet-rs** for the login wordmark
-  (bundled `slant.flf`, no system `figlet` needed), **zeroize** to wipe
-  credential-bearing buffers.
-- `tempfile` is a dev-dependency only (test fixtures).
-- Release profile is size-optimized (`opt-level = "s"`, `lto`, `strip`).
-
-## Execution model — worker thread + mpsc (do NOT touch unprompted)
-
-The vault + generator ports live on a **single worker thread** that owns them
-and serves requests serially over `mpsc`; the render thread never blocks on a
-`bw` call (`tui/worker.rs`). The flow:
-
-1. A `request_*` builder (in `tui/flows/`) validates input, stashes a
-   `worker::InFlight` ticket on `App::in_flight`, sets a `Running` toast, and
-   sends a `WorkerRequest` on `app.worker_tx`.
-2. The worker runs the blocking `bw` call off-thread and sends a
-   `WorkerResponse` back. Each call is wrapped in `run_caught` so a panic in
-   one can't kill the worker.
-3. The run loop (`tui/mod.rs::run_loop`) drains `app.worker_rx` every frame and
-   routes each response through `flows::apply_response`, which consumes the
-   `in_flight` ticket and dispatches to the owning `handle_*`. The spinner
-   animates throughout; `Ctrl+C` stays instant.
-
-Multi-step flows (login → load → session-data; save = fetch → patch → edit;
-delete → reload) **chain** by having a `handle_*` queue the next `request_*`.
-Only one user request is in flight at a time (`App::in_flight: Option<_>`);
-`input::busy_blocks` gates all keys but `Esc` while busy so a second request
-can't be queued. Each call still has a per-operation timeout in
-`adapters/bw_cli/process.rs`.
-
-Clipboard + settings stay **synchronous** on the render thread (they're fast).
-Plain clipboard copies (username/password) read an in-memory item and don't
-touch the worker; only TOTP / HIBP do.
-
-**Do NOT pull in `tokio`/`async-std`.** Extend the `std::thread` + `mpsc`
-worker pattern: add a `WorkerRequest`/`WorkerResponse`/`InFlight` variant and a
-`request_*`/`handle_*` pair.
-
-## No Bitwarden SDK
-
-All Bitwarden access is the `bw` CLI binary spawned as a subprocess
-(`adapters/bw_cli/`). Adding functionality means a new CLI invocation, not an
-SDK crate: build argv in `codec.rs`, run with a timeout in `process.rs`,
-parse in `json.rs`. Master passwords / OTP / 2FA codes are fed via
-stdin / the `BW_PASS_INPUT` env var, **never** argv (so they don't appear in
-`ps`). Every invocation is appended to the in-app command log with the
-session key redacted (`***`).
+`cargo fmt` is the formatter of record (default rustfmt, no `rustfmt.toml`, so
+don't hand-format against the default style). Debug logging:
+`BYTEWARDEN_DEBUG=1` → `~/.bytewarden.log` (0600; the redacted command log
+only, never a secret).
 
 ## Architecture (hexagonal / ports & adapters)
 
@@ -147,100 +64,283 @@ main ──► tui ──► flows ──► ports ◄── adapters
                     └── domain (pure types, no I/O)
 ```
 
-- `src/domain/` — pure types and rules, no I/O (e.g. `Item`, `LoginData`,
-  `Folder`, `Collection`, `ItemFilter`, `fuzzy_score_lowered`, validators,
-  fingerprint phrase).
-- `src/ports/` — trait abstractions: `VaultPort`, `ClipboardPort`,
-  `SettingsPort`, `PasswordGeneratorPort`.
-- `src/adapters/` — the only layer allowed to do I/O: `bw_cli/` (subprocess +
-  `codec` + `process` + `json`), `bw_generator.rs`, `clipboard_system.rs`
-  (`wl-copy`/`xclip`/`xsel`/`pbcopy`), `settings_toml.rs` (hand-rolled TOML
-  that preserves unknown keys).
+- `src/domain/` — pure types + rules, **no I/O**: `Item` (+ the five typed
+  payloads), `ItemFilter`/`CreateItemType`, `Folder`/`Collection`/
+  `Organization`, `LineEditor` (every text input; word ops, `ZeroizeOnDrop`),
+  `fuzzy_score_lowered`/`LoweredItem`, the login/2FA types (`VaultInfo`,
+  `LoginOutcome`, `TwoFactorMethod`), validators, identity helpers.
+- `src/ports/` — traits: `VaultPort`, `ClipboardPort`, `SettingsPort`,
+  `PasswordGeneratorPort` (+ the typed `BwError`). Every port method returns
+  `Result<_, BwError>`, never `Result<_, String>` (see *Error taxonomy*).
+  `SettingsPort::write_*` return `bool` — never fatal, but callers must
+  inform on failure.
+- `src/adapters/` — the **only** layer doing I/O:
+  - `bw_cli/` — subprocess + `codec` (serde-built JSON payloads, base64) +
+    `process` (wall-clock timeouts, concurrent piped-drain) + `json`
+    (tolerant parsing). One-shot subprocess model; there is **no** persistent
+    session or push stream (the `bw` CLI has neither — see *Execution model*).
+  - `clipboard_system.rs` — wl-copy/xclip/xsel/pbcopy + **OSC 52** fallback
+    for headless, with compare-and-clear auto-clear (`clipboard_clear_secs`).
+  - `settings_toml.rs` — hand-rolled TOML preserving unknown keys, **atomic**
+    writes (temp file + `rename`), 0700/0600 perms.
+  - `bw_generator.rs` — the password/passphrase generator (`bw generate`).
 - `src/tui/` — the driving adapter:
-  - `app.rs` — global mutable `App` state container (incl. `worker_tx`/
-    `worker_rx`/`in_flight`).
-  - `worker.rs` — the worker thread + `WorkerRequest`/`WorkerResponse`/
-    `InFlight` enums + `WorkerHandle`.
-  - `action.rs` — `ActionState` (Idle/Running/Done/Error) + `CmdEntry`.
-  - `screens.rs` — `Screen`, `Focus`, `LoginField` enums.
+  - `app.rs` — the mutable `App` state container + the invalidation methods
+    (see *State & invalidation contracts*).
+  - `worker.rs` — worker thread(s) + `WorkerRequest`/`WorkerResponse`/
+    `InFlight`; `run_caught` panic isolation per call.
   - `flows/` — per-feature `request_*`/`handle_*` pairs (`auth`, `vault`,
-    `items`, `copy`, `generator`, `folders`, `memberships`, `reprompt`, …).
-    `flows::apply_response` routes each `WorkerResponse` to its `handle_*`.
-  - `input/` — per-screen keyboard handlers (wired in `input/mod.rs::
-    handle_events`) + `mouse.rs` + shared `nav.rs`.
-  - `view/` — per-screen Ratatui renderers (router in `view/mod.rs::draw`) +
-    shared chrome in `view/widgets.rs`; `theme.rs`, `logo.rs`, `starfield.rs`.
-  - Helpers: `detail_fields.rs` (detail row model), `edit_field.rs` (edit/
-    create field model), `folders.rs` (`FolderFilter` + sidebar), `import.rs`/
-    `export.rs`/`send.rs`/`assign_collections.rs`/`reprompt.rs` (popup state),
-    `session_file.rs` (keep-session per-PPID file), `debug_log.rs`.
+    `items`, `copy`, `generator`, `folders`, `memberships`, `reprompt`,
+    `export`, `import`, `send`, `assign_collections`, `item_json`).
+    `flows::apply_response` routes each response by the `in_flight` ticket.
+  - `input/` — per-screen key handlers (router `input/mod.rs`) + `mouse.rs`;
+    shared mechanics in `input/common.rs` (`list_nav`, `route_line_editor`,
+    `search_key`, `confirm_key` + `run_confirm`, `busy_blocks`,
+    `cycle_focus`) — every handler delegates, never re-implements.
+  - `view/` — per-screen renderers (router `view/mod.rs::draw`; popups draw
+    their base screen underneath) + the widget system in `view/widgets.rs`
+    (see *UI system*); `logo.rs`/`starfield.rs` (splash/login only).
+  - Support modules under `tui/`: `theme.rs` (presets + `ColorCaps`
+    adaptation + semantic styles), `settings_model.rs`, `action.rs`
+    (`ActionState`/`CmdEntry`), `screens.rs` (`Screen`/`Focus`),
+    `mouse_areas.rs` (hit-test rects), `session_file.rs` (keep-session
+    per-PPID file), `debug_log.rs`.
 
-When adding a new screen: add the `Screen` variant, an `input/<screen>.rs`
-handler (wired in `input/mod.rs`), a `view/<screen>.rs` renderer (wired in
-the `view/mod.rs::draw` router — popups draw their origin screen underneath
-first), reuse `widgets::*` for chrome, and add its section to `view/help.rs`.
-**Reuse the shared helpers above rather than re-implementing per screen** —
-that's what keeps the app coherent.
+New screen = `Screen` variant + `input/<screen>.rs` (wired in the router) +
+`view/<screen>.rs` (wired in `draw`) + a `view/help.rs` section + the
+four-surface keybinding sync. **Reuse the shared helpers rather than
+re-implementing per screen** — that is what keeps the app coherent.
 
-## Security (Bitwarden-specific)
+## Execution model — worker thread(s) + mpsc (do NOT touch unprompted)
 
-- **Secrets live in `zeroize`d buffers.** The session key, master-password
-  buffer, OTP/2FA buffer, and every vault payload (`Item` & friends) are
-  `Zeroizing` / `ZeroizeOnDrop`; the in-memory cache is wiped on lock /
-  logout / shutdown. JSON intermediates and edit-form / generator buffers are
-  `Zeroizing<String>` too.
-- **Clipboard auto-clear** (`clipboard_clear_secs`, default 30 s) wipes any
-  copied secret — only if the clipboard still holds bytewarden's write.
+**Do NOT pull in `tokio`/`async-std`.** Extend the `std::thread` + `mpsc`
+pattern instead: a `WorkerRequest`/`WorkerResponse`/`InFlight` variant + a
+`request_*`/`handle_*` pair.
+
+- **User lane** — one worker owns the `VaultPort` (+ generator) and serves
+  requests serially. A flow starts a request with
+  **`App::submit(slot, label, req)`**: it claims the `in_flight` slot via
+  `begin`, shows the `Running` toast, and sends; a failed send releases the
+  slot and routes through `on_worker_dead` instead of leaving the UI busy.
+  Only reach for bare `begin()` when state must mutate between claiming and
+  sending — comment why. **One request in flight at a time**
+  (`App::in_flight: Option<_>`); `input::common::busy_blocks` gates every key
+  but `Esc` while busy so a second request can't be queued.
+- **Background lane** (optional, for silent work that must never gate the
+  user): the post-mutation silent reloads (reload-items, reload-trash,
+  reload-folders after a delete/import/move) and the auto-lock-safe idle
+  resync belong here. Its responses carry **no ticket** and are routed **by
+  variant** at the top of `apply_response`, off the user's `in_flight` slot.
+- **No push lane.** The `bw` CLI has no realtime stream, so there is no
+  `api-listen` equivalent and no listener supervisor. The vault is refreshed
+  by explicit sync / reload, not by pushed events. Do not invent one.
+- **Multi-step flows chain** by having a `handle_*` queue the next
+  `request_*`: login → load items → parallel session-data; save = fetch item
+  JSON → patch → `edit`; favorite = fetch → flip → `edit`; delete → reload
+  trash; folder-delete → reload items → reload folders; import → reload items
+  → reload folders. Prefer a single explicit chain per operation; never fan
+  out N concurrent requests the busy-guard would drop — sequence them as a
+  batch advanced by each response.
+- **Failure containment** — `run_caught` wraps every port call in
+  `catch_unwind` (a panic becomes `BwError::Internal`, the worker keeps
+  serving); per-op wall-clock timeouts in `process.rs`; the all-workers-dead
+  state is observable (`TryRecvError::Disconnected` → `App::on_worker_dead`
+  unwedges the UI, `begin` refuses, a persistent error badge shows) plus a
+  per-tick **watchdog** (`App::watchdog_release_stuck_request`) that releases
+  a slot outliving the largest per-op budget so a lost ticket can't lock
+  input forever.
+
+Clipboard + settings stay **synchronous** on the render thread (they're fast).
+Plain clipboard copies (username/password) read an in-memory item and don't
+touch the worker; only TOTP / HIBP do.
+
+## Error taxonomy — `BwError` (do NOT return `String`)
+
+Every port method returns `Result<_, BwError>`. Stringly-typed errors are
+opaque — the UI can't tell a timeout from "not found" from a missing binary,
+and ends up string-matching human-readable output. Classify at the boundary
+instead:
+
+- `Spawn(String)` — couldn't exec `bw` (not on PATH / perms).
+- `Timeout { label, secs }` — wall-clock budget exceeded, child killed.
+- `Exit { stderr, status }` — non-zero exit; stderr passed through verbatim.
+- `InvalidJson { detail }` — stdout wasn't the JSON we expected.
+- `Auth(AuthChallenge)` — the login path needs a device-verification OTP or a
+  permanent 2FA code (replaces today's brittle prompt-string matching where
+  possible; keep the substring classifier only where `bw` gives no structured
+  signal, isolated behind this variant).
+- `Shape(String)` — parsed, exit 0, but an expected field was missing.
+- `Internal(String)` — an adapter/worker panic captured via `catch_unwind`.
+
+`BwError` implements `Display` (human-readable, for the toast + command log)
+and `std::error::Error`. The command log stores the classified error; the
+feedback strip renders `Display`.
+
+## State & invalidation contracts (the footgun list)
+
+`App` caches derived state; each cache has **exactly one** rebuild path.
+**Mutating the input without calling the rebuild is a bug**, and calling a
+rebuild with the wrong cursor semantics is a UX regression. Selection always
+indexes the **filtered** cache, never the raw vec, and is re-anchored by
+**id**, never by index, after a wholesale reload.
+
+| Input mutated | Must call | Notes |
+|---|---|---|
+| `items` / `trashed_items` replaced wholesale (load, sync, import) | `rebuild_caches()` | rebuilds lowered projection + filtered cache + sidebar counts, in that order (filtered references the lowered vec) |
+| in-place edit of a searchable field (name/username/uri/notes) | `rebuild_caches()` | the lowered projection is now stale |
+| item added / removed (create, delete, restore) | `rebuild_caches()` | indices in `filtered_cache` shift |
+| favorite / folder / collection change only | `rebuild_filtered_cache()` + `rebuild_sidebar_counts()` | no lowered rebuild needed — names/labels unchanged |
+| new search / filter / folder-filter query | `rebuild_filtered_cache()` | snaps `selected_index` to the first (top-ranked) match |
+| theme / settings change | (no cache) | re-resolve the theme; nothing to invalidate |
+
+After any load/reload handler, re-anchor `selected_index` onto the same item
+**by id** so a background resync never yanks the cursor. `selected_index`
+must only ever reach `items`/`trashed_items` through the filtered cache via
+`.get()`, so it can never point out of bounds.
+
+## UI system
+
+**Read `UX.md` before any UI change** — it is the spec; keep it updated in
+the same change. The component vocabulary lives in `view/widgets.rs` (a new
+overlay / hint / empty-state / input **must** use these, never a one-off):
+
+- `titled_block` / `rounded_block` / `focus_style` — the rounded panel chrome
+  and the single focused-vs-unfocused style decision.
+- `list_table` — every multi-column list panel (never a stretching `Min` on a
+  non-final column). `draw_picker_modal` — every centered query/list overlay.
+  `draw_input_popup` — small single-input popups.
+- `draw_confirm_popup` + `input::common::run_confirm` — every y/n confirm
+  (navigable, **default = cancel** on destructive).
+- `legend_line(&[(key, label)], width, theme)` — every hint/legend (keys in
+  accent via `key_style`, fitted by whole segments, never a clipped key).
+- `editor_spans` / `editor_spans_masked` / `editor_lines` — the one
+  text-input renderer, over a `domain::LineEditor` (see below).
+- `empty_state_lines(head, hints, theme)` — every empty state **teaches**
+  (names the 2-3 keys that would fill the panel); a bare dim line is not
+  acceptable. `draw_scrollbar` — one scrollbar on every overflowing region.
+- `unread`/attention emphasis, `favorite_star`, `key_style`, `center_rect`,
+  `MODAL_*` — one definition each; `Theme::emphasis()` / `Theme::danger_title()`
+  are the semantic styles.
+
+**Keybindings — the gradient (full spec in `UX.md`).** Keys are assigned by a
+gradient of modifier tiers so the modifier tells you the weight of the action
+before you press it: **bare letter** = the frequent/safe action on the focused
+list · **`Shift`** = the loud/status-change tier · **`Ctrl`** = global
+(works from any focus) · **`Alt`** = jump to a panel + compose-context verbs ·
+**`/`** = focus search. Destructive item ops are bare (`x`/`Alt+D`) *because*
+they pass through the navigable confirm. `Ctrl+C` is the **only** quit. The
+vim layer is a contract: the `Esc` chain backs out one layer at a time and
+**never destroys typed text**; word ops (`Ctrl+W`, `Ctrl+U`, `Ctrl+←/→`,
+`Ctrl+A/E`) live once in `route_line_editor` so every input inherits them.
+
+## The text-input model
+
+Every text input is a `domain::LineEditor` (UTF-8-safe byte cursor on a char
+boundary; `insert`/`backspace`/`delete`/`left`/`right`/`home`/`end`/`set`/
+`clear` + readline word ops, `ZeroizeOnDrop` because inputs can hold secrets).
+Handlers feed keys through `input::common::route_line_editor` (returns `true`
+when the text changed → rebuild a filter) or, for the search box,
+`input::common::search_key`. Rendering is always `widgets::editor_spans`.
+**Do not** hand-roll `char_indices().nth()` cursor editing in a screen — that
+duplication is exactly what this model exists to kill. Login/password/OTP
+fields are `LineEditor`s too (masked via `editor_spans_masked`).
+
+## Bitwarden CLI — adapter rules
+
+All Bitwarden access is the `bw` binary spawned as a subprocess
+(`adapters/bw_cli/`). Adding functionality means a new CLI invocation, not an
+SDK crate:
+
+- Build argv/JSON payloads in `codec.rs` (serde → base64, **never** string
+  concat), run with a per-op **timeout** via `process.rs`, parse
+  **strict-but-tolerant** in `json.rs` (skip a malformed row with a
+  diagnostic, never drop the whole list).
+- **Secrets never in argv.** Master passwords / OTP / 2FA codes are fed via
+  stdin or the `BW_PASS_INPUT` env var; the session key via `BW_SESSION`,
+  never `--session`. (`ps aux` / `/proc/PID/cmdline` must never show a
+  secret.)
+- Every invocation is appended to the in-app command log with the session key
+  **redacted** (`***`); the same redacted line goes to `~/.bytewarden.log`
+  under `BYTEWARDEN_DEBUG=1`.
+- `parallel_session_data` overlaps the four post-login reads
+  (folders/orgs/collections/import-formats) by cloning the adapter (sharing
+  one `Arc<Zeroizing>` session key) across short-lived threads; a partial
+  failure surfaces per-result, never poisons the whole load.
+
+## Working agreements
+
+1. **Fix every occurrence, not just the one reported** — the reported spot is
+   one instance of a class; grep for siblings before finishing.
+2. **Every UX change stays coherent with the whole UI** — reuse the
+   documented component; when touching a shared mechanic (the confirm
+   mechanics, the Esc layering, the filter contract), check every other place
+   it's used.
+3. **Verify before declaring done** — the full gate (fmt/clippy/test) plus
+   unit tests for new pure logic on `App`/`domain`. Regression tests
+   accompany behaviour fixes.
+4. **Judge coherence + flow BEFORE writing.** Does the change match the app's
+   own patterns; does it match what users know from comparable tools (vim /
+   lazygit / mutt and the Bitwarden GUI); is the real multi-step flow smooth
+   (no needless mode switches, cursor jumps, or lost input)? State the
+   reasoning briefly when non-trivial.
+
+## Security & memory hygiene
+
+- The session key, master-password buffer, OTP/2FA buffer, every vault
+  payload (`Item` & friends), and every `LineEditor` are `Zeroizing` /
+  `ZeroizeOnDrop`; the in-memory cache is wiped on lock / logout / shutdown.
+  JSON intermediates are `Zeroizing<String>`. Keep the derives when touching
+  these types.
 - **Reprompt** re-verifies the master password before exposing a secret on a
-  reprompt-flagged item (copy password/TOTP/hidden field, F2 reveal); routed
-  through `flows::reprompt`. No caching — every protected action re-prompts.
-- **Auto-lock** after inactivity (`lock_after_minutes`); **keep-session**
-  writes the session key to a per-PPID file (`tui/session_file.rs`, mode
-  0600). Config file is mode 0600. `BYTEWARDEN_DEBUG=1` appends the redacted
-  command log to `~/.bytewarden.log`.
+  reprompt-flagged item (copy password/TOTP/hidden field, reveal). No caching
+  — every protected action re-prompts, on the keyboard *and* the mouse path.
+- **Clipboard auto-clear** (`clipboard_clear_secs`, default 30 s) wipes a
+  copied secret only if the clipboard still holds bytewarden's write; the
+  OSC 52 headless path can't verify, so it skips the timed clear.
+- **Auto-lock** after inactivity; **keep-session** writes the session key to a
+  per-PPID file (mode 0600, cleaned when the parent shell dies). Config file
+  and settings writes are atomic with owner-only perms (0600 / 0700).
 - Don't add a surface that writes secrets to disk (beyond the user-chosen
   export path) without an explicit ask.
 
-## Branching
+## No cross-project references (hard rule)
 
-- The default / deploy branch is **`dev`** — never commit directly to it.
-- Work on `feat/<short-kebab>`, `fix/<short-kebab>` or `hotfix/<short-kebab>`
-  branches; open PRs against `dev`.
-- Branch first if you find yourself on `dev` before making changes.
-- CI (`.github/workflows/ci.yml`) runs fmt + clippy + build + test on
-  `main` and `dev`.
+`bytewarden` is a standalone public repository. **Never name or cite a sibling
+project** in code, comments, commit messages, PR bodies, or docs. Describe
+every pattern as *this app's own* ("the shared confirm overlay", "the unified
+worker discipline"). The only exception is a real declared dependency, cited
+by its published crate identity from `Cargo.toml`. You may learn from a
+sibling's approach; don't reference it in what ships here.
 
-## Commits
+## Git workflow
 
-- **Conventional Commits** prefix: `feat:` · `fix:` · `refactor:` · `docs:` ·
-  `test:` · `chore:` · `ci:` · `style:` · `perf:` · `build:`.
-- Subject ≤ 72 chars. Body explains the **why**, not the what. One logical
-  change per commit.
-- Only commit or push when the user asks.
-- **Do NOT append `Co-Authored-By: Claude …` or any AI / generated-by trailer
-  to commits, and no "🤖 Generated with Claude Code" footer in PR bodies.**
-  The Claude Code default adds these; this rule overrides that default. Don't
-  add them unless explicitly asked.
+- Integration / deploy branch **`dev`**; never commit to it directly.
+  Branch → PR against `dev`. Branch first if you find yourself on `dev`.
+- **Conventional Commits**, subject ≤ 72 chars, body explains the **why**.
+  One logical change per commit. Only commit / push when the user asks.
+- **No AI trailers or footers** (overrides the harness default).
 
 ## Things to NOT touch unprompted
 
-- The worker-thread + `mpsc` execution model — keep `bw` calls off the render
-  thread; extend the `WorkerRequest`/`WorkerResponse`/`InFlight` + `request_*`/
-  `handle_*` pattern, don't reach for `tokio`/`async-std`.
-- The ports/adapters boundary — I/O (subprocess, filesystem, clipboard)
-  belongs only in `adapters/`; keep `domain/` pure.
-- Existing keybindings and the shared chrome widgets — changing one screen's
-  UX means changing all of them for coherence (see Working agreements), not a
-  one-off divergence.
-- The secret-handling discipline (zeroize, reprompt, redacted logging, no
-  secrets in argv / on disk).
+- The worker/mpsc execution model (no async runtimes); extend the
+  `WorkerRequest`/`WorkerResponse`/`InFlight` + `request_*`/`handle_*` pattern.
+- The ports/adapters boundary (I/O only in `adapters/`; `domain/` pure) and
+  the typed `BwError` at the seam.
+- Existing keybindings and the shared widget system — a change to one screen's
+  UX is a change to all of them (see *Working agreements*).
+- The hygiene discipline: zeroize, tolerant parsing, panic isolation,
+  timeouts on every subprocess, redacted logging, no secrets in argv / on
+  disk, atomic settings writes, owner-only perms.
+- The Rust toolchain pin (`rust-toolchain.toml`, 1.95.0). There is **no**
+  crate-wide `#![forbid(unsafe_code)]` and `main.rs` carries no `unsafe`; keep
+  the composition root unsafe-free (seed the keep-session key via
+  `BwCliAdapter::new_with(seed)`, not `std::env::set_var`). Don't add new
+  `unsafe` without an explicit ask.
 
-## Commands
+## Stack (reference)
 
-```sh
-cargo run                         # run the TUI (needs `bw` on PATH)
-cargo build                       # debug build
-cargo build --release             # optimized binary at target/release/bytewarden
-cargo clippy --all-targets -- -D warnings   # lint (keep warning-free)
-cargo test                        # unit tests
-```
+Rust edition 2024 (pinned 1.95.0) · Ratatui 0.30 + Crossterm 0.29 · serde /
+serde_json (parse `bw` JSON) · color-eyre · zeroize · figlet-rs (bundled
+`slant.flf` login wordmark, no system `figlet`) · tempfile (dev-only). No
+Bitwarden SDK — every Bitwarden operation is a `bw` subprocess. Release
+profile is size-optimized (`opt-level = "s"`, `lto`, `strip`).
