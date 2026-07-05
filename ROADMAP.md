@@ -135,13 +135,13 @@ one branch → PR → squash-merge to `dev`.
     `dim` toward text; list rows `foreground` not `dim`) is a **visual** change
     across every screen — held until it can be verified in a real terminal,
     not shifted blind. More presets are additive and can land any time.
-- [~] **Batch 12 — Responsiveness. (Deferred — needs runtime verification.)**
-  Every piece here is a **visual layout change** (responsive command-log
-  height, scrollbars on overflowing regions, wrapped field values, modals
-  windowed by real height) whose correctness can only be judged by rendering
-  it in a real terminal at various sizes. Shipping unverified layout risks
-  visible breakage, so this waits for a terminal-in-the-loop session rather
-  than being changed blind. (The footer already truncates via
+- [~] **Batch 12 — Responsiveness (partial).** Shipped the **monotonic
+  responsive command-log height** (`widgets::cmdlog_height`, 6 rows roomy → 3
+  at the 18-row floor, unit-tested) and a **scroll cue on the vault list**
+  (`widgets::draw_scrollbar`, built on Ratatui's `Scrollbar`, shown only on
+  overflow). *Still to do, visual/runtime-verify:* scrollbars on the command
+  log (bottom-anchored scroll math) and the help popup; wrapped field values;
+  windowing modals by real height. (The footer already truncates via
   `render_cmd_bar_with_help`.)
 - [x] **Batch 13 — Adapter robustness (internal, testable slice).** Made
   settings writes **atomic** (`write_file_secure` now writes a sibling

@@ -5,10 +5,46 @@ use ratatui::{
     layout::{Constraint, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, BorderType, Borders, Paragraph},
+    widgets::{
+        Block, BorderType, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState,
+    },
 };
 
 use crate::tui::theme::Theme;
+
+/// Responsive command-log height (rows, borders included): 6 when the
+/// terminal is roomy, shrinking to 3 at the floor so the body keeps its
+/// rows. **Monotonic** — a taller terminal never shrinks the log (and so
+/// never shrinks the body it sits above).
+pub fn cmdlog_height(total: u16) -> u16 {
+    match total {
+        0..=19 => 3,
+        20..=23 => 4,
+        24..=29 => 5,
+        _ => 6,
+    }
+}
+
+/// Draws a dim vertical scrollbar on the right border of a bordered
+/// `area` — **only when the content overflows** the visible rows, so
+/// short lists stay clean. Built on Ratatui's `Scrollbar` so the glyphs
+/// and thumb sizing are correct. `content_len` is the total row count,
+/// `offset` the index of the first visible row.
+pub fn draw_scrollbar(frame: &mut Frame, area: Rect, content_len: usize, offset: usize, t: &Theme) {
+    let viewport = area.height.saturating_sub(2) as usize; // inside the borders
+    if viewport == 0 || content_len <= viewport {
+        return;
+    }
+    let mut state = ScrollbarState::new(content_len)
+        .viewport_content_length(viewport)
+        .position(offset);
+    let sb = Scrollbar::new(ScrollbarOrientation::VerticalRight)
+        .thumb_style(Style::default().fg(t.dim))
+        .track_style(Style::default().fg(t.muted))
+        .begin_symbol(None)
+        .end_symbol(None);
+    frame.render_stateful_widget(sb, area, &mut state);
+}
 
 /// Returns the accent color when focused, the inactive color otherwise.
 pub fn focus_color(focused: bool, accent: Color, inactive: Color) -> Color {
@@ -325,4 +361,26 @@ pub fn help_line<'a>(key: &'a str, desc: &'a str, t: &Theme) -> Line<'a> {
         Span::styled(format!("{key:<14}"), Style::default().fg(t.accent)),
         Span::styled(desc, Style::default().fg(t.foreground)),
     ])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::cmdlog_height;
+
+    #[test]
+    fn cmdlog_height_is_bounded_and_monotonic() {
+        // Bounded to [3, 6].
+        for h in 0u16..80 {
+            let r = cmdlog_height(h);
+            assert!((3..=6).contains(&r), "out of range at {h}: {r}");
+        }
+        // Monotonic non-decreasing in terminal height (a taller terminal
+        // never shrinks the log — and so never shrinks the body).
+        for h in 1u16..80 {
+            assert!(cmdlog_height(h) >= cmdlog_height(h - 1));
+        }
+        // The floor is 3 (short terminal), the ceiling 6 (roomy).
+        assert_eq!(cmdlog_height(18), 3);
+        assert_eq!(cmdlog_height(40), 6);
+    }
 }
