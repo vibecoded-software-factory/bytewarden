@@ -1099,49 +1099,64 @@ Tests live alongside their source files in `#[cfg(test)] mod tests` blocks (the 
 
 ## Keyboard reference
 
+Keys follow a **gradient**: a **bare letter** acts on the focused list, `Shift`
+is the loud tier, `Ctrl` is global, `Alt` is app-wide commands (bytewarden uses
+`0`–`4` for panel focus, so `Alt` is free for commands), and `/` focuses search.
+On the **Search** box the letters are typed into the query, so its row actions
+ride on `Alt+` instead.
+
 ```
-LOGIN                                   VAULT — global              VAULT — items
-─────────────────────                   ──────────────────────────  ────────────────────────
-Tab/Shift+Tab  cycle field              0..4    focus panel         Alt+N   new item
-←→  Home  End  cursor                   /       focus search        Alt+U   copy username
-Backspace/Del  delete char              Tab     next panel          Alt+C   copy password
-Space          toggle checkbox          Alt+S   sync vault          Alt+F   toggle favorite ★
-F2             reveal master pwd        Alt+L/Alt+Q  lock vault     Alt+D   delete (or perm in trash)
-Enter          login / unlock           Alt+O   logout              Alt+R   restore (trash only)
-Alt+K          API-key login            Alt+I   fingerprint         Enter / l  open detail
-Alt+S          SSO login                Alt+G   generator           j/k     navigate
-Ctrl+C         quit                     Alt+E   export              PgUp/PgDn  page
-                                        Alt+M   import
-                                        Alt+W   send                FOLDERS panel [1]
-DETAIL — read                           Alt+B   memberships         ────────────────────────
-─────────────────────                   F1      help                j/k/Enter   nav / apply
-j/k Tab Shift+Tab  fields                                           Alt+N       new folder
-F2                 reveal hidden        DETAIL — edit               Alt+R       rename
-Alt+C              copy field           ──────────────────────      Alt+D       delete
-Alt+E              edit                 Tab/Shift+Tab  field
-Alt+D              delete item          ↑↓             field        SEARCH
-Alt+X              HIBP check           ←→ Home End    cursor       ─────────────────
-Alt+A              attach upload        F2             reveal       (any)   extend query
-Alt+S              attach download      Enter          save         Backspace pop char
-Alt+Del            attach delete        Esc            cancel       Esc     clear & focus list
-Alt+R              restore (trash)      Alt+G          generator
-Esc / h            back                 Alt+N          add custom   GENERATOR
-                                        Alt+R          rename       ─────────────────
-CREATE — type picker                    Alt+T          cycle type   Tab/↑↓     option
-─────────────────────                   Alt+U          add URL      Space/←→   toggle/adjust
-j/k Tab Shift+Tab  type                 Alt+Del        remove       Enter      generate
-Enter              confirm                                          Alt+C      copy
-Esc                cancel               HELP popup                  Alt+U      use in form
-                                        ───────────────────         Esc        close
-CREATE — fill fields                    j/k ↑↓ PgUp/PgDn   scroll
-─────────────────────                   h/l ← →            pan      CONFIRMATIONS
-Tab/Shift+Tab  field                    Shift+H / Shift+L  page-pan ─────────────────
-↑↓             field (clamps)           Home / End         top/bot  Enter   confirm
-←→ Home End    cursor                   q / F1 / Esc       close    D       hard-delete
-F2             reveal hidden                                        Esc / n cancel
-Alt+G          generator
-Enter          create                   Wheel              vertical
-Esc            cancel                   Shift+wheel        horizontal
+GLOBAL (any screen)
+  Ctrl+C quit · F1 help · F9 settings · Esc/h back · Tab cycle focus
+  0..4 focus panel · / focus search
+
+LOGIN
+  Tab/Shift+Tab cycle field · ←→ Home End cursor · Space toggle checkbox
+  F2 reveal master pwd · Enter login/unlock · Alt+K API-key · Alt+S SSO
+
+VAULT — app commands (Alt, from any focus)
+  Alt+S sync · Alt+E export · Alt+M import · Alt+W send · Alt+B memberships
+  Alt+I fingerprint · Alt+G generator · Alt+L lock · Alt+O logout
+
+VAULT — list [3]  (bare letters act on the highlighted row)
+  j/k ↑↓ navigate · PgUp/PgDn page · Enter/l open detail
+  n new · e edit · c copy password · u copy username
+  f favorite ★ · x HIBP check · d delete · r restore (trash)
+  (the same actions work from the Search box as Alt+letter)
+
+VAULT — folders [1]
+  j/k nav · Enter apply · n new · r rename · d delete
+
+VAULT — items filter [2] · search [/]
+  Items:  j/k nav · Enter apply
+  Search: type to filter · ↑↓ PgUp/PgDn navigate · Enter open · Esc clear
+
+DETAIL — read (bare letters act)
+  j/k ↑↓ Tab fields · F2 reveal hidden · Esc/h back
+  c copy field · e edit · m move to org · d delete · x HIBP
+  a attach upload · s attach download · r restore (trash) · Alt+Del delete attachment
+
+DETAIL — edit (Alt — it's a form, letters are typed)
+  Tab/↑↓ field · ←→ Home End cursor · Enter save · Esc cancel · F2 reveal
+  Alt+N add field · Alt+U add URL · Alt+T cycle type · Alt+R rename
+  Alt+L assign collections · Alt+G generator · Alt+Del remove field
+
+CREATE
+  j/k Tab type-picker · Enter confirm/create · Esc cancel · F2 reveal
+  Alt+G generator · Alt+L assign collections
+
+GENERATOR
+  Tab/↑↓ option · Space/←→ toggle/adjust · Enter generate
+  Alt+C copy · Alt+U use in form · Esc close
+
+HELP popup
+  j/k ↑↓ PgUp/PgDn scroll · h/l ←→ pan · Home/End top/bottom · q/F1/Esc close
+
+CONFIRMATIONS
+  Enter confirm · D hard-delete (non-trash) · Esc/n cancel
+
+MOUSE
+  Wheel vertical · Shift+wheel horizontal · click focuses / selects
 ```
 
 ---

@@ -111,23 +111,22 @@ pub fn handle(app: &mut App, key: KeyEvent) {
             }
             app.show_password = !app.show_password;
         }
-        KeyCode::Char('c') if is_alt(&key) => copy::copy_selected_field(app),
-        KeyCode::Char('e') if is_alt(&key) && !app.is_trash_view() => items::enter_edit_mode(app),
-        KeyCode::Char('m') if is_alt(&key) && !app.is_trash_view() => {
-            assign_collections::open_for_move(app)
-        }
-        KeyCode::Char('r') if is_alt(&key) && app.is_trash_view() => items::queue_restore_item(app),
-        KeyCode::Char('d') if is_alt(&key) => items::open_confirm_delete(app),
-        KeyCode::Char('x') if is_alt(&key) && !app.is_trash_view() => {
-            items::queue_check_exposed(app)
-        }
-        KeyCode::Char('a') if is_alt(&key) && !app.is_trash_view() => {
-            items::open_attachment_upload(app)
-        }
-        // Attachment row shortcuts — Alt+S downloads, Alt+Del deletes.
-        // The flow surfaces an error toast when the focused row isn't
-        // actually an attachment, so the keys are safe to press anywhere.
-        KeyCode::Char('s') if is_alt(&key) => items::open_attachment_download(app),
+        // Read mode is a viewer, so the row actions are **bare letters**
+        // (the gradient); the `Alt+` form still works as a transition
+        // alias because these arms don't require the modifier. `h`/`j`/`k`
+        // (back / navigate) are matched above and never reach here.
+        KeyCode::Char('c') => copy::copy_selected_field(app),
+        KeyCode::Char('e') if !app.is_trash_view() => items::enter_edit_mode(app),
+        KeyCode::Char('m') if !app.is_trash_view() => assign_collections::open_for_move(app),
+        KeyCode::Char('r') if app.is_trash_view() => items::queue_restore_item(app),
+        KeyCode::Char('d') => items::open_confirm_delete(app),
+        KeyCode::Char('x') if !app.is_trash_view() => items::queue_check_exposed(app),
+        KeyCode::Char('a') if !app.is_trash_view() => items::open_attachment_upload(app),
+        // Attachment rows — `s` downloads, `Alt+Del` deletes (kept on a
+        // modifier so a stray Del can't wipe an attachment). The flows
+        // toast when the focused row isn't an attachment, so they're safe
+        // to press anywhere.
+        KeyCode::Char('s') => items::open_attachment_download(app),
         KeyCode::Delete if is_alt(&key) && !app.is_trash_view() => {
             items::open_confirm_delete_attachment(app)
         }

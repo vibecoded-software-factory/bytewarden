@@ -92,11 +92,12 @@ pub fn handle(app: &mut App, key: KeyEvent) {
             KeyCode::Char('k') | KeyCode::Up | KeyCode::PageUp => folders::move_up(app),
             KeyCode::Enter => folders::apply_filter(app),
             KeyCode::Tab | KeyCode::Esc => app.cycle_focus(),
-            // Folder CRUD shortcuts (panel-local — Alt+N/D in other
-            // panels still mean "new item" / "delete item"):
-            KeyCode::Char('n') if is_alt(&key) => folders::open_create(app),
-            KeyCode::Char('r') if is_alt(&key) => folders::open_rename(app),
-            KeyCode::Char('d') if is_alt(&key) => folders::open_confirm_delete(app),
+            // Folder CRUD — bare letters act on the focused Folders panel
+            // (the gradient); the `Alt+` form still works as a transition
+            // alias since it hits the same arm.
+            KeyCode::Char('n') => folders::open_create(app),
+            KeyCode::Char('r') => folders::open_rename(app),
+            KeyCode::Char('d') => folders::open_confirm_delete(app),
             _ => {}
         },
 
@@ -141,7 +142,12 @@ pub fn handle(app: &mut App, key: KeyEvent) {
             KeyCode::PageUp => app.move_up_page(),
             KeyCode::Enter | KeyCode::Char('l') => app.go_to_detail(),
             KeyCode::Tab => app.cycle_focus(),
+            // Alt+letter still runs the row actions (transition alias);
+            // the Alt globals were already handled above.
             _ if is_alt(&key) => handle_alt_shortcuts(app, key),
+            // Bare letters act on the focused row (the gradient). The
+            // List panel never typed, so this is purely additive.
+            KeyCode::Char(c) if key.modifiers == KeyModifiers::NONE => list_row_action(app, c),
             _ => {}
         },
 
@@ -153,6 +159,36 @@ pub fn handle(app: &mut App, key: KeyEvent) {
             KeyCode::Tab | KeyCode::Esc => app.cycle_focus(),
             _ => {}
         },
+    }
+}
+
+/// Bare-letter row actions on the focused vault List (the gradient):
+/// the frequent, safe operations on the highlighted item. `j`/`k`/`l`
+/// (navigate / open) and `0`–`4` (focus) are handled by the caller
+/// before this runs, so they never reach here. Destructive `d` always
+/// goes through the confirm popup (which offers permanent-delete via
+/// `D` when not already in trash).
+fn list_row_action(app: &mut App, c: char) {
+    let trash = app.is_trash_view();
+    match c {
+        'n' if !trash => items::open_create(app),
+        'e' if !trash => list_edit(app),
+        'c' if !trash => copy::copy_password_to_clipboard(app),
+        'u' if !trash => copy::copy_username_to_clipboard(app),
+        'f' if !trash => items::toggle_favorite(app),
+        'x' if !trash => items::queue_check_exposed(app),
+        'd' => items::open_confirm_delete(app),
+        'r' if trash => items::queue_restore_item(app),
+        _ => {}
+    }
+}
+
+/// Opens the highlighted item's detail screen straight in edit mode —
+/// the list-level `e` shortcut. No-op when the list is empty.
+fn list_edit(app: &mut App) {
+    if app.selected_item().is_some() {
+        app.go_to_detail();
+        items::enter_edit_mode(app);
     }
 }
 
