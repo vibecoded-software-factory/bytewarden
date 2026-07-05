@@ -44,14 +44,22 @@ one branch → PR → squash-merge to `dev`.
 
 ## UI system
 
-- [ ] **Batch 5 — Widget vocabulary (`view/widgets.rs`).** `list_table` +
-  `list_title` + `table_row_at`; `draw_picker_modal(PickerModal{..})` with a
-  per-frame hit map; `draw_confirm_popup` + `run_confirm` (one confirm look,
-  default = cancel); `draw_input_popup`, `legend_line`, `button`,
-  `empty_state_lines`, `draw_scrollbar`; `focus_style`/`key_style`/`MODAL_*`,
-  `Theme::emphasis()`/`danger_title()`. Kill the `titled_block`
-  focus-via-color-equality hack; route status/search/cmdlog/settings through
-  `titled_block`. Consolidate the 3 centering helpers into one.
+- [x] **Batch 5 — Chrome styling centralization (`view/widgets.rs`).** Added
+  `Theme::emphasis()` / `danger_title()` and `widgets::focus_style` /
+  `key_style`; refactored `titled_block` to take an explicit `focused: bool`
+  — **killing the `col == accent` color-equality hack**. Consolidated the two
+  centering helpers (`center_rect` rows + `center_rect_pct` percent; help.rs's
+  private `centered` removed). Fixed the spec's border rule to match
+  bytewarden's real convention (square section panels, rounded popups/cards).
+  Swept **all cross-project references** out of the code comments (hard-rule
+  cleanup). Theme helpers unit-tested.
+  - *Redistributed* (the remaining widget vocabulary lands where each surface
+    is actually reworked): `draw_confirm_popup` + `run_confirm` → Batch 7 (the
+    confirm mechanics ride with the keybinding gradient); `empty_state_lines`
+    + `draw_scrollbar` + `legend_line` → Batch 12 (responsiveness);
+    `draw_picker_modal` → Batch 14 (the command palette needs it);
+    `list_table` when a second multi-column table appears (today the vault
+    list is the only one).
 - [ ] **Batch 6 — 3-tier borders + status strip.** `disabled_block` (the
   `muted` "unavailable" tier) alongside focused/available. `draw_status_strip`:
   mode badge · condition badges (`⚠ WORKER DEAD`) · feedback · hint · `F1`

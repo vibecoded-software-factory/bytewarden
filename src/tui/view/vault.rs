@@ -188,7 +188,7 @@ fn render_vaults(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     ));
 
     // Blank spacer before the named folder/collection rows — a clean
-    // grouping gap instead of a heavy rule (matches jewel/secretbase).
+    // grouping gap instead of a heavy rule.
     rows.push(ListItem::new(Line::from("")));
 
     // One row per folder (alphabetised at load time). Per-folder
@@ -244,12 +244,7 @@ fn render_vaults(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
 
     frame.render_stateful_widget(
         List::new(rows)
-            .block(titled_block(
-                "─[1]-Folders",
-                &indicator,
-                focus_color(ff, t.accent, t.inactive),
-                t,
-            ))
+            .block(titled_block("─[1]-Folders", &indicator, ff, t))
             .highlight_style(Style::default().bg(t.selected_bg).fg(t.foreground))
             .highlight_symbol("▶ "),
         area,
@@ -336,12 +331,7 @@ fn render_filters(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
 
     frame.render_stateful_widget(
         List::new(filter_items_with_sep)
-            .block(titled_block(
-                "─[2]-Items",
-                &indicator,
-                focus_color(itf, t.accent, t.inactive),
-                t,
-            ))
+            .block(titled_block("─[2]-Items", &indicator, itf, t))
             .highlight_style(Style::default().bg(t.selected_bg).fg(t.foreground))
             .highlight_symbol("▶ "),
         area,
@@ -406,9 +396,9 @@ fn render_list(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     // gutter. The reservation is per-view (not per-row) so alignment
     // stays stable within the list.
     let (mut any_fav, mut any_reprompt, mut any_org) = (false, false, false);
-    // Type column sized to the widest *visible* "[label]" (jewel's
-    // `col_width` pattern) instead of a fixed pad — an all-[Login] view
-    // gets a 7-wide column, not 11, so names start that much earlier.
+    // Type column sized to the widest *visible* "[label]" instead of a
+    // fixed pad — an all-[Login] view gets a 7-wide column, not 11, so
+    // names start that much earlier.
     let mut type_w = 0usize;
     for it in filtered.iter() {
         any_fav |= it.favorite;
@@ -485,12 +475,7 @@ fn render_list(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
             [Constraint::Length(ind_w + type_w), Constraint::Min(0)],
         )
         .column_spacing(2)
-        .block(titled_block(
-            "─[3]-Vault",
-            &indicator,
-            focus_color(lf, t.accent, t.inactive),
-            t,
-        ))
+        .block(titled_block("─[3]-Vault", &indicator, lf, t))
         .row_highlight_style(
             Style::default()
                 .bg(t.selected_bg)
