@@ -324,9 +324,9 @@ fn vault_sections(out: &mut Vec<Line<'static>>, focus: &Focus, t: &Theme) {
             out.push(section("Folders panel [1]", t));
             out.push(help_line("j / k  ↑ ↓  PgUp/PgDn", "Move selection", t));
             out.push(help_line("Enter", "Apply folder filter", t));
-            out.push(help_line("Alt+N", "New folder (popup)", t));
-            out.push(help_line("Alt+R", "Rename focused folder (popup)", t));
-            out.push(help_line("Alt+D", "Delete focused folder (confirm)", t));
+            out.push(help_line("n", "New folder (popup)", t));
+            out.push(help_line("r", "Rename focused folder (popup)", t));
+            out.push(help_line("d", "Delete focused folder (confirm)", t));
             out.push(help_line("Tab / Esc", "Cycle focus away", t));
         }
         Focus::Items => {
@@ -356,7 +356,8 @@ fn vault_sections(out: &mut Vec<Line<'static>>, focus: &Focus, t: &Theme) {
             out.push(help_line("Enter", "Open detail of the selected item", t));
             out.push(help_line("Tab", "Cycle focus to next panel", t));
             out.push(blank());
-            out.push(section("Item shortcuts (still work here)", t));
+            // The Search box types, so row actions ride on Alt here.
+            out.push(section("Item shortcuts (Alt — the box is typing)", t));
             push_item_alt_shortcuts(out, t);
         }
         Focus::List => {
@@ -366,8 +367,8 @@ fn vault_sections(out: &mut Vec<Line<'static>>, focus: &Focus, t: &Theme) {
             out.push(help_line("Enter / l", "Open detail", t));
             out.push(help_line("Tab", "Cycle focus", t));
             out.push(blank());
-            out.push(section("Item shortcuts (Alt)", t));
-            push_item_alt_shortcuts(out, t);
+            out.push(section("Item actions (bare letters)", t));
+            push_item_row_shortcuts(out, t);
         }
         Focus::CmdLog => {
             out.push(section("Command log [4]", t));
@@ -379,6 +380,21 @@ fn vault_sections(out: &mut Vec<Line<'static>>, focus: &Focus, t: &Theme) {
     }
 }
 
+/// The item row actions as **bare letters** — the List panel (which
+/// doesn't type).
+fn push_item_row_shortcuts(out: &mut Vec<Line<'static>>, t: &Theme) {
+    out.push(help_line("n", "New item (not in trash)", t));
+    out.push(help_line("e", "Edit the selected item", t));
+    out.push(help_line("u", "Copy username", t));
+    out.push(help_line("c", "Copy password", t));
+    out.push(help_line("f", "Toggle favorite ★", t));
+    out.push(help_line("x", "Check password against HIBP", t));
+    out.push(help_line("d", "Delete (or permanent in trash)", t));
+    out.push(help_line("r", "Restore (trash view only)", t));
+}
+
+/// The same item row actions as `Alt+` chords — for the Search box,
+/// where bare letters are typed into the query.
 fn push_item_alt_shortcuts(out: &mut Vec<Line<'static>>, t: &Theme) {
     out.push(help_line("Alt+N", "New item (not in trash)", t));
     out.push(help_line("Alt+U", "Copy username", t));
@@ -397,27 +413,23 @@ fn detail_sections(out: &mut Vec<Line<'static>>, t: &Theme) {
     ));
     out.push(help_line("PgUp / PgDn", "Same as k / j", t));
     out.push(help_line("F2", "Reveal / hide hidden field", t));
-    out.push(help_line("Alt+C", "Copy focused field to clipboard", t));
-    out.push(help_line("Alt+E", "Enter edit mode (not in trash)", t));
+    out.push(help_line("c", "Copy focused field to clipboard", t));
+    out.push(help_line("e", "Enter edit mode (not in trash)", t));
     out.push(help_line(
-        "Alt+M",
+        "m",
         "Move into your organisation (popup) — only when item is personal and you have exactly 1 org",
         t,
     ));
-    out.push(help_line("Alt+D", "Delete item (confirm)", t));
-    out.push(help_line(
-        "Alt+X",
-        "Check password against HIBP breaches",
-        t,
-    ));
-    out.push(help_line("Alt+A", "Upload attachment (popup)", t));
-    out.push(help_line("Alt+S", "Download focused attachment (popup)", t));
+    out.push(help_line("d", "Delete item (confirm)", t));
+    out.push(help_line("x", "Check password against HIBP breaches", t));
+    out.push(help_line("a", "Upload attachment (popup)", t));
+    out.push(help_line("s", "Download focused attachment (popup)", t));
     out.push(help_line(
         "Alt+Del",
         "Delete focused attachment (confirm)",
         t,
     ));
-    out.push(help_line("Alt+R", "Restore (trash view only)", t));
+    out.push(help_line("r", "Restore (trash view only)", t));
     out.push(help_line("Esc / h", "Back to vault", t));
     out.push(blank());
     out.push(section("Edit mode", t));

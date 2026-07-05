@@ -81,36 +81,40 @@ fn render_hint_bar(
     // discoverable via F1 — which is anchored at the right of the bar
     // and never truncated.
     let hints_pairs: &[(&str, &str)] = match app.focus {
+        // On Search the box owns typing, so ↑↓ navigate (not j/k), and
+        // row actions ride on `Alt+` (the gradient's text-field rule).
         Focus::Search => {
             if app.is_trash_view() {
-                &[("Esc", "clear"), ("j/k", "nav"), ("Enter", "detail")]
+                &[("Esc", "clear"), ("↑↓", "nav"), ("Enter", "open")]
             } else {
                 &[
                     ("Esc", "clear"),
-                    ("j/k", "nav"),
-                    ("Enter", "detail"),
+                    ("↑↓", "nav"),
+                    ("Enter", "open"),
                     ("Alt+N", "new"),
                     ("Alt+C", "pass"),
                 ]
             }
         }
         Focus::Items => &[("j/k", "filter"), ("Enter", "apply"), ("Tab", "next")],
+        // Bare letters act on the focused Folders panel.
         Focus::Folders => &[
             ("j/k", "folder"),
             ("Enter", "apply"),
-            ("Alt+N", "new"),
-            ("Tab", "next"),
+            ("n", "new"),
+            ("r", "rename"),
         ],
         Focus::CmdLog => &[("j/k", "scroll"), ("Tab", "next")],
+        // Bare letters act on the focused row (the gradient).
         Focus::List | Focus::Status => {
             if app.is_trash_view() {
-                &[("j/k", "nav"), ("Enter", "detail"), ("Alt+R", "restore")]
+                &[("j/k", "nav"), ("Enter", "open"), ("r", "restore")]
             } else {
                 &[
                     ("j/k", "nav"),
-                    ("Enter", "detail"),
-                    ("Alt+N", "new"),
-                    ("Alt+C", "pass"),
+                    ("Enter", "open"),
+                    ("n", "new"),
+                    ("c", "pass"),
                 ]
             }
         }

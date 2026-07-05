@@ -266,35 +266,41 @@ Keys are assigned by a **gradient of tiers**, so the modifier tells you the
 weight of the action before you press it. Every screen follows the same tiers:
 
 - **bare lowercase letter = the frequent, safe action on the focused list.**
-  On the vault `List`/`Folders`/`Items` panels (which don't type) bare letters
-  act on the cursor row (`n` new, `e` edit, `c` copy, `f` favorite, `r`
-  refresh/restore, `g` generator, …). This is the lazygit / mutt model: a list
-  is "command mode".
-- **`Shift+letter` = the loud tier.** Deleting a concrete item is bare `x`
-  (it always passes through the navigable confirm — that's the guard);
-  `Shift+D` is the explicit permanent-delete in trash. Loud one-keystroke
-  status ops live here.
+  The vault `List`/`Folders` and the `Detail` read view don't type, so bare
+  letters act on the highlighted row: on List `n` new · `e` edit · `c` copy
+  password · `u` copy username · `f` favorite · `x` HIBP · `d` delete · `r`
+  restore (trash); on Folders `n`/`r`/`d`; on Detail `c`/`e`/`m`/`d`/`x`/`a`/`s`/`r`.
+  This is the lazygit / mutt model: a non-typing surface is "command mode".
+  (`j`/`k`/`l`/`h` stay navigation, so no action binds them.)
+- **`Shift+letter` = the loud tier.** Deleting is bare `d` — it always passes
+  through the navigable confirm, which is the guard — and `Shift+D` (inside
+  that confirm, non-trash) is the explicit permanent-delete.
 - **`Ctrl` = global** — works from any focus, never confused with typed text:
   `Ctrl+C` quit (the **only** quit), `Ctrl+P` command palette (target),
-  `Ctrl+D`/`Ctrl+U` half-page in every list, `Ctrl+W`/`Ctrl+U` word ops in
-  every input.
-- **`Alt+letter` = jump to a panel** (matching its border tag) **+
-  compose-context verbs** — actions on a screen whose bare letters are typed
-  text (the Search box, the edit/create forms) park on `Alt` so a text field
-  can't trap you (e.g. `Alt+G` generate into the focused field).
+  `Ctrl+W`/`Ctrl+U` word ops in every input.
+- **`Alt+letter` = app-wide command.** bytewarden focuses panels with `0`–`4`
+  (not `Alt`), so `Alt` is free for the vault-wide commands that fire from any
+  focus: `Alt+S` sync · `Alt+E` export · `Alt+M` import · `Alt+W` send ·
+  `Alt+B` memberships · `Alt+I` fingerprint · `Alt+G` generator · `Alt+L` lock ·
+  `Alt+O` logout. On **typing surfaces** (the Search box, the edit/create
+  forms) the row actions *also* park on `Alt+letter` so a text field can't trap
+  you (`Alt+C` copy while searching; `Alt+G` generate into a field).
 - **`/` = focus search** · `Esc`/`h` back · `F1` help · `F9` Settings ·
   `0`–`4` focus panel · `Tab` cycle · `j/k`+`↑/↓` navigate · `PgUp/PgDn` page ·
-  `g/G` top/bottom · `Enter`/`l` open.
+  `Enter`/`l` open. On the **Search** box `↑/↓` (not `j/k`, which type) move
+  the list selection.
 
 **Why the tiers.** A text field (Search, the edit forms) owns bare letters as
-typed text; a list doesn't type, so its letters are free to act. Putting
-actions on bare letters in lists — and only shifting to `Alt`/`Ctrl` where
-text input would collide — is what makes the app feel like a pro TUI instead
-of chord soup. The vim layer is a contract: the `Esc` chain backs out one
-layer at a time (cancel field edit → leave edit mode → back) and **never
-destroys typed text**. The footer shows only a few keys; the full per-screen
-list lives in the help popup, the `README.md` tables and (when added) the
-command palette — **keep all in sync** whenever a key changes.
+typed text; a non-typing surface (List, Folders, Detail-read) doesn't, so its
+letters are free to act. Putting actions on bare letters there — and shifting
+to `Alt` for app commands and typing-surface actions — is what makes the app
+feel like a pro TUI instead of chord soup. The vim layer is a contract: the
+`Esc` chain backs out one layer at a time (cancel field edit → leave edit mode
+→ back) and **never destroys typed text**. During the transition the old
+`Alt+letter` row shortcuts still work as aliases, but **bare is canonical**.
+The footer shows only a few keys; the full per-screen list lives in the help
+popup, the `README.md` tables and (when added) the command palette — **keep
+all four in sync** whenever a key changes.
 
 ## Theme (`tui::theme`)
 

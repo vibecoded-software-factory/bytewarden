@@ -70,11 +70,17 @@ one branch → PR → squash-merge to `dev`.
     the **3-tier `disabled_block`** (every vault panel is always reachable, so
     there's no "unavailable" tier). UX.md reconciled to the real layout
     (sidebar `[0]-Status` + hint bar, no bottom mode strip).
-- [ ] **Batch 7 — Keybinding gradient.** bare letter = action on the focused
-  list · `Shift` = destructive/loud · `Ctrl` = global · `Alt` = panel jump +
-  compose verbs · `/` = search. Resolve the current `Alt+S/L/R/D` collisions.
-  Central keybinding registry; sync the 4 surfaces (footer · `help.rs` ·
-  `README` · `UX.md`).
+- [x] **Batch 7 — Keybinding gradient.** Adopted the gradient (user-approved
+  map): **bare letters act** on the non-typing surfaces (List `n/e/c/u/f/x/d/r`,
+  Folders `n/r/d`, Detail-read `c/e/m/d/x/a/s/r`); `Alt+letter` = app-wide
+  commands (sync/export/import/send/memberships/fingerprint/generator/lock/
+  logout — bytewarden focuses panels with `0`–`4`, so `Alt` is free); the
+  Search box types, so its row actions ride on `Alt`; delete is bare `d`
+  (confirm-gated), `Shift+D` = permanent. The old `Alt+letter` row shortcuts
+  stay as transition aliases; **bare is canonical**. The `Alt+S/L/R/D`
+  collisions dissolve (row/panel actions moved to bare, context = focused
+  panel). Synced all four surfaces: footer hints · `view/help.rs` · `README`
+  tables · `UX.md`.
 
 ## State & coherence
 
