@@ -20,6 +20,7 @@ pub mod item;
 pub mod line_editor;
 pub mod membership;
 pub mod search;
+pub mod timefmt;
 pub mod validation;
 pub mod vault_info;
 

@@ -868,13 +868,29 @@ impl VaultPort for BwCliAdapter {
         content: &str,
     ) -> Result<String, BwError> {
         let session = self.session()?.to_string();
-        let days = days_to_expire.clamp(1, 31).to_string();
-        // bw prints just the URL on stdout when --fullObject is omitted.
-        let out = bw_run_with_session_timeout(
-            &["send", "-n", name, "-d", &days, content],
-            &session,
-            ITEM_OP_TIMEOUT,
-        )?;
+        let days = days_to_expire.clamp(1, 31) as i64;
+        // Compute the absolute deletion date `bw send create` expects
+        // from the relative day count. UTC ISO-8601, no `chrono`.
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or(0);
+        let deletion = crate::domain::timefmt::unix_to_iso_utc(now + days * 86_400);
+
+        // Build the Send payload and pass it as **base64 JSON** to
+        // `bw send create`, exactly like the item CRUD payloads — the
+        // content is no longer a plaintext positional arg visible in
+        // `ps aux`. (Type 0 = text Send; `bw send create` prints just
+        // the access URL unless `--fullObject` is passed.)
+        let payload = json!({
+            "name": name,
+            "type": 0,
+            "text": { "text": content, "hidden": false },
+            "deletionDate": deletion,
+        });
+        let encoded = base64_encode(&payload.to_string());
+        let out =
+            bw_run_with_session_timeout(&["send", "create", &encoded], &session, ITEM_OP_TIMEOUT)?;
         if out.status.success() {
             let url = stdout_str(&out);
             if url.is_empty() {
