@@ -426,13 +426,18 @@ impl Theme {
     pub fn from_palette(p: &Palette) -> Theme {
         Theme {
             accent: p.accent,
-            inactive: p.overlay,
+            // Legibility hierarchy: `inactive` (unfocused borders) and
+            // `dim` (readable secondary text — counters, hints, timestamps)
+            // are lifted *out of the dark overlay band toward text* so
+            // they stay legible, instead of being painted the near-border
+            // gray. `muted` alone stays in the recessive band (chrome).
+            inactive: mix(p.overlay, p.text, 0.6),
             selected_bg: p.surface,
             success: p.green,
             error: p.red,
-            dim: p.overlay,
+            dim: mix(p.overlay, p.text, 0.5),
             foreground: p.text,
-            placeholder: p.overlay,
+            placeholder: mix(p.overlay, p.text, 0.25),
             muted: p.muted,
             // Starfield: a fade from the background up toward the accent.
             star_dim: mix(p.accent, p.base, 0.78),
@@ -929,6 +934,25 @@ mod tests {
             assert_ne!(t.accent, Color::Reset);
             // item_note (teal) must stay distinct from success (green).
             assert_ne!(t.item_note, t.success);
+        }
+    }
+
+    #[test]
+    fn dim_and_inactive_are_lifted_out_of_the_overlay_band() {
+        // The legibility hierarchy: readable secondary text (`dim`) and
+        // unfocused borders (`inactive`) must NOT be the raw dark overlay —
+        // they're blended toward `text` so they stay legible. Only `muted`
+        // stays in the recessive band.
+        for p in Preset::ALL {
+            let t = Theme::from_palette(&p.palette());
+            assert_ne!(t.dim, p.palette().overlay, "dim not lifted: {}", p.name());
+            assert_ne!(
+                t.inactive,
+                p.palette().overlay,
+                "inactive not lifted: {}",
+                p.name()
+            );
+            assert_eq!(t.muted, p.palette().muted, "muted moved: {}", p.name());
         }
     }
 
