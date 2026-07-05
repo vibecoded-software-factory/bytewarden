@@ -77,6 +77,9 @@ with full CRUD over items, folders, attachments, sends, exports and more.
 - [Bitwarden CLI](https://bitwarden.com/help/cli/) (`bw`) installed and on `$PATH`.
 - [Rust toolchain](https://rustup.rs) (`cargo`) to build from source.
 - A clipboard tool: `wl-copy` (Wayland), `xclip` / `xsel` (X11), or `pbcopy` (macOS).
+  Optional — with none installed, bytewarden falls back to the **OSC 52**
+  terminal escape (works over SSH / tmux in a compatible terminal), though the
+  timed auto-clear is skipped on that path (OSC 52 can't read the clipboard back).
 
 The login wordmark uses the bundled `slant` FIGlet font via `figlet-rs` — no system `figlet` install needed.
 
