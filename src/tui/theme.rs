@@ -91,18 +91,38 @@ pub struct Palette {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Preset {
     CatppuccinMocha,
+    CatppuccinMacchiato,
+    CatppuccinFrappe,
     Dracula,
     Nord,
+    TokyoNight,
+    GruvboxDark,
+    RosePine,
+    Everforest,
+    OneDark,
+    SolarizedDark,
     CatppuccinLatte,
+    RosePineDawn,
+    SolarizedLight,
 }
 
 impl Preset {
     /// Every bundled preset, in picker order (dark first, light last).
-    pub const ALL: [Preset; 4] = [
+    pub const ALL: [Preset; 14] = [
         Preset::CatppuccinMocha,
+        Preset::CatppuccinMacchiato,
+        Preset::CatppuccinFrappe,
         Preset::Dracula,
         Preset::Nord,
+        Preset::TokyoNight,
+        Preset::GruvboxDark,
+        Preset::RosePine,
+        Preset::Everforest,
+        Preset::OneDark,
+        Preset::SolarizedDark,
         Preset::CatppuccinLatte,
+        Preset::RosePineDawn,
+        Preset::SolarizedLight,
     ];
 
     /// The default preset — used when the config names no preset.
@@ -112,9 +132,19 @@ impl Preset {
     pub fn name(self) -> &'static str {
         match self {
             Preset::CatppuccinMocha => "catppuccin-mocha",
+            Preset::CatppuccinMacchiato => "catppuccin-macchiato",
+            Preset::CatppuccinFrappe => "catppuccin-frappe",
             Preset::Dracula => "dracula",
             Preset::Nord => "nord",
+            Preset::TokyoNight => "tokyonight",
+            Preset::GruvboxDark => "gruvbox-dark",
+            Preset::RosePine => "rose-pine",
+            Preset::Everforest => "everforest",
+            Preset::OneDark => "one-dark",
+            Preset::SolarizedDark => "solarized-dark",
             Preset::CatppuccinLatte => "catppuccin-latte",
+            Preset::RosePineDawn => "rose-pine-dawn",
+            Preset::SolarizedLight => "solarized-light",
         }
     }
 
@@ -122,9 +152,19 @@ impl Preset {
     pub fn label(self) -> &'static str {
         match self {
             Preset::CatppuccinMocha => "Catppuccin Mocha",
+            Preset::CatppuccinMacchiato => "Catppuccin Macchiato",
+            Preset::CatppuccinFrappe => "Catppuccin Frappé",
             Preset::Dracula => "Dracula",
             Preset::Nord => "Nord",
+            Preset::TokyoNight => "Tokyo Night",
+            Preset::GruvboxDark => "Gruvbox Dark",
+            Preset::RosePine => "Rosé Pine",
+            Preset::Everforest => "Everforest",
+            Preset::OneDark => "One Dark",
+            Preset::SolarizedDark => "Solarized Dark",
             Preset::CatppuccinLatte => "Catppuccin Latte (light)",
+            Preset::RosePineDawn => "Rosé Pine Dawn (light)",
+            Preset::SolarizedLight => "Solarized Light (light)",
         }
     }
 
@@ -209,6 +249,156 @@ impl Preset {
                 magenta: h("#ea76cb"),
                 cyan: h("#179299"),
                 orange: h("#fe640b"),
+            },
+            Preset::CatppuccinMacchiato => Palette {
+                base: h("#24273a"),
+                surface: h("#363a4f"),
+                overlay: h("#6e738d"),
+                muted: h("#494d64"),
+                text: h("#cad3f5"),
+                accent: h("#c6a0f6"),
+                red: h("#ed8796"),
+                green: h("#a6da95"),
+                yellow: h("#eed49f"),
+                blue: h("#8aadf4"),
+                magenta: h("#f5bde6"),
+                cyan: h("#8bd5ca"),
+                orange: h("#f5a97f"),
+            },
+            Preset::CatppuccinFrappe => Palette {
+                base: h("#303446"),
+                surface: h("#414559"),
+                overlay: h("#737994"),
+                muted: h("#51576d"),
+                text: h("#c6d0f5"),
+                accent: h("#ca9ee6"),
+                red: h("#e78284"),
+                green: h("#a6d189"),
+                yellow: h("#e5c890"),
+                blue: h("#8caaee"),
+                magenta: h("#f4b8e4"),
+                cyan: h("#81c8be"),
+                orange: h("#ef9f76"),
+            },
+            Preset::TokyoNight => Palette {
+                base: h("#1a1b26"),
+                surface: h("#24283b"),
+                overlay: h("#565f89"),
+                muted: h("#414868"),
+                text: h("#c0caf5"),
+                accent: h("#7aa2f7"),
+                red: h("#f7768e"),
+                green: h("#9ece6a"),
+                yellow: h("#e0af68"),
+                blue: h("#7aa2f7"),
+                magenta: h("#bb9af7"),
+                cyan: h("#7dcfff"),
+                orange: h("#ff9e64"),
+            },
+            Preset::GruvboxDark => Palette {
+                base: h("#282828"),
+                surface: h("#3c3836"),
+                overlay: h("#928374"),
+                muted: h("#504945"),
+                text: h("#ebdbb2"),
+                accent: h("#83a598"),
+                red: h("#fb4934"),
+                green: h("#b8bb26"),
+                yellow: h("#fabd2f"),
+                blue: h("#83a598"),
+                magenta: h("#d3869b"),
+                cyan: h("#8ec07c"),
+                orange: h("#fe8019"),
+            },
+            Preset::RosePine => Palette {
+                base: h("#191724"),
+                surface: h("#1f1d2e"),
+                overlay: h("#6e6a86"),
+                muted: h("#26233a"),
+                text: h("#e0def4"),
+                accent: h("#c4a7e7"),
+                red: h("#eb6f92"),
+                green: h("#31748f"),
+                yellow: h("#f6c177"),
+                blue: h("#9ccfd8"),
+                magenta: h("#c4a7e7"),
+                cyan: h("#9ccfd8"),
+                orange: h("#ebbcba"),
+            },
+            Preset::Everforest => Palette {
+                base: h("#2d353b"),
+                surface: h("#343f44"),
+                overlay: h("#859289"),
+                muted: h("#3d484d"),
+                text: h("#d3c6aa"),
+                accent: h("#a7c080"),
+                red: h("#e67e80"),
+                green: h("#a7c080"),
+                yellow: h("#dbbc7f"),
+                blue: h("#7fbbb3"),
+                magenta: h("#d699b6"),
+                cyan: h("#83c092"),
+                orange: h("#e69875"),
+            },
+            Preset::OneDark => Palette {
+                base: h("#282c34"),
+                surface: h("#2c313a"),
+                overlay: h("#5c6370"),
+                muted: h("#3e4451"),
+                text: h("#abb2bf"),
+                accent: h("#61afef"),
+                red: h("#e06c75"),
+                green: h("#98c379"),
+                yellow: h("#e5c07b"),
+                blue: h("#61afef"),
+                magenta: h("#c678dd"),
+                cyan: h("#56b6c2"),
+                orange: h("#d19a66"),
+            },
+            Preset::SolarizedDark => Palette {
+                base: h("#002b36"),
+                surface: h("#073642"),
+                overlay: h("#586e75"),
+                muted: h("#094b56"),
+                text: h("#839496"),
+                accent: h("#268bd2"),
+                red: h("#dc322f"),
+                green: h("#859900"),
+                yellow: h("#b58900"),
+                blue: h("#268bd2"),
+                magenta: h("#d33682"),
+                cyan: h("#2aa198"),
+                orange: h("#cb4b16"),
+            },
+            Preset::RosePineDawn => Palette {
+                base: h("#faf4ed"),
+                surface: h("#fffaf3"),
+                overlay: h("#9893a5"),
+                muted: h("#f2e9e1"),
+                text: h("#575279"),
+                accent: h("#907aa9"),
+                red: h("#b4637a"),
+                green: h("#286983"),
+                yellow: h("#ea9d34"),
+                blue: h("#56949f"),
+                magenta: h("#907aa9"),
+                cyan: h("#56949f"),
+                orange: h("#d7827e"),
+            },
+            Preset::SolarizedLight => Palette {
+                base: h("#fdf6e3"),
+                surface: h("#eee8d5"),
+                overlay: h("#93a1a1"),
+                muted: h("#e6dfc8"),
+                text: h("#657b83"),
+                accent: h("#268bd2"),
+                red: h("#dc322f"),
+                green: h("#859900"),
+                yellow: h("#b58900"),
+                blue: h("#268bd2"),
+                magenta: h("#d33682"),
+                cyan: h("#2aa198"),
+                orange: h("#cb4b16"),
             },
         }
     }
@@ -744,7 +934,21 @@ mod tests {
 
     #[test]
     fn preset_next_prev_wrap() {
-        assert_eq!(Preset::CatppuccinMocha.prev(), Preset::CatppuccinLatte);
-        assert_eq!(Preset::CatppuccinLatte.next(), Preset::CatppuccinMocha);
+        // Wraps around the ends of `ALL` (first ↔ last).
+        let first = Preset::ALL[0];
+        let last = Preset::ALL[Preset::ALL.len() - 1];
+        assert_eq!(first.prev(), last);
+        assert_eq!(last.next(), first);
+        // next/prev are inverses everywhere.
+        for &p in Preset::ALL.iter() {
+            assert_eq!(p.next().prev(), p);
+        }
+    }
+
+    #[test]
+    fn every_preset_round_trips_through_its_name() {
+        for &p in Preset::ALL.iter() {
+            assert_eq!(Preset::from_name(p.name()), Some(p), "name: {}", p.name());
+        }
     }
 }
