@@ -1122,8 +1122,8 @@ ride on `Alt+` instead.
 
 ```
 GLOBAL (any screen)
-  Ctrl+C quit · F1 help · F9 settings · Esc/h back · Tab cycle focus
-  0..4 focus panel · / focus search
+  Ctrl+C quit · F1 help · F9 settings · Ctrl+P command palette
+  Esc/h back · Tab cycle focus · 0..4 focus panel · / focus search
 
 LOGIN
   Tab/Shift+Tab cycle field · ←→ Home End cursor · Space toggle checkbox
