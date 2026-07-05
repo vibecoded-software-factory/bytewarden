@@ -26,12 +26,12 @@ pub fn handle(app: &mut App, key: KeyEvent) {
             // Whenever focus leaves the Server field, persist any
             // change so the user does not have to remember a separate
             // commit key.
-            let leaving_server = app.active_field == LoginField::Server;
-            app.active_field = match app.active_field {
+            let leaving_server = app.login.active_field == LoginField::Server;
+            app.login.active_field = match app.login.active_field {
                 LoginField::Server => LoginField::Email,
                 LoginField::Email => LoginField::Password,
                 LoginField::Password => {
-                    if app.awaiting_code() {
+                    if app.login.awaiting_code() {
                         LoginField::Otp
                     } else {
                         LoginField::SaveEmail
@@ -47,12 +47,12 @@ pub fn handle(app: &mut App, key: KeyEvent) {
             }
         }
         KeyCode::BackTab => {
-            let leaving_server = app.active_field == LoginField::Server;
-            app.active_field = match app.active_field {
+            let leaving_server = app.login.active_field == LoginField::Server;
+            app.login.active_field = match app.login.active_field {
                 LoginField::KeepSession => LoginField::AutoLock,
                 LoginField::AutoLock => LoginField::SaveEmail,
                 LoginField::SaveEmail => {
-                    if app.awaiting_code() {
+                    if app.login.awaiting_code() {
                         LoginField::Otp
                     } else {
                         LoginField::Password
@@ -67,46 +67,50 @@ pub fn handle(app: &mut App, key: KeyEvent) {
                 commit_server_change(app);
             }
         }
-        KeyCode::Char(' ') if app.active_field == LoginField::SaveEmail => {
+        KeyCode::Char(' ') if app.login.active_field == LoginField::SaveEmail => {
             app.toggle_save_email();
         }
-        KeyCode::Char(' ') if app.active_field == LoginField::AutoLock => {
+        KeyCode::Char(' ') if app.login.active_field == LoginField::AutoLock => {
             app.auto_lock = !app.auto_lock;
             app.settings.write_auto_lock(app.auto_lock);
         }
-        KeyCode::Char(' ') if app.active_field == LoginField::KeepSession => {
+        KeyCode::Char(' ') if app.login.active_field == LoginField::KeepSession => {
             app.toggle_keep_session();
         }
         KeyCode::Enter => {
             // On the Server field, Enter commits the URL change in
             // place instead of submitting the login form.
-            if app.active_field == LoginField::Server {
+            if app.login.active_field == LoginField::Server {
                 commit_server_change(app);
             } else {
                 attempt_login(app);
             }
         }
-        KeyCode::F(2) => app.login_password_visible = !app.login_password_visible,
+        KeyCode::F(2) => app.login.password_visible = !app.login.password_visible,
         // ← → on the Otp field cycles the 2FA method when in 2FA
         // mode (Authenticator / Email / YubiKey). On any other text
         // field they keep their normal cursor-movement role.
-        KeyCode::Left if app.two_factor_required && app.active_field == LoginField::Otp => {
-            app.two_factor_method = app.two_factor_method.prev();
+        KeyCode::Left
+            if app.login.two_factor_required && app.login.active_field == LoginField::Otp =>
+        {
+            app.login.two_factor_method = app.login.two_factor_method.prev();
         }
-        KeyCode::Right if app.two_factor_required && app.active_field == LoginField::Otp => {
-            app.two_factor_method = app.two_factor_method.next();
+        KeyCode::Right
+            if app.login.two_factor_required && app.login.active_field == LoginField::Otp =>
+        {
+            app.login.two_factor_method = app.login.two_factor_method.next();
         }
         // Everything else drives the focused field's `LineEditor` (the
         // shared input model). `login_editor_mut` returns `None` on the
         // checkbox fields, so typing there is a no-op. An edit clears a
         // stale login error and persists the e-mail when opted in.
         _ => {
-            let changed = match app.login_editor_mut() {
+            let changed = match app.login.editor_mut() {
                 Some(ed) => crate::tui::input::common::route_line_editor(ed, key),
                 None => false,
             };
             if changed {
-                app.clear_login_error();
+                app.login.clear_error();
                 app.persist_email_if_saving();
             }
         }

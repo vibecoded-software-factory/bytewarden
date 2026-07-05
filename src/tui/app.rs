@@ -18,7 +18,6 @@ use std::time::{Duration, Instant};
 
 use zeroize::Zeroizing;
 
-use crate::domain::LineEditor;
 use crate::domain::LoweredItem;
 use crate::domain::filter::{CreateItemType, ITEM_FILTERS, ItemFilter};
 use crate::domain::folder::Folder;
@@ -27,6 +26,7 @@ use crate::ports::{ClipboardPort, SettingsPort};
 use crate::tui::action::{ActionState, CmdEntry};
 use crate::tui::edit_field::EditField;
 use crate::tui::generator::GeneratorState;
+use crate::tui::login_form::LoginForm;
 use crate::tui::mouse_areas::MouseAreas;
 use crate::tui::screens::{Focus, LoginField, Screen};
 use crate::tui::theme::{self, Theme};
@@ -153,47 +153,15 @@ pub struct App {
     pub folder_selected: usize,
 
     // ── Login form ────────────────────────────────────────────────────────
-    /// Current Bitwarden server URL — populated from `bw status` at
-    /// boot and editable from the login screen.
-    pub server_input: LineEditor,
-    /// Server URL as last persisted by `bw config server`. Used to
-    /// decide whether the field is dirty and needs a re-config call.
-    pub server_committed: String,
-    pub email_input: LineEditor,
-    /// Master password buffer. [`LineEditor`] is `ZeroizeOnDrop`, so the
-    /// bytes are overwritten when the field is cleared (or when `App`
-    /// drops) — no plaintext copy lingers in the heap after login.
-    pub password_input: LineEditor,
-    /// One-time-code buffer. Same zeroizing rationale as
-    /// `password_input` — short-lived but worth scrubbing.
-    pub otp_input: LineEditor,
-    /// Toggled on after the backend reports a "new device" challenge —
-    /// the user has to paste the code bw e-mailed them.
-    pub otp_required: bool,
-    /// Toggled on after the backend reports the account has a
-    /// permanent second factor enrolled (Authenticator / Email /
-    /// YubiKey). The same `otp_input` buffer is reused, but the
-    /// submit path branches to
-    /// [`crate::ports::VaultPort::login_with_two_factor`] instead of
-    /// the device-verification path. Mutually exclusive with
-    /// `otp_required`.
-    pub two_factor_required: bool,
-    /// Currently selected 2FA method. Defaults to
-    /// [`crate::domain::TwoFactorMethod::Authenticator`] (the most
-    /// common case); the user cycles it from the login form when
-    /// the popup is up. Only meaningful when `two_factor_required`
-    /// is `true`.
-    pub two_factor_method: crate::domain::TwoFactorMethod,
-    pub active_field: LoginField,
-    pub login_error: bool,
-    pub save_email: bool,
-    /// Whether the unlocked session key should be persisted to a
-    /// per-PPID runtime file (cleaned up when the parent shell dies).
-    pub keep_session: bool,
+    /// The login screen's form state — buffers, focus, toggles and the
+    /// transient 2FA / device-verification flags. See
+    /// [`crate::tui::login_form::LoginForm`].
+    pub login: LoginForm,
     /// Whether the `bw` CLI is logged into an account (vault Locked or
-    /// Unlocked) vs fully signed out. Tracked on `App` because the vault
-    /// now lives on the worker thread, so the login flow can't call
-    /// `status()` synchronously to decide unlock-vs-login. Set from the
+    /// Unlocked) vs fully signed out. Tracked on `App` (not `LoginForm`)
+    /// because it outlives the login screen: the vault now lives on the
+    /// worker thread, so the login flow can't call `status()`
+    /// synchronously to decide unlock-vs-login. Set from the
     /// boot-status / login response handlers; cleared on logout.
     pub authenticated: bool,
 
@@ -203,9 +171,6 @@ pub struct App {
     // ── Detail / edit / create ────────────────────────────────────────────
     pub show_password: bool,
     pub detail_field: usize,
-    /// Whether the master password on the login screen is shown in plain
-    /// text.
-    pub login_password_visible: bool,
 
     // ── Command log ───────────────────────────────────────────────────────
     pub cmd_log: Vec<CmdEntry>,
@@ -417,27 +382,11 @@ impl App {
             import_formats: Vec::new(),
             active_folder: crate::tui::folders::FolderFilter::All,
             folder_selected: 0,
-            server_input: LineEditor::new(),
-            server_committed: String::new(),
-            email_input: LineEditor::with_text(saved_email),
-            password_input: LineEditor::new(),
-            otp_input: LineEditor::new(),
-            otp_required: false,
-            two_factor_required: false,
-            two_factor_method: crate::domain::TwoFactorMethod::Authenticator,
-            active_field: if cfg.save_email {
-                LoginField::Password
-            } else {
-                LoginField::Email
-            },
-            login_error: false,
-            save_email: cfg.save_email,
-            keep_session: cfg.keep_session,
+            login: LoginForm::new(saved_email, cfg.save_email, cfg.keep_session),
             authenticated: false,
             search_query: String::new(),
             show_password: false,
             detail_field: 0,
-            login_password_visible: false,
             cmd_log: Vec::new(),
             cmd_log_scroll: 0,
             action_state: ActionState::Idle,
@@ -639,15 +588,6 @@ impl App {
     pub fn settings_cancel(&mut self) {
         self.theme = self.theme_before_settings.clone();
         self.screen = self.settings_from.clone();
-    }
-
-    /// `true` while bw is asking the user for an interactive code —
-    /// either a device-verification OTP (e-mailed on first login from
-    /// a new device) or a permanent second-factor code (Authenticator).
-    /// Layout, click hit-testing and tab order use this rather than
-    /// branching on the two flags individually.
-    pub fn awaiting_code(&self) -> bool {
-        self.otp_required || self.two_factor_required
     }
 
     pub fn go_to_vault(&mut self) {
@@ -988,21 +928,6 @@ impl App {
         self.set_action(ActionState::Error(format!("{label}: {e}")));
     }
 
-    // ── Login error helpers ───────────────────────────────────────────────
-
-    pub fn set_login_error(&mut self) {
-        self.login_error = true;
-        self.password_input.clear();
-        self.otp_input.clear();
-        self.otp_required = false;
-        self.two_factor_required = false;
-        self.active_field = LoginField::Password;
-    }
-
-    pub fn clear_login_error(&mut self) {
-        self.login_error = false;
-    }
-
     // ── Edit / create field accessors ─────────────────────────────────────
 
     pub fn edit_field_mut(&mut self) -> Option<&mut EditField> {
@@ -1022,37 +947,23 @@ impl App {
         }
     }
 
-    // ── Login text field plumbing ─────────────────────────────────────────
-
-    /// Returns the [`LineEditor`] for the focused login text field, or
-    /// `None` for the checkbox fields. The caller drives it through
-    /// [`crate::tui::input::common::route_line_editor`] like every other
-    /// input.
-    pub fn login_editor_mut(&mut self) -> Option<&mut LineEditor> {
-        match self.active_field {
-            LoginField::Server => Some(&mut self.server_input),
-            LoginField::Email => Some(&mut self.email_input),
-            LoginField::Password => Some(&mut self.password_input),
-            LoginField::Otp => Some(&mut self.otp_input),
-            _ => None,
-        }
-    }
+    // ── Login form plumbing (settings-backed) ─────────────────────────────
 
     /// Persists the e-mail when the "save e-mail" box is ticked — call
     /// after editing the Email field so a typed address survives a
     /// relaunch (the side effect the old `insert_char`/`delete_char_*`
     /// carried inline).
     pub fn persist_email_if_saving(&mut self) {
-        if self.active_field == LoginField::Email && self.save_email {
-            let e = self.email_input.text().to_string();
+        if self.login.active_field == LoginField::Email && self.login.save_email {
+            let e = self.login.email_input.text().to_string();
             self.settings.write(true, Some(&e));
         }
     }
 
     pub fn toggle_save_email(&mut self) {
-        self.save_email = !self.save_email;
-        if self.save_email {
-            let e = self.email_input.text().to_string();
+        self.login.save_email = !self.login.save_email;
+        if self.login.save_email {
+            let e = self.login.email_input.text().to_string();
             self.settings.write(true, Some(&e));
         } else {
             self.settings.write(false, None);
@@ -1064,9 +975,9 @@ impl App {
     /// the user's choice takes effect right away (instead of waiting
     /// for the parent shell to die).
     pub fn toggle_keep_session(&mut self) {
-        self.keep_session = !self.keep_session;
-        self.settings.write_keep_session(self.keep_session);
-        if !self.keep_session {
+        self.login.keep_session = !self.login.keep_session;
+        self.settings.write_keep_session(self.login.keep_session);
+        if !self.login.keep_session {
             crate::tui::session_file::clear();
         }
     }

@@ -66,15 +66,15 @@ fn mouse_login(app: &mut App, col: u16, row: u16) {
     // Server / email / password / [otp] rows are positioned identically
     // in both layouts (OTP appears after password, before save).
     if row < 5 {
-        app.active_field = LoginField::Server;
+        app.login.active_field = LoginField::Server;
         return;
     }
     if row < 9 {
-        app.active_field = LoginField::Email;
+        app.login.active_field = LoginField::Email;
         return;
     }
     if row < 13 {
-        app.active_field = LoginField::Password;
+        app.login.active_field = LoginField::Password;
         return;
     }
 
@@ -82,29 +82,29 @@ fn mouse_login(app: &mut App, col: u16, row: u16) {
     // OTP block is shown. Branch explicitly so a click on the OTP
     // input doesn't accidentally toggle the save-email / auto-lock /
     // keep-session checkboxes.
-    if app.awaiting_code() {
+    if app.login.awaiting_code() {
         if row < 17 {
-            app.active_field = LoginField::Otp;
+            app.login.active_field = LoginField::Otp;
         } else if row < 18 {
-            app.active_field = LoginField::SaveEmail;
+            app.login.active_field = LoginField::SaveEmail;
             app.toggle_save_email();
         } else if row < 19 {
-            app.active_field = LoginField::AutoLock;
+            app.login.active_field = LoginField::AutoLock;
             app.auto_lock = !app.auto_lock;
             app.settings.write_auto_lock(app.auto_lock);
         } else {
-            app.active_field = LoginField::KeepSession;
+            app.login.active_field = LoginField::KeepSession;
             app.toggle_keep_session();
         }
     } else if row < 14 {
-        app.active_field = LoginField::SaveEmail;
+        app.login.active_field = LoginField::SaveEmail;
         app.toggle_save_email();
     } else if row < 15 {
-        app.active_field = LoginField::AutoLock;
+        app.login.active_field = LoginField::AutoLock;
         app.auto_lock = !app.auto_lock;
         app.settings.write_auto_lock(app.auto_lock);
     } else {
-        app.active_field = LoginField::KeepSession;
+        app.login.active_field = LoginField::KeepSession;
         app.toggle_keep_session();
     }
 }
