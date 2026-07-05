@@ -6,14 +6,19 @@
 //! keeping the responsibilities split lets either backend be replaced
 //! without touching the other.
 
-use std::process::Command;
-
+use crate::adapters::bw_cli::process::bw_run_timeout;
 use crate::ports::{BwError, GeneratorMode, GeneratorOptions, PasswordGeneratorPort};
 
 /// Bitwarden's hard minimum lengths, mirrored here so the adapter can
 /// clamp UI input before invoking the CLI.
 const MIN_PASSWORD_LENGTH: u8 = 5;
 const MIN_PASSPHRASE_WORDS: u8 = 3;
+
+/// Wall-clock budget for `bw generate`. Generation is local (no network),
+/// so it finishes in milliseconds — this is a panic-prevention floor so a
+/// wedged CLI can't block the worker thread indefinitely, matching the
+/// timeout discipline the rest of the `bw` surface already uses.
+const GENERATE_TIMEOUT_SECS: u64 = 10;
 
 /// Generator adapter — calls `bw generate <flags>` per request.
 #[derive(Debug, Default)]
@@ -82,10 +87,11 @@ impl PasswordGeneratorPort for BwGeneratorAdapter {
         }
 
         let args = Self::build_args(opts);
-        let out = Command::new("bw")
-            .args(&args)
-            .output()
-            .map_err(|e| BwError::Spawn(format!("Could not run bw: {e}")))?;
+        // Route through the shared timeout runner so a hung `bw` can't
+        // freeze the worker (it also nulls stdin + prepends
+        // `--nointeraction`, consistent with every other invocation).
+        let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
+        let out = bw_run_timeout(&arg_refs, GENERATE_TIMEOUT_SECS)?;
 
         if out.status.success() {
             let value = String::from_utf8_lossy(&out.stdout).trim().to_string();

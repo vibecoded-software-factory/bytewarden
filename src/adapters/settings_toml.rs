@@ -136,25 +136,44 @@ impl TomlSettingsAdapter {
 ///   a no-op, so we still call `set_permissions(0o600)` after writing
 ///   as a safety net.
 ///
+/// The write is **atomic**: the contents go to a sibling `<path>.tmp`
+/// (owner-only from the first byte, flushed to disk) and are then
+/// `rename(2)`d over the target. A crash or interruption mid-write
+/// leaves the original config intact instead of a half-written file —
+/// `rename` on the same filesystem is atomic, and the temp is always a
+/// sibling so they're co-located.
+///
 /// Errors are swallowed by design — settings persistence is
 /// best-effort and the user-visible feedback comes from later reads
 /// failing.
 fn write_file_secure(path: &Path, contents: &str) {
-    let mut file = match fs::OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .mode(CONFIG_FILE_MODE)
-        .open(path)
-    {
-        Ok(f) => f,
-        Err(_) => return,
+    let tmp = {
+        let mut p = path.as_os_str().to_owned();
+        p.push(".tmp");
+        std::path::PathBuf::from(p)
     };
-    if file.write_all(contents.as_bytes()).is_err() {
+    let write = (|| -> std::io::Result<()> {
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(CONFIG_FILE_MODE)
+            .open(&tmp)?;
+        file.write_all(contents.as_bytes())?;
+        // Flush data + metadata so a crash right after the rename can't
+        // surface an empty file.
+        file.sync_all()?;
+        Ok(())
+    })();
+    if write.is_err() {
+        let _ = fs::remove_file(&tmp);
         return;
     }
-    // Re-tighten perms in case the file already existed with a looser
-    // mode (mode() above only takes effect on creation).
+    if fs::rename(&tmp, path).is_err() {
+        let _ = fs::remove_file(&tmp);
+        return;
+    }
+    // Re-tighten perms in case an inherited umask loosened the target.
     let _ = fs::set_permissions(path, fs::Permissions::from_mode(CONFIG_FILE_MODE));
 }
 
@@ -345,6 +364,23 @@ mod tests {
             dir: tmp.path().to_path_buf(),
         };
         (adapter, tmp)
+    }
+
+    #[test]
+    fn write_file_secure_is_atomic_and_owner_only() {
+        let tmp = TempDir::new().expect("tempdir");
+        let path = tmp.path().join("config.toml");
+        write_file_secure(&path, "a = 1\n");
+        assert_eq!(fs::read_to_string(&path).unwrap(), "a = 1\n");
+        // Owner-only perms from the first byte.
+        let mode = fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
+        // The rename cleaned up after itself — no leftover temp file.
+        assert!(!tmp.path().join("config.toml.tmp").exists());
+        // An overwrite replaces the content wholesale (atomic swap).
+        write_file_secure(&path, "b = 2\n");
+        assert_eq!(fs::read_to_string(&path).unwrap(), "b = 2\n");
+        assert!(!tmp.path().join("config.toml.tmp").exists());
     }
 
     #[test]
