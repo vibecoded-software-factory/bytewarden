@@ -48,8 +48,8 @@ pub fn handle_boot_status(app: &mut App, r: Result<VaultInfo, BwError>) {
         .server_url
         .clone()
         .unwrap_or_else(|| "https://bitwarden.com".to_string());
-    app.server_input.set(server.clone());
-    app.server_committed = server;
+    app.login.server_input.set(server.clone());
+    app.login.server_committed = server;
 
     match info.status {
         VaultStatus::Unlocked => {
@@ -60,9 +60,9 @@ pub fn handle_boot_status(app: &mut App, r: Result<VaultInfo, BwError>) {
             // form in `handle_resume_items`.
             app.authenticated = true;
             if let Some(email) = info.user_email.clone()
-                && app.email_input.is_empty()
+                && app.login.email_input.is_empty()
             {
-                app.email_input.set(email);
+                app.login.email_input.set(email);
             }
             app.submit(
                 InFlight::ResumeItems,
@@ -188,11 +188,11 @@ fn apply_parallel_session_data(app: &mut App, data: ParallelSessionData) {
 fn apply_locked_state(app: &mut App, user_email: Option<String>) {
     if let Some(email) = user_email
         && !email.is_empty()
-        && app.email_input.is_empty()
+        && app.login.email_input.is_empty()
     {
-        app.email_input.set(email);
+        app.login.email_input.set(email);
     }
-    app.active_field = LoginField::Password;
+    app.login.active_field = LoginField::Password;
 }
 
 // ── Login / unlock ────────────────────────────────────────────────────────
@@ -200,13 +200,13 @@ fn apply_locked_state(app: &mut App, user_email: Option<String>) {
 /// Validates the login form and dispatches the right worker request
 /// (unlock, fresh login, or resume an OTP / 2FA challenge).
 pub fn attempt_login(app: &mut App) {
-    if app.password_input.is_empty() {
-        app.login_error = true;
+    if app.login.password_input.is_empty() {
+        app.login.login_error = true;
         return;
     }
-    if let Err(msg) = crate::domain::validation::validate_email(app.email_input.text()) {
+    if let Err(msg) = crate::domain::validation::validate_email(app.login.email_input.text()) {
         app.set_action(ActionState::Error(msg.into()));
-        app.active_field = LoginField::Email;
+        app.login.active_field = LoginField::Email;
         return;
     }
     request_login(app);
@@ -214,13 +214,13 @@ pub fn attempt_login(app: &mut App) {
 
 /// Sends the appropriate login/unlock request to the worker.
 fn request_login(app: &mut App) {
-    let email = app.email_input.text().to_string();
-    let password = Zeroizing::new(app.password_input.text().to_string());
+    let email = app.login.email_input.text().to_string();
+    let password = Zeroizing::new(app.login.password_input.text().to_string());
 
-    if app.otp_required || app.two_factor_required {
-        let code = Zeroizing::new(app.otp_input.text().trim().to_string());
-        if app.two_factor_required {
-            let method = app.two_factor_method;
+    if app.login.otp_required || app.login.two_factor_required {
+        let code = Zeroizing::new(app.login.otp_input.text().trim().to_string());
+        if app.login.two_factor_required {
+            let method = app.login.two_factor_method;
             app.submit(
                 InFlight::LoginTwoFactor,
                 "Logging in…",
@@ -271,10 +271,10 @@ pub fn handle_login(app: &mut App, outcome: LoginOutcome) {
                 "device verification required — OTP sent",
             );
             app.set_action(ActionState::Idle);
-            app.otp_required = true;
-            app.two_factor_required = false;
-            app.otp_input.clear();
-            app.active_field = LoginField::Otp;
+            app.login.otp_required = true;
+            app.login.two_factor_required = false;
+            app.login.otp_input.clear();
+            app.login.active_field = LoginField::Otp;
         }
         LoginOutcome::NeedsTwoFactor => {
             app.push_cmd(
@@ -283,16 +283,16 @@ pub fn handle_login(app: &mut App, outcome: LoginOutcome) {
                 "two-factor required — pick method and enter code",
             );
             app.set_action(ActionState::Idle);
-            app.two_factor_required = true;
-            app.two_factor_method = crate::domain::TwoFactorMethod::Authenticator;
-            app.otp_required = false;
-            app.otp_input.clear();
-            app.active_field = LoginField::Otp;
+            app.login.two_factor_required = true;
+            app.login.two_factor_method = crate::domain::TwoFactorMethod::Authenticator;
+            app.login.otp_required = false;
+            app.login.otp_input.clear();
+            app.login.active_field = LoginField::Otp;
         }
         LoginOutcome::Failed(err) => {
             app.push_cmd("bw login *** --raw", false, &err);
             app.set_action(ActionState::Idle);
-            app.set_login_error();
+            app.login.set_error();
         }
     }
 }
@@ -304,7 +304,7 @@ pub fn handle_unlock(app: &mut App, r: Result<String, BwError>) {
         Err(_) => {
             app.push_cmd("bw unlock ***", false, "invalid credentials");
             app.set_action(ActionState::Idle);
-            app.set_login_error();
+            app.login.set_error();
         }
     }
 }
@@ -314,9 +314,9 @@ pub fn handle_login_otp(app: &mut App, r: Result<String, BwError>) {
     let cmd = "bw login *** --raw  (otp via stdin)";
     match r {
         Ok(key) => {
-            app.otp_input.clear();
-            app.otp_required = false;
-            app.two_factor_required = false;
+            app.login.otp_input.clear();
+            app.login.otp_required = false;
+            app.login.two_factor_required = false;
             app.push_cmd(cmd, true, "verified");
             on_login_success(app, &key);
         }
@@ -328,13 +328,13 @@ pub fn handle_login_otp(app: &mut App, r: Result<String, BwError>) {
 pub fn handle_login_two_factor(app: &mut App, r: Result<String, BwError>) {
     let cmd = format!(
         "bw login *** --method {} --raw  (code via stdin)",
-        app.two_factor_method.as_u8()
+        app.login.two_factor_method.as_u8()
     );
     match r {
         Ok(key) => {
-            app.otp_input.clear();
-            app.otp_required = false;
-            app.two_factor_required = false;
+            app.login.otp_input.clear();
+            app.login.otp_required = false;
+            app.login.two_factor_required = false;
             app.push_cmd(&cmd, true, "verified");
             on_login_success(app, &key);
         }
@@ -346,9 +346,9 @@ pub fn handle_login_two_factor(app: &mut App, r: Result<String, BwError>) {
 fn fail_code(app: &mut App, cmd: &str, label: &str) {
     app.push_cmd(cmd, false, label);
     app.set_action(ActionState::Idle);
-    app.otp_input.clear();
-    app.active_field = LoginField::Otp;
-    app.login_error = true;
+    app.login.otp_input.clear();
+    app.login.active_field = LoginField::Otp;
+    app.login.login_error = true;
 }
 
 /// Common tail of every successful login / unlock path: caches the
@@ -356,14 +356,14 @@ fn fail_code(app: &mut App, cmd: &str, label: &str) {
 fn on_login_success(app: &mut App, session_key: &str) {
     app.authenticated = true;
     app.session_marker = Some(Zeroizing::new(session_key.to_string()));
-    if app.save_email {
-        let email = app.email_input.text().to_string();
+    if app.login.save_email {
+        let email = app.login.email_input.text().to_string();
         app.settings.write(true, Some(&email));
     }
-    if app.keep_session && !session_key.is_empty() {
+    if app.login.keep_session && !session_key.is_empty() {
         session_file::save(session_key);
     }
-    app.password_input.clear();
+    app.login.password_input.clear();
     app.submit(
         InFlight::PostLoginItems,
         "Loading vault…",
@@ -427,7 +427,7 @@ pub fn handle_api_key(app: &mut App, r: Result<(), BwError>) {
             app.set_action(ActionState::Done(
                 "Logged in via API key — enter master password to unlock.".into(),
             ));
-            app.active_field = LoginField::Password;
+            app.login.active_field = LoginField::Password;
         }
         Err(e) => app.cmd_err("bw login --apikey", &e, "API-key login failed"),
     }
@@ -451,7 +451,7 @@ pub fn handle_sso(app: &mut App, r: Result<(), BwError>) {
             app.set_action(ActionState::Done(
                 "Logged in via SSO — enter master password to unlock.".into(),
             ));
-            app.active_field = LoginField::Password;
+            app.login.active_field = LoginField::Password;
         }
         Err(e) => app.cmd_err("bw login --sso", &e, "SSO login failed"),
     }
@@ -476,8 +476,8 @@ pub fn lock_vault(app: &mut App) {
     app.collections.clear();
     app.organizations.clear();
     app.rebuild_caches();
-    app.password_input.clear();
-    app.active_field = LoginField::Password;
+    app.login.password_input.clear();
+    app.login.active_field = LoginField::Password;
     app.push_cmd("bw lock", true, "vault locked");
     app.set_action(ActionState::Done("Locked ✓".into()));
 }
@@ -490,13 +490,13 @@ pub fn open_confirm_logout(app: &mut App) {
 /// Persists a new server URL via `bw config server <url>` when the Server
 /// field differs from the last committed value.
 pub fn commit_server_change(app: &mut App) {
-    let url = app.server_input.text().trim().to_string();
-    if url.is_empty() || url == app.server_committed {
+    let url = app.login.server_input.text().trim().to_string();
+    if url.is_empty() || url == app.login.server_committed {
         return;
     }
     if let Err(msg) = crate::domain::validation::validate_server_url(&url) {
         app.set_action(ActionState::Error(msg.into()));
-        app.active_field = LoginField::Server;
+        app.login.active_field = LoginField::Server;
         return;
     }
     app.submit(
@@ -508,7 +508,7 @@ pub fn commit_server_change(app: &mut App) {
 
 /// `bw config server` response.
 pub fn handle_set_server(app: &mut App, r: Result<(), BwError>) {
-    let url = app.server_input.text().trim().to_string();
+    let url = app.login.server_input.text().trim().to_string();
     match r {
         Ok(()) => {
             app.push_cmd(
@@ -516,13 +516,13 @@ pub fn handle_set_server(app: &mut App, r: Result<(), BwError>) {
                 true,
                 "server URL updated",
             );
-            app.server_committed = url;
+            app.login.server_committed = url;
             app.set_action(ActionState::Done("Server updated ✓".into()));
         }
         Err(e) => {
             app.cmd_err(&format!("bw config server {url}"), &e, "Set server failed");
-            let cmt = app.server_committed.clone();
-            app.server_input.set(cmt);
+            let cmt = app.login.server_committed.clone();
+            app.login.server_input.set(cmt);
         }
     }
 }
@@ -546,11 +546,11 @@ pub fn handle_logout(app: &mut App, r: Result<(), BwError>) {
             app.collections.clear();
             app.organizations.clear();
             app.rebuild_caches();
-            app.password_input.clear();
-            app.otp_input.clear();
-            app.otp_required = false;
-            app.two_factor_required = false;
-            app.email_input.clear();
+            app.login.password_input.clear();
+            app.login.otp_input.clear();
+            app.login.otp_required = false;
+            app.login.two_factor_required = false;
+            app.login.email_input.clear();
             app.search_query.clear();
             app.selected_index = 0;
             app.scroll_offset = 0;
@@ -559,7 +559,7 @@ pub fn handle_logout(app: &mut App, r: Result<(), BwError>) {
             app.cmd_log.clear();
             app.cmd_log_scroll = 0;
             app.screen = Screen::Login;
-            app.active_field = LoginField::Email;
+            app.login.active_field = LoginField::Email;
             app.set_action(ActionState::Done("Logged out ✓".into()));
         }
         Err(e) => app.cmd_err("bw logout", &e, "Logout failed"),

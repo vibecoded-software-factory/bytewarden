@@ -38,7 +38,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     //            +email-lbl(1)+email-in(3)+pass-lbl(1)+pass-in(3)
     //            + [otp-lbl(1)+otp-in(3)]
     //            +save(1)+lock(1)+keep_session(1)+strip(2)+border(2).
-    let form_height: u16 = if app.awaiting_code() { 24 } else { 20 };
+    let form_height: u16 = if app.login.awaiting_code() { 24 } else { 20 };
 
     // Vertical layout — stars above the form (2/3) and below (1/3),
     // command bar at the bottom.
@@ -72,7 +72,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     fill_stars(frame, form_row[0], t);
     fill_stars(frame, form_row[2], t);
     let form_area = form_row[1];
-    let form_border = if app.login_error {
+    let form_border = if app.login.login_error {
         Style::default().fg(t.error)
     } else {
         Style::default().fg(t.accent)
@@ -90,7 +90,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     // Build the inner vertical splits dynamically — OTP rows only exist
     // when needed (device verification *or* permanent 2FA).
     let (idx_otp_lbl, idx_otp_in, idx_save, idx_lock, idx_keep, idx_strip, f);
-    if app.awaiting_code() {
+    if app.login.awaiting_code() {
         let splits = Layout::vertical([
             Constraint::Length(1), // [0]  padding
             Constraint::Length(1), // [1]  server label
@@ -144,7 +144,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     let _ = (idx_otp_lbl, idx_otp_in); // silence unused-variable in non-OTP branch
 
     // ── Server ────────────────────────────────────────────────────────────
-    let server_dirty = app.server_input.text().trim() != app.server_committed;
+    let server_dirty = app.login.server_input.text().trim() != app.login.server_committed;
     frame.render_widget(
         Paragraph::new(Line::from(vec![
             Span::styled("Server:", Style::default().fg(t.dim)),
@@ -159,11 +159,11 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         ])),
         f[1],
     );
-    let server_foc = app.active_field == LoginField::Server;
+    let server_foc = app.login.active_field == LoginField::Server;
     frame.render_widget(
         Paragraph::new(input_with_cursor(
-            app.server_input.text(),
-            app.server_input.cursor(),
+            app.login.server_input.text(),
+            app.login.server_input.cursor(),
             server_foc,
             t,
         ))
@@ -176,11 +176,11 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         Paragraph::new("Email:").style(Style::default().fg(t.dim)),
         f[3],
     );
-    let email_foc = app.active_field == LoginField::Email;
+    let email_foc = app.login.active_field == LoginField::Email;
     frame.render_widget(
         Paragraph::new(input_with_cursor(
-            app.email_input.text(),
-            app.email_input.cursor(),
+            app.login.email_input.text(),
+            app.login.email_input.cursor(),
             email_foc,
             t,
         ))
@@ -194,7 +194,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
             Span::styled("Master Password:", Style::default().fg(t.dim)),
             Span::styled(
                 "  (F2: reveal)",
-                Style::default().fg(if app.login_password_visible {
+                Style::default().fg(if app.login.password_visible {
                     t.accent
                 } else {
                     t.dim
@@ -203,20 +203,21 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         ])),
         f[5],
     );
-    let pass_foc = app.active_field == LoginField::Password;
-    let pass_line = if app.login_password_visible {
+    let pass_foc = app.login.active_field == LoginField::Password;
+    let pass_line = if app.login.password_visible {
         input_with_cursor(
-            app.password_input.text(),
-            app.password_input.cursor(),
+            app.login.password_input.text(),
+            app.login.password_input.cursor(),
             pass_foc,
             t,
         )
     } else {
-        let masked_before = "●".repeat(app.password_input.cursor());
+        let masked_before = "●".repeat(app.login.password_input.cursor());
         let masked_after = "●".repeat(
-            app.password_input
+            app.login
+                .password_input
                 .len_chars()
-                .saturating_sub(app.password_input.cursor()),
+                .saturating_sub(app.login.password_input.cursor()),
         );
         if pass_foc {
             Line::from(vec![
@@ -225,7 +226,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
                 Span::raw(masked_after),
             ])
         } else {
-            Line::from(Span::raw("●".repeat(app.password_input.len_chars())))
+            Line::from(Span::raw("●".repeat(app.login.password_input.len_chars())))
         }
     };
     frame.render_widget(
@@ -234,12 +235,12 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     );
 
     // ── OTP / 2FA ────────────────────────────────────────────────────────
-    if app.awaiting_code() {
-        let (label_main, label_hint) = if app.two_factor_required {
+    if app.login.awaiting_code() {
+        let (label_main, label_hint) = if app.login.two_factor_required {
             // Method-specific hint so the user knows what code is
             // being asked for. The method chip below the label
             // shows the current selection + cycle hint.
-            let hint = match app.two_factor_method {
+            let hint = match app.login.two_factor_method {
                 crate::domain::TwoFactorMethod::Authenticator => {
                     "  (TOTP from your authenticator app)"
                 }
@@ -257,16 +258,21 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
             ])),
             f[idx_otp_lbl],
         );
-        let otp_foc = app.active_field == LoginField::Otp;
+        let otp_foc = app.login.active_field == LoginField::Otp;
         // For 2FA we render a compact method chip on the input row's
         // right side so the user can tell at a glance which factor
         // is active. Cycling happens via ← → when focus is on the
         // Otp field.
-        let inner = input_with_cursor(app.otp_input.text(), app.otp_input.cursor(), otp_foc, t);
+        let inner = input_with_cursor(
+            app.login.otp_input.text(),
+            app.login.otp_input.cursor(),
+            otp_foc,
+            t,
+        );
         let block = rounded_block(focus_border(otp_foc, t.accent));
         frame.render_widget(Paragraph::new(inner).block(block), f[idx_otp_in]);
 
-        if app.two_factor_required && otp_foc {
+        if app.login.two_factor_required && otp_foc {
             // One-line tip below the code input — small, dim, only
             // when focused so it doesn't add noise on the rest of
             // the form.
@@ -279,7 +285,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
             let method_line = Line::from(vec![Span::styled(
                 format!(
                     " Method: {} · ← → to cycle (Authenticator / Email / YubiKey)",
-                    app.two_factor_method.label()
+                    app.login.two_factor_method.label()
                 ),
                 Style::default().fg(t.dim),
             )]);
@@ -296,7 +302,8 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
             // existing `idx_strip` cell — the strip already gets
             // overwritten by `action_line` further down. So we
             // intercept here only when nothing else is showing.
-            if matches!(app.action_state, crate::tui::action::ActionState::Idle) && !app.login_error
+            if matches!(app.action_state, crate::tui::action::ActionState::Idle)
+                && !app.login.login_error
             {
                 frame.render_widget(Paragraph::new(method_line), f[idx_strip]);
             }
@@ -307,8 +314,8 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     render_checkbox(
         frame,
         "Save email",
-        app.save_email,
-        app.active_field == LoginField::SaveEmail,
+        app.login.save_email,
+        app.login.active_field == LoginField::SaveEmail,
         t.accent,
         t.inactive,
         f[idx_save],
@@ -318,7 +325,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         frame,
         &lock_label,
         app.auto_lock,
-        app.active_field == LoginField::AutoLock,
+        app.login.active_field == LoginField::AutoLock,
         t.accent,
         t.inactive,
         f[idx_lock],
@@ -326,8 +333,8 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     render_checkbox(
         frame,
         "Keep session",
-        app.keep_session,
-        app.active_field == LoginField::KeepSession,
+        app.login.keep_session,
+        app.login.active_field == LoginField::KeepSession,
         t.accent,
         t.inactive,
         f[idx_keep],
@@ -337,10 +344,10 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     let strip_block = Block::default()
         .borders(Borders::TOP)
         .border_style(Style::default().fg(t.muted));
-    if app.login_error {
-        let msg = if app.two_factor_required {
+    if app.login.login_error {
+        let msg = if app.login.two_factor_required {
             "Invalid two-factor code. Please try again."
-        } else if app.otp_required {
+        } else if app.login.otp_required {
             "Invalid verification code. Please try again."
         } else {
             "Invalid credentials. Please try again."
@@ -356,7 +363,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
             .block(strip_block),
             f[idx_strip],
         );
-    } else if app.two_factor_required {
+    } else if app.login.two_factor_required {
         frame.render_widget(
             Paragraph::new(Line::from(vec![
                 Span::styled(
@@ -371,7 +378,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
             .block(strip_block),
             f[idx_strip],
         );
-    } else if app.otp_required {
+    } else if app.login.otp_required {
         frame.render_widget(
             Paragraph::new(Line::from(vec![
                 Span::styled(
