@@ -96,27 +96,19 @@ pub fn handle(app: &mut App, key: KeyEvent) {
         KeyCode::Right if app.two_factor_required && app.active_field == LoginField::Otp => {
             app.two_factor_method = app.two_factor_method.next();
         }
-        KeyCode::Left => app.cursor_left(),
-        KeyCode::Right => app.cursor_right(),
-        KeyCode::Home => app.cursor_home(),
-        KeyCode::End => app.cursor_end(),
-        KeyCode::Delete => {
-            app.clear_login_error();
-            app.delete_char_at();
+        // Everything else drives the focused field's `LineEditor` (the
+        // shared input model). `login_editor_mut` returns `None` on the
+        // checkbox fields, so typing there is a no-op. An edit clears a
+        // stale login error and persists the e-mail when opted in.
+        _ => {
+            let changed = match app.login_editor_mut() {
+                Some(ed) => crate::tui::input::common::route_line_editor(ed, key),
+                None => false,
+            };
+            if changed {
+                app.clear_login_error();
+                app.persist_email_if_saving();
+            }
         }
-        KeyCode::Backspace => {
-            app.clear_login_error();
-            app.delete_char_before();
-        }
-        KeyCode::Char(c)
-            if app.active_field != LoginField::SaveEmail
-                && app.active_field != LoginField::AutoLock
-                && app.active_field != LoginField::KeepSession =>
-        {
-            // Char input only meaningful on text fields.
-            app.clear_login_error();
-            app.insert_char(c);
-        }
-        _ => {}
     }
 }

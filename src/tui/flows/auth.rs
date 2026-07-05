@@ -48,8 +48,7 @@ pub fn handle_boot_status(app: &mut App, r: Result<VaultInfo, BwError>) {
         .server_url
         .clone()
         .unwrap_or_else(|| "https://bitwarden.com".to_string());
-    app.server_cursor = server.chars().count();
-    app.server_input = server.clone();
+    app.server_input.set(server.clone());
     app.server_committed = server;
 
     match info.status {
@@ -63,8 +62,7 @@ pub fn handle_boot_status(app: &mut App, r: Result<VaultInfo, BwError>) {
             if let Some(email) = info.user_email.clone()
                 && app.email_input.is_empty()
             {
-                app.email_cursor = email.chars().count();
-                app.email_input = email;
+                app.email_input.set(email);
             }
             app.submit(
                 InFlight::ResumeItems,
@@ -192,8 +190,7 @@ fn apply_locked_state(app: &mut App, user_email: Option<String>) {
         && !email.is_empty()
         && app.email_input.is_empty()
     {
-        app.email_cursor = email.chars().count();
-        app.email_input = email;
+        app.email_input.set(email);
     }
     app.active_field = LoginField::Password;
 }
@@ -207,7 +204,7 @@ pub fn attempt_login(app: &mut App) {
         app.login_error = true;
         return;
     }
-    if let Err(msg) = crate::domain::validation::validate_email(&app.email_input) {
+    if let Err(msg) = crate::domain::validation::validate_email(app.email_input.text()) {
         app.set_action(ActionState::Error(msg.into()));
         app.active_field = LoginField::Email;
         return;
@@ -217,11 +214,11 @@ pub fn attempt_login(app: &mut App) {
 
 /// Sends the appropriate login/unlock request to the worker.
 fn request_login(app: &mut App) {
-    let email = app.email_input.clone();
-    let password = app.password_input.clone();
+    let email = app.email_input.text().to_string();
+    let password = Zeroizing::new(app.password_input.text().to_string());
 
     if app.otp_required || app.two_factor_required {
-        let code = Zeroizing::new(app.otp_input.trim().to_string());
+        let code = Zeroizing::new(app.otp_input.text().trim().to_string());
         if app.two_factor_required {
             let method = app.two_factor_method;
             app.submit(
@@ -277,7 +274,6 @@ pub fn handle_login(app: &mut App, outcome: LoginOutcome) {
             app.otp_required = true;
             app.two_factor_required = false;
             app.otp_input.clear();
-            app.otp_cursor = 0;
             app.active_field = LoginField::Otp;
         }
         LoginOutcome::NeedsTwoFactor => {
@@ -291,7 +287,6 @@ pub fn handle_login(app: &mut App, outcome: LoginOutcome) {
             app.two_factor_method = crate::domain::TwoFactorMethod::Authenticator;
             app.otp_required = false;
             app.otp_input.clear();
-            app.otp_cursor = 0;
             app.active_field = LoginField::Otp;
         }
         LoginOutcome::Failed(err) => {
@@ -320,7 +315,6 @@ pub fn handle_login_otp(app: &mut App, r: Result<String, BwError>) {
     match r {
         Ok(key) => {
             app.otp_input.clear();
-            app.otp_cursor = 0;
             app.otp_required = false;
             app.two_factor_required = false;
             app.push_cmd(cmd, true, "verified");
@@ -339,7 +333,6 @@ pub fn handle_login_two_factor(app: &mut App, r: Result<String, BwError>) {
     match r {
         Ok(key) => {
             app.otp_input.clear();
-            app.otp_cursor = 0;
             app.otp_required = false;
             app.two_factor_required = false;
             app.push_cmd(&cmd, true, "verified");
@@ -354,7 +347,6 @@ fn fail_code(app: &mut App, cmd: &str, label: &str) {
     app.push_cmd(cmd, false, label);
     app.set_action(ActionState::Idle);
     app.otp_input.clear();
-    app.otp_cursor = 0;
     app.active_field = LoginField::Otp;
     app.login_error = true;
 }
@@ -365,14 +357,13 @@ fn on_login_success(app: &mut App, session_key: &str) {
     app.authenticated = true;
     app.session_marker = Some(Zeroizing::new(session_key.to_string()));
     if app.save_email {
-        let email = app.email_input.clone();
+        let email = app.email_input.text().to_string();
         app.settings.write(true, Some(&email));
     }
     if app.keep_session && !session_key.is_empty() {
         session_file::save(session_key);
     }
     app.password_input.clear();
-    app.password_cursor = 0;
     app.submit(
         InFlight::PostLoginItems,
         "Loading vault…",
@@ -486,7 +477,6 @@ pub fn lock_vault(app: &mut App) {
     app.organizations.clear();
     app.rebuild_caches();
     app.password_input.clear();
-    app.password_cursor = 0;
     app.active_field = LoginField::Password;
     app.push_cmd("bw lock", true, "vault locked");
     app.set_action(ActionState::Done("Locked ✓".into()));
@@ -500,7 +490,7 @@ pub fn open_confirm_logout(app: &mut App) {
 /// Persists a new server URL via `bw config server <url>` when the Server
 /// field differs from the last committed value.
 pub fn commit_server_change(app: &mut App) {
-    let url = app.server_input.trim().to_string();
+    let url = app.server_input.text().trim().to_string();
     if url.is_empty() || url == app.server_committed {
         return;
     }
@@ -518,7 +508,7 @@ pub fn commit_server_change(app: &mut App) {
 
 /// `bw config server` response.
 pub fn handle_set_server(app: &mut App, r: Result<(), BwError>) {
-    let url = app.server_input.trim().to_string();
+    let url = app.server_input.text().trim().to_string();
     match r {
         Ok(()) => {
             app.push_cmd(
@@ -532,8 +522,7 @@ pub fn handle_set_server(app: &mut App, r: Result<(), BwError>) {
         Err(e) => {
             app.cmd_err(&format!("bw config server {url}"), &e, "Set server failed");
             let cmt = app.server_committed.clone();
-            app.server_cursor = cmt.chars().count();
-            app.server_input = cmt;
+            app.server_input.set(cmt);
         }
     }
 }
@@ -558,13 +547,10 @@ pub fn handle_logout(app: &mut App, r: Result<(), BwError>) {
             app.organizations.clear();
             app.rebuild_caches();
             app.password_input.clear();
-            app.password_cursor = 0;
             app.otp_input.clear();
-            app.otp_cursor = 0;
             app.otp_required = false;
             app.two_factor_required = false;
             app.email_input.clear();
-            app.email_cursor = 0;
             app.search_query.clear();
             app.selected_index = 0;
             app.scroll_offset = 0;
