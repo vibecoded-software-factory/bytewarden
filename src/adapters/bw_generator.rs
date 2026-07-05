@@ -8,7 +8,7 @@
 
 use std::process::Command;
 
-use crate::ports::{GeneratorMode, GeneratorOptions, PasswordGeneratorPort};
+use crate::ports::{BwError, GeneratorMode, GeneratorOptions, PasswordGeneratorPort};
 
 /// Bitwarden's hard minimum lengths, mirrored here so the adapter can
 /// clamp UI input before invoking the CLI.
@@ -69,36 +69,39 @@ impl BwGeneratorAdapter {
 }
 
 impl PasswordGeneratorPort for BwGeneratorAdapter {
-    fn generate(&self, opts: &GeneratorOptions) -> Result<String, String> {
+    fn generate(&self, opts: &GeneratorOptions) -> Result<String, BwError> {
         // Validate up front: in password mode at least one character
         // class must be enabled, otherwise `bw` returns an unhelpful
         // error and we'd surface garbage.
         if opts.mode == GeneratorMode::Password
             && !(opts.uppercase || opts.lowercase || opts.numbers || opts.special)
         {
-            return Err("At least one character class must be enabled.".into());
+            return Err(BwError::Internal(
+                "At least one character class must be enabled.".into(),
+            ));
         }
 
         let args = Self::build_args(opts);
         let out = Command::new("bw")
             .args(&args)
             .output()
-            .map_err(|e| format!("Could not run bw: {e}"))?;
+            .map_err(|e| BwError::Spawn(format!("Could not run bw: {e}")))?;
 
         if out.status.success() {
             let value = String::from_utf8_lossy(&out.stdout).trim().to_string();
             if value.is_empty() {
-                Err("bw generate returned an empty value".into())
+                Err(BwError::Shape("bw generate returned an empty value".into()))
             } else {
                 Ok(value)
             }
         } else {
             let err = String::from_utf8_lossy(&out.stderr).trim().to_string();
-            Err(if err.is_empty() {
-                "bw generate failed".into()
+            let stderr = if err.is_empty() {
+                "bw generate failed".to_string()
             } else {
                 err
-            })
+            };
+            Err(BwError::exit(stderr, out.status.code()))
         }
     }
 }

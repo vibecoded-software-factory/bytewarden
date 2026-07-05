@@ -2,6 +2,7 @@
 //! parks them on the App for the read-only popup view to render.
 
 use crate::domain::{Collection, Organization};
+use crate::ports::BwError;
 use crate::tui::action::ActionState;
 use crate::tui::app::App;
 use crate::tui::screens::Screen;
@@ -25,7 +26,7 @@ pub fn open(app: &mut App) {
 
 /// `bw list organizations` response — stashes the orgs and fetches the
 /// collections.
-pub fn handle_orgs(app: &mut App, r: Result<Vec<Organization>, String>) {
+pub fn handle_orgs(app: &mut App, r: Result<Vec<Organization>, BwError>) {
     match r {
         Ok(orgs) => {
             app.push_cmd(
@@ -48,7 +49,7 @@ pub fn handle_orgs(app: &mut App, r: Result<Vec<Organization>, String>) {
 }
 
 /// `bw list collections` response — completes the popup and shows it.
-pub fn handle_collections(app: &mut App, r: Result<Vec<Collection>, String>) {
+pub fn handle_collections(app: &mut App, r: Result<Vec<Collection>, BwError>) {
     match r {
         Ok(mut cs) => {
             // Sort by `Org / Name` so the per-org slices render in a

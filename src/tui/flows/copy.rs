@@ -5,6 +5,7 @@
 //! first, then writes the code).
 
 use crate::domain::identity::{build_full_name, identity_fields};
+use crate::ports::BwError;
 use crate::tui::action::ActionState;
 use crate::tui::app::App;
 use crate::tui::reprompt::ProtectedAction;
@@ -94,7 +95,7 @@ pub fn request_copy_totp(app: &mut App, item_id: String) {
 }
 
 /// `bw get totp` response — writes the code to the clipboard.
-pub fn handle_copy_totp(app: &mut App, r: Result<String, String>) {
+pub fn handle_copy_totp(app: &mut App, r: Result<String, BwError>) {
     match r {
         Ok(v) => {
             app.push_cmd("bw get totp", true, "totp [hidden]");

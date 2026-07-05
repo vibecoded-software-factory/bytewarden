@@ -5,6 +5,7 @@
 //! matching `handle_*` runs when the response arrives and chains the
 //! next step (status → resume/login → load items → session data → vault).
 
+use crate::ports::BwError;
 use zeroize::Zeroizing;
 
 use crate::domain::item::Item;
@@ -26,7 +27,7 @@ pub fn request_resume(app: &mut App) {
 }
 
 /// Boot `bw status` response.
-pub fn handle_boot_status(app: &mut App, r: Result<VaultInfo, String>) {
+pub fn handle_boot_status(app: &mut App, r: Result<VaultInfo, BwError>) {
     let info = match r {
         Ok(i) => i,
         Err(e) => {
@@ -81,7 +82,7 @@ pub fn handle_boot_status(app: &mut App, r: Result<VaultInfo, String>) {
 }
 
 /// Resume: items listed with the seeded session key.
-pub fn handle_resume_items(app: &mut App, r: Result<Vec<Item>, String>) {
+pub fn handle_resume_items(app: &mut App, r: Result<Vec<Item>, BwError>) {
     match r {
         Ok(items) => {
             let count = items.len();
@@ -283,7 +284,7 @@ pub fn handle_login(app: &mut App, outcome: LoginOutcome) {
 }
 
 /// `bw unlock` response.
-pub fn handle_unlock(app: &mut App, r: Result<String, String>) {
+pub fn handle_unlock(app: &mut App, r: Result<String, BwError>) {
     match r {
         Ok(key) => on_login_success(app, &key),
         Err(_) => {
@@ -295,7 +296,7 @@ pub fn handle_unlock(app: &mut App, r: Result<String, String>) {
 }
 
 /// `bw login` resuming a new-device verification OTP.
-pub fn handle_login_otp(app: &mut App, r: Result<String, String>) {
+pub fn handle_login_otp(app: &mut App, r: Result<String, BwError>) {
     let cmd = "bw login *** --raw  (otp via stdin)";
     match r {
         Ok(key) => {
@@ -311,7 +312,7 @@ pub fn handle_login_otp(app: &mut App, r: Result<String, String>) {
 }
 
 /// `bw login --method N` resuming a permanent-2FA challenge.
-pub fn handle_login_two_factor(app: &mut App, r: Result<String, String>) {
+pub fn handle_login_two_factor(app: &mut App, r: Result<String, BwError>) {
     let cmd = format!(
         "bw login *** --method {} --raw  (code via stdin)",
         app.two_factor_method.as_u8()
@@ -359,7 +360,7 @@ fn on_login_success(app: &mut App, session_key: &str) {
 }
 
 /// Post-login: items loaded → fetch the secondary session data.
-pub fn handle_post_login_items(app: &mut App, r: Result<Vec<Item>, String>) {
+pub fn handle_post_login_items(app: &mut App, r: Result<Vec<Item>, BwError>) {
     match r {
         Ok(items) => {
             let count = items.len();
@@ -402,7 +403,7 @@ pub fn api_key_login(app: &mut App) {
 }
 
 /// `bw login --apikey` response (vault left Locked).
-pub fn handle_api_key(app: &mut App, r: Result<(), String>) {
+pub fn handle_api_key(app: &mut App, r: Result<(), BwError>) {
     match r {
         Ok(()) => {
             app.push_cmd("bw login --apikey", true, "logged in via API key");
@@ -426,7 +427,7 @@ pub fn sso_login(app: &mut App) {
 }
 
 /// `bw login --sso` response (vault left Locked).
-pub fn handle_sso(app: &mut App, r: Result<(), String>) {
+pub fn handle_sso(app: &mut App, r: Result<(), BwError>) {
     match r {
         Ok(()) => {
             app.push_cmd("bw login --sso", true, "logged in via SSO");
@@ -488,7 +489,7 @@ pub fn commit_server_change(app: &mut App) {
 }
 
 /// `bw config server` response.
-pub fn handle_set_server(app: &mut App, r: Result<(), String>) {
+pub fn handle_set_server(app: &mut App, r: Result<(), BwError>) {
     let url = app.server_input.trim().to_string();
     match r {
         Ok(()) => {
@@ -517,7 +518,7 @@ pub fn logout(app: &mut App) {
 }
 
 /// `bw logout` response.
-pub fn handle_logout(app: &mut App, r: Result<(), String>) {
+pub fn handle_logout(app: &mut App, r: Result<(), BwError>) {
     match r {
         Ok(()) => {
             session_file::clear();
@@ -561,7 +562,7 @@ pub fn show_fingerprint(app: &mut App) {
 }
 
 /// `bw get fingerprint me` response.
-pub fn handle_fingerprint(app: &mut App, r: Result<String, String>) {
+pub fn handle_fingerprint(app: &mut App, r: Result<String, BwError>) {
     match r {
         Ok(phrase) => {
             app.push_cmd("bw get fingerprint me", true, &phrase);

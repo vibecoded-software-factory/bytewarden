@@ -1,5 +1,6 @@
 //! Password generator port.
 
+use super::BwError;
 /// Selectable output flavour of the generator.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GeneratorMode {
@@ -76,5 +77,5 @@ pub trait PasswordGeneratorPort {
     /// Returns an error string when the underlying generator fails
     /// (e.g. the `bw` binary is missing, or all character classes are
     /// disabled at once).
-    fn generate(&self, opts: &GeneratorOptions) -> Result<String, String>;
+    fn generate(&self, opts: &GeneratorOptions) -> Result<String, BwError>;
 }

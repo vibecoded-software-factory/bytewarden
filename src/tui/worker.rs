@@ -35,17 +35,16 @@ use zeroize::Zeroizing;
 
 use crate::domain::vault_info::LoginOutcome;
 use crate::domain::{Collection, Folder, Item, Organization, TwoFactorMethod, VaultInfo};
-use crate::ports::{GeneratorOptions, ParallelSessionData, PasswordGeneratorPort, VaultPort};
+use crate::ports::{
+    BwError, GeneratorOptions, ParallelSessionData, PasswordGeneratorPort, VaultPort,
+};
 
 /// Catches a panic inside a port call and turns it into an `Err` string
 /// so one bad call can't take down the worker thread.
-fn run_caught<T>(f: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
+fn run_caught<T>(f: impl FnOnce() -> Result<T, BwError>) -> Result<T, BwError> {
     match std::panic::catch_unwind(AssertUnwindSafe(f)) {
         Ok(r) => r,
-        Err(payload) => Err(format!(
-            "internal error: {}",
-            panic_payload_to_string(payload)
-        )),
+        Err(payload) => Err(BwError::Internal(panic_payload_to_string(payload))),
     }
 }
 
@@ -175,37 +174,37 @@ pub enum WorkerRequest {
 /// envelope; the [`InFlight`] ticket disambiguates which flow they
 /// belong to.
 pub enum WorkerResponse {
-    Status(Result<VaultInfo, String>),
+    Status(Result<VaultInfo, BwError>),
     Login(LoginOutcome),
     /// unlock / login-otp / login-2fa → the new session key.
-    SessionKey(Result<String, String>),
+    SessionKey(Result<String, BwError>),
     /// api-key / sso login (vault left Locked, no key yet).
-    LoginLocked(Result<(), String>),
-    Logout(Result<(), String>),
-    SetServer(Result<(), String>),
-    Items(Result<Vec<Item>, String>),
-    Trash(Result<Vec<Item>, String>),
+    LoginLocked(Result<(), BwError>),
+    Logout(Result<(), BwError>),
+    SetServer(Result<(), BwError>),
+    Items(Result<Vec<Item>, BwError>),
+    Trash(Result<Vec<Item>, BwError>),
     /// Shared envelope for mutating calls returning `()` — sync, delete
     /// item, restore item, delete folder, export, import, move item,
     /// delete/download attachment. Routed by [`InFlight`].
-    Unit(Result<(), String>),
-    Totp(Result<String, String>),
-    ItemJson(Result<Zeroizing<String>, String>),
-    Exposed(Result<u32, String>),
+    Unit(Result<(), BwError>),
+    Totp(Result<String, BwError>),
+    ItemJson(Result<Zeroizing<String>, BwError>),
+    Exposed(Result<u32, BwError>),
     /// create_item / edit_item / upload_attachment → the updated item.
     /// Boxed: `Item` is ~900 bytes and would bloat every response moved
     /// across the channel (`clippy::large_enum_variant`). The dispatcher
     /// unboxes before calling the handler.
-    Item(Result<Box<Item>, String>),
+    Item(Result<Box<Item>, BwError>),
     /// create_folder / edit_folder → the folder.
-    Folder(Result<Folder, String>),
-    Folders(Result<Vec<Folder>, String>),
-    Orgs(Result<Vec<Organization>, String>),
-    Collections(Result<Vec<Collection>, String>),
-    Fingerprint(Result<String, String>),
-    SendUrl(Result<String, String>),
+    Folder(Result<Folder, BwError>),
+    Folders(Result<Vec<Folder>, BwError>),
+    Orgs(Result<Vec<Organization>, BwError>),
+    Collections(Result<Vec<Collection>, BwError>),
+    Fingerprint(Result<String, BwError>),
+    SendUrl(Result<String, BwError>),
     SessionData(ParallelSessionData),
-    Generated(Result<String, String>),
+    Generated(Result<String, BwError>),
     /// `bw lock` finished — fire-and-forget, routed by variant and ignored.
     Locked,
 }
@@ -510,10 +509,10 @@ fn run_worker(
                     Err(p) => {
                         let msg = panic_payload_to_string(p);
                         ParallelSessionData {
-                            folders: Err(msg.clone()),
-                            organizations: Err(msg.clone()),
-                            collections: Err(msg.clone()),
-                            import_formats: Err(msg),
+                            folders: Err(BwError::Internal(msg.clone())),
+                            organizations: Err(BwError::Internal(msg.clone())),
+                            collections: Err(BwError::Internal(msg.clone())),
+                            import_formats: Err(BwError::Internal(msg)),
                         }
                     }
                 };
@@ -546,7 +545,7 @@ mod tests {
     }
 
     impl VaultPort for PanicOnce {
-        fn status(&mut self) -> Result<VaultInfo, String> {
+        fn status(&mut self) -> Result<VaultInfo, BwError> {
             let prev = self.n.fetch_add(1, Ordering::SeqCst);
             if prev == 0 {
                 panic!("boom");
@@ -561,7 +560,7 @@ mod tests {
         fn login(&mut self, _: &str, _: &str) -> LoginOutcome {
             LoginOutcome::Failed("x".into())
         }
-        fn login_with_otp(&mut self, _: &str, _: &str, _: &str) -> Result<String, String> {
+        fn login_with_otp(&mut self, _: &str, _: &str, _: &str) -> Result<String, BwError> {
             Ok(String::new())
         }
         fn login_with_two_factor(
@@ -570,101 +569,101 @@ mod tests {
             _: &str,
             _: &str,
             _: TwoFactorMethod,
-        ) -> Result<String, String> {
+        ) -> Result<String, BwError> {
             Ok(String::new())
         }
-        fn login_with_api_key(&mut self) -> Result<(), String> {
+        fn login_with_api_key(&mut self) -> Result<(), BwError> {
             Ok(())
         }
-        fn login_with_sso(&mut self) -> Result<(), String> {
+        fn login_with_sso(&mut self) -> Result<(), BwError> {
             Ok(())
         }
-        fn unlock(&mut self, _: &str) -> Result<String, String> {
+        fn unlock(&mut self, _: &str) -> Result<String, BwError> {
             Ok(String::new())
         }
         fn lock(&mut self) {}
-        fn logout(&mut self) -> Result<(), String> {
+        fn logout(&mut self) -> Result<(), BwError> {
             Ok(())
         }
         fn session_key(&self) -> Option<&str> {
             None
         }
-        fn set_server(&mut self, _: &str) -> Result<(), String> {
+        fn set_server(&mut self, _: &str) -> Result<(), BwError> {
             Ok(())
         }
-        fn list_items(&mut self) -> Result<Vec<Item>, String> {
+        fn list_items(&mut self) -> Result<Vec<Item>, BwError> {
             Ok(Vec::new())
         }
-        fn list_trash(&mut self) -> Result<Vec<Item>, String> {
+        fn list_trash(&mut self) -> Result<Vec<Item>, BwError> {
             Ok(Vec::new())
         }
-        fn sync(&mut self) -> Result<(), String> {
+        fn sync(&mut self) -> Result<(), BwError> {
             Ok(())
         }
-        fn get_totp(&mut self, _: &str) -> Result<String, String> {
+        fn get_totp(&mut self, _: &str) -> Result<String, BwError> {
             Ok(String::new())
         }
-        fn get_item_json(&mut self, _: &str) -> Result<Zeroizing<String>, String> {
+        fn get_item_json(&mut self, _: &str) -> Result<Zeroizing<String>, BwError> {
             Ok(Zeroizing::new(String::new()))
         }
-        fn check_exposed(&mut self, _: &str) -> Result<u32, String> {
+        fn check_exposed(&mut self, _: &str) -> Result<u32, BwError> {
             Ok(0)
         }
-        fn create_item(&mut self, _: &str) -> Result<Item, String> {
-            Err("no".into())
+        fn create_item(&mut self, _: &str) -> Result<Item, BwError> {
+            Err(BwError::Internal("no".into()))
         }
-        fn edit_item(&mut self, _: &str, _: &str) -> Result<Item, String> {
-            Err("no".into())
+        fn edit_item(&mut self, _: &str, _: &str) -> Result<Item, BwError> {
+            Err(BwError::Internal("no".into()))
         }
-        fn delete_item(&mut self, _: &str, _: bool) -> Result<(), String> {
+        fn delete_item(&mut self, _: &str, _: bool) -> Result<(), BwError> {
             Ok(())
         }
-        fn restore_item(&mut self, _: &str) -> Result<(), String> {
+        fn restore_item(&mut self, _: &str) -> Result<(), BwError> {
             Ok(())
         }
-        fn list_folders(&mut self) -> Result<Vec<Folder>, String> {
+        fn list_folders(&mut self) -> Result<Vec<Folder>, BwError> {
             Ok(Vec::new())
         }
-        fn create_folder(&mut self, _: &str) -> Result<Folder, String> {
-            Err("no".into())
+        fn create_folder(&mut self, _: &str) -> Result<Folder, BwError> {
+            Err(BwError::Internal("no".into()))
         }
-        fn edit_folder(&mut self, _: &str, _: &str) -> Result<Folder, String> {
-            Err("no".into())
+        fn edit_folder(&mut self, _: &str, _: &str) -> Result<Folder, BwError> {
+            Err(BwError::Internal("no".into()))
         }
-        fn delete_folder(&mut self, _: &str) -> Result<(), String> {
+        fn delete_folder(&mut self, _: &str) -> Result<(), BwError> {
             Ok(())
         }
-        fn export(&mut self, _: &str, _: &str) -> Result<(), String> {
+        fn export(&mut self, _: &str, _: &str) -> Result<(), BwError> {
             Ok(())
         }
-        fn get_fingerprint(&mut self) -> Result<String, String> {
+        fn get_fingerprint(&mut self) -> Result<String, BwError> {
             Ok(String::new())
         }
-        fn import(&mut self, _: &str, _: &str) -> Result<(), String> {
+        fn import(&mut self, _: &str, _: &str) -> Result<(), BwError> {
             Ok(())
         }
-        fn list_import_formats(&mut self) -> Result<Vec<String>, String> {
+        fn list_import_formats(&mut self) -> Result<Vec<String>, BwError> {
             Ok(Vec::new())
         }
-        fn move_item(&mut self, _: &str, _: &str, _: &[String]) -> Result<(), String> {
+        fn move_item(&mut self, _: &str, _: &str, _: &[String]) -> Result<(), BwError> {
             Ok(())
         }
-        fn upload_attachment(&mut self, _: &str, _: &str) -> Result<Item, String> {
-            Err("no".into())
+        fn upload_attachment(&mut self, _: &str, _: &str) -> Result<Item, BwError> {
+            Err(BwError::Internal("no".into()))
         }
-        fn download_attachment(&mut self, _: &str, _: &str, _: &str) -> Result<(), String> {
+        fn download_attachment(&mut self, _: &str, _: &str, _: &str) -> Result<(), BwError> {
             Ok(())
         }
-        fn delete_attachment(&mut self, _: &str, _: &str) -> Result<(), String> {
+        fn delete_attachment(&mut self, _: &str, _: &str) -> Result<(), BwError> {
             Ok(())
         }
-        fn send_text(&mut self, _: &str, _: u8, _: &str) -> Result<String, String> {
+        fn send_text(&mut self, _: &str, _: u8, _: &str) -> Result<String, BwError> {
             Ok(String::new())
         }
-        fn list_organizations(&mut self) -> Result<Vec<Organization>, String> {
+        fn list_organizations(&mut self) -> Result<Vec<Organization>, BwError> {
             Ok(Vec::new())
         }
-        fn list_collections(&mut self) -> Result<Vec<Collection>, String> {
+        fn list_collections(&mut self) -> Result<Vec<Collection>, BwError> {
             Ok(Vec::new())
         }
         fn parallel_session_data(&mut self) -> ParallelSessionData {
@@ -679,7 +678,7 @@ mod tests {
 
     struct NoopGen;
     impl PasswordGeneratorPort for NoopGen {
-        fn generate(&self, _: &GeneratorOptions) -> Result<String, String> {
+        fn generate(&self, _: &GeneratorOptions) -> Result<String, BwError> {
             Ok(String::new())
         }
     }
@@ -697,7 +696,7 @@ mod tests {
 
         tx.send(WorkerRequest::Status).unwrap();
         match rx.recv().unwrap() {
-            WorkerResponse::Status(Err(msg)) => assert!(msg.contains("boom")),
+            WorkerResponse::Status(Err(BwError::Internal(msg))) => assert!(msg.contains("boom")),
             _ => panic!("expected Err on first call"),
         }
 

@@ -10,6 +10,7 @@
 //! action triggers its own popup. That matches the official Bitwarden
 //! GUI and the user's stated preference.
 
+use crate::ports::BwError;
 use zeroize::Zeroizing;
 
 use crate::tui::action::ActionState;
@@ -89,7 +90,7 @@ pub fn verify_and_run(app: &mut App) {
 
 /// `bw unlock` (reprompt) response. On success runs the deferred action;
 /// on failure re-opens the error strip for a retry.
-pub fn handle_unlock(app: &mut App, r: Result<String, String>) {
+pub fn handle_unlock(app: &mut App, r: Result<String, BwError>) {
     match r {
         Ok(key) => {
             // bw issued a fresh session key — cache it for redaction.
