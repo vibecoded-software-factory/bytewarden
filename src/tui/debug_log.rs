@@ -99,58 +99,15 @@ fn iso_utc_now() -> String {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0);
-    let (y, m, d, hh, mm, ss) = unix_to_civil(secs);
-    format!("{y:04}-{m:02}-{d:02}T{hh:02}:{mm:02}:{ss:02}Z")
-}
-
-/// Converts a unix-epoch second count to `(year, month, day, hour,
-/// minute, second)`. UTC, proleptic Gregorian.
-fn unix_to_civil(secs: i64) -> (i32, u32, u32, u32, u32, u32) {
-    // Time of day.
-    let secs_per_day: i64 = 86_400;
-    let days = secs.div_euclid(secs_per_day);
-    let tod = secs.rem_euclid(secs_per_day);
-    let hh = (tod / 3600) as u32;
-    let mm = ((tod % 3600) / 60) as u32;
-    let ss = (tod % 60) as u32;
-
-    // Date — Hinnant's "days_from_civil" inverted.
-    let z = days + 719_468;
-    let era = z.div_euclid(146_097);
-    let doe = (z - era * 146_097) as u32; // 0..=146096
-    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
-    let y = (yoe as i64 + era * 400) as i32;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100); // 0..=365
-    let mp = (5 * doy + 2) / 153; // 0..=11
-    let d = doy - (153 * mp + 2) / 5 + 1;
-    let m = if mp < 10 { mp + 3 } else { mp - 9 };
-    let y = if m <= 2 { y + 1 } else { y };
-    (y, m, d, hh, mm, ss)
+    crate::domain::timefmt::unix_to_iso_utc(secs)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[test]
-    fn unix_to_civil_known_values() {
-        // Three independently-verifiable epoch values.
-        // 1970-01-01T00:00:00Z = 0 (the unix epoch itself).
-        assert_eq!(unix_to_civil(0), (1970, 1, 1, 0, 0, 0));
-        // 2000-01-01T00:00:00Z = 946684800.
-        assert_eq!(unix_to_civil(946_684_800), (2000, 1, 1, 0, 0, 0));
-        // 2038-01-19T03:14:07Z — the i32 overflow wall (Y2K38). We
-        // pass it as i64 so the algorithm copes.
-        assert_eq!(unix_to_civil(2_147_483_647), (2038, 1, 19, 3, 14, 7));
-    }
-
-    #[test]
-    fn unix_to_civil_handles_leap_day() {
-        // 2024-02-29T00:00:00Z — leap day. 2024 is divisible by 4 and
-        // not by 100, so it is a leap year.
-        let secs = 1_709_164_800;
-        assert_eq!(unix_to_civil(secs), (2024, 2, 29, 0, 0, 0));
-    }
+    // The civil-date algorithm now lives in `domain::timefmt` and is
+    // tested there; here we only cover the debug-log-specific helpers.
 
     #[test]
     fn iso_format_has_expected_shape() {
