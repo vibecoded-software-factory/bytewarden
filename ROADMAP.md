@@ -110,14 +110,17 @@ one branch → PR → squash-merge to `dev`.
     read display vs editable form with per-field kind/cursor), high-risk to do
     blind. The copy-order divergence (the concrete bug) is fixed and pinned;
     the broader merge waits for a runtime-verifiable moment.
-- [~] **Batch 10 — Background lane. (Deferred — low ROI for bytewarden.)**
-  The second worker lane exists in the north star to serve the *idle inbox
-  resync* and the *push stream* — **bytewarden has neither** (the vault only
-  changes via the user's own actions or an explicit sync). The post-mutation
-  silent reloads gate input only briefly, right after a user action. A second
-  worker thread + variant-based response routing carries real threading risk
-  for a marginal benefit, so it's parked. Revisit if bytewarden ever adds a
-  periodic auto-sync.
+- [✗] **Batch 10 — Background lane. (Won't implement — architecturally
+  blocked.)** Two reasons: (1) the second lane exists in the north star to
+  serve the *idle resync* + *push stream*, and bytewarden has neither (the
+  vault only changes via user actions / explicit sync); (2) more decisively,
+  bytewarden's **session key is per-adapter** (stored in the user-lane
+  `BwCliAdapter` after `unlock`), whereas the north star's backend is a local
+  service with no per-adapter session. A second worker with its own adapter
+  would have **no session** and couldn't `list items`; wiring a shared
+  session across two threads is real complexity for a marginal (brief,
+  post-action) input-gating win. Not worth it — parked unless a periodic
+  auto-sync is ever added (which would justify the plumbing).
 
 ## Theme, responsiveness, robustness
 
