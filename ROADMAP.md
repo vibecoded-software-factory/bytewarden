@@ -60,11 +60,16 @@ one branch → PR → squash-merge to `dev`.
     `draw_picker_modal` → Batch 14 (the command palette needs it);
     `list_table` when a second multi-column table appears (today the vault
     list is the only one).
-- [ ] **Batch 6 — 3-tier borders + status strip.** `disabled_block` (the
-  `muted` "unavailable" tier) alongside focused/available. `draw_status_strip`:
-  mode badge · condition badges (`⚠ WORKER DEAD`) · feedback · hint · `F1`
-  anchor. Sticky errors (cleared by the next keypress; successes keep the
-  ~1.5 s fuse).
+- [x] **Batch 6 — Condition badge + sticky errors.** Added the persistent
+  **`⚠ WORKER DEAD`** condition badge to the `─[0]-Status` panel (survives
+  keypresses; completes the Batch 3 worker-dead story). Made **error toasts
+  sticky** — they persist until the next keypress clears them
+  (`input::handle_events`); success toasts keep the ~1.5 s fuse (`tick_state`).
+  - *Not applicable to bytewarden* (dropped, not deferred): the **nvim-style
+    mode badge** (bytewarden navigates by focused panel, not editor modes) and
+    the **3-tier `disabled_block`** (every vault panel is always reachable, so
+    there's no "unavailable" tier). UX.md reconciled to the real layout
+    (sidebar `[0]-Status` + hint bar, no bottom mode strip).
 - [ ] **Batch 7 — Keybinding gradient.** bare letter = action on the focused
   list · `Shift` = destructive/loud · `Ctrl` = global · `Alt` = panel jump +
   compose verbs · `/` = search. Resolve the current `Alt+S/L/R/D` collisions.

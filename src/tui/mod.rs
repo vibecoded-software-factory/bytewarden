@@ -161,18 +161,23 @@ fn poll_timeout(state: &ActionState, busy: bool) -> Duration {
     }
 }
 
-/// Advances the spinner or expires Done/Error feedback after
+/// Advances the spinner or expires the success toast after
 /// [`FEEDBACK_TICKS`] ticks (~1.5 s).
+///
+/// **Errors are sticky** (mutt/lazygit): a failure is a condition the
+/// user must read, not a 1.5 s event, so it persists until the next
+/// keypress clears it (`input::handle_events`). Success toasts keep the
+/// short fuse.
 fn tick_state(app: &mut App, done_ticks: &mut u8) {
     match &app.action_state {
         ActionState::Running(_) => app.tick_action(),
-        ActionState::Done(_) | ActionState::Error(_) => {
+        ActionState::Done(_) => {
             *done_ticks += 1;
             if *done_ticks >= FEEDBACK_TICKS {
                 app.set_action(ActionState::Idle);
                 *done_ticks = 0;
             }
         }
-        ActionState::Idle => {}
+        ActionState::Error(_) | ActionState::Idle => {}
     }
 }

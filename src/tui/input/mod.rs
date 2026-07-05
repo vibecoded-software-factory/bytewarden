@@ -112,6 +112,13 @@ pub fn handle_events(app: &mut App, ev: Event) {
             if key.kind != KeyEventKind::Press {
                 return;
             }
+            // Sticky errors clear on the next keypress (mutt/lazygit): a
+            // failure is a condition the user must read, not a 1.5 s
+            // event. The clearing key still does its thing below. (The
+            // `⚠ WORKER DEAD` condition badge is separate and persists.)
+            if matches!(app.action_state, crate::tui::action::ActionState::Error(_)) {
+                app.set_action(crate::tui::action::ActionState::Idle);
+            }
             // Global quit shortcut.
             if key.code == KeyCode::Char('c') && key.modifiers == KeyModifiers::CONTROL {
                 app.should_quit = true;

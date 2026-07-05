@@ -29,11 +29,14 @@ replaced by the centered "terminal too small" notice
 {MIN_W}×{MIN_H} (currently {w}×{h})` line, and a `dim` `Ctrl+C to quit` hint.
 
 **Vault** (`view/vault.rs`) is the reference layout: a 2-column body over the
-shared command log and status strip.
+shared command log and hint bar.
 
 - **Left sidebar** (content-sized, ~26 %): three stacked panels, each box
   hugging its rows so the column stays compact —
-  - `─[0]-Status` — the feedback line (spinner / ✓ / ✗), read-only chrome.
+  - `─[0]-Status` — the feedback line (spinner / ✓ / ✗) **and the persistent
+    `⚠ WORKER DEAD` condition badge** (`error`-bold; shown whenever the worker
+    thread has died until restart, unlike the sticky error toast a keypress
+    clears). Read-only chrome.
   - `─[1]-Folders` — "All folders", "(No folder)", a separator, then `📁`
     folders and `👥 Org / Collection` rows, each with an item count from the
     precomputed count maps.
@@ -41,12 +44,21 @@ shared command log and status strip.
     Identity, Note, SSH Key, separator, Trash) with per-row counts + icons.
 - **Right main** (~74 %): `─[/]-Search` (3 rows) · `─[3]-Vault` list (fills) ·
   the `─[4]-Command log`.
-- **Bottom**: the command log (responsive height) and the **status strip**
-  (mode badge · condition badges · feedback / per-focus hint · `F1 help`
-  anchored right).
+- **Bottom**: the command log (responsive height) and the **per-focus hint
+  bar** (`widgets::render_cmd_bar_with_help`: short hints on the left,
+  **`F1 help` anchored right and never truncated**).
+
+**Feedback lifetime.** Success toasts (`✓`) auto-clear after ~1.5 s; **error
+toasts are sticky** — they persist until the next keypress clears them
+(mutt/lazygit), because a failure is a condition to read, not a flash. The
+`⚠ WORKER DEAD` badge is a separate *condition* indicator: it survives
+keypresses and only goes away on restart.
+
+There is **no nvim-style mode badge** — bytewarden navigates by focused panel
+(`0`–`4` / `Tab`), not by editor modes.
 
 Other screens (Login, Detail, Create, Generator) build their own `Layout` but
-reuse the same chrome (`titled_block`, field cards, status strip). Every popup
+reuse the same chrome (`titled_block`, field cards, hint bar). Every popup
 screen draws its **origin screen underneath** and overlays a centered popup —
 the router does this explicitly (e.g. `ConfirmDelete` draws `vault` then the
 popup; `AttachmentUpload` draws `detail` then the popup; the reprompt and
@@ -154,8 +166,10 @@ square via `titled_block`; a new overlay/card is rounded via `rounded_block`.
 - `widgets::editor_spans` / `editor_spans_masked` / `editor_lines` — the one
   text-input renderer over a `LineEditor` (masked `●` for secret fields —
   the login master password / OTP, detail hidden fields until reveal).
-- `widgets::draw_cmd_log` / `widgets::draw_status_strip` — the command-log
-  panel and the bottom feedback/hint strip.
+- `widgets::render_cmd_bar_with_help` — the bottom per-focus hint bar (hints
+  left, `F1 help` anchored right); popups use the plain `render_cmd_bar`. The
+  command log + `─[0]-Status` feedback panel are rendered inline in
+  `view/vault.rs` (`render_cmd_log` / `render_status`).
 - `widgets::draw_picker_modal(frame, theme, PickerModal { .. })` — **the**
   centered query/list overlay skeleton every picker renders through: `Clear`
   + rounded accent block + emphasized title (with its live count) + optional
