@@ -1,5 +1,7 @@
 //! Import-popup state.
 
+use crate::domain::LineEditor;
+
 /// Which control of the import popup currently has focus.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ImportFocus {
@@ -23,8 +25,7 @@ pub struct ImportState {
     /// Index of the currently-selected format inside `formats`.
     pub format_idx: usize,
     /// Filesystem path to the file `bw` will import.
-    pub path: String,
-    pub path_cursor: usize,
+    pub path: LineEditor,
     pub focus: ImportFocus,
 }
 
@@ -48,8 +49,7 @@ impl ImportState {
         Self {
             formats,
             format_idx,
-            path: String::new(),
-            path_cursor: 0,
+            path: LineEditor::new(),
             focus: ImportFocus::Path,
         }
     }

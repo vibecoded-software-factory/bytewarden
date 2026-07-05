@@ -7,6 +7,7 @@
 pub mod assign_collections;
 pub mod attachment_download;
 pub mod attachment_upload;
+pub mod common;
 pub mod confirm;
 pub mod confirm_delete_attachment;
 pub mod create;

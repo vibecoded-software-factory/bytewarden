@@ -27,12 +27,20 @@ one branch → PR → squash-merge to `dev`.
   bare `begin` (silent reloads); the fire-and-forget lock stays a bare send.
   New unit tests cover the single-in-flight / worker-dead / dispatch
   invariants.
-- [ ] **Batch 4 — `LineEditor` + shared input.** `domain::LineEditor`
-  (UTF-8-safe byte cursor, word ops `Ctrl+W`/`Ctrl+U`/`Ctrl+←→`/`Ctrl+A`/
-  `Ctrl+E`, `ZeroizeOnDrop`). `input::common`: `route_line_editor`,
-  `search_key`, `list_nav`/`list_nav_arrows`, `confirm_key` + `run_confirm`,
-  `busy_blocks`, `cycle_focus`. Delete the ~8 copies of the char-index editor
-  in the popups + the login variant.
+- [x] **Batch 4 — `LineEditor` + shared input.** Added `domain::LineEditor`
+  (UTF-8-safe char-index cursor, word ops `Ctrl+W`/`Ctrl+U`/`Ctrl+←→`/
+  `Ctrl+A`/`Ctrl+E`, `ZeroizeOnDrop`) and `input::common::route_line_editor`.
+  Migrated all **8 popup** text inputs (export · import · send · reprompt ·
+  folder-name · rename-field · attachment up/download) onto it, deleting the
+  8 hand-rolled char-index editors; `widgets::editor_line` renders from the
+  editor. LineEditor + router are unit-tested.
+  - *Deferred:* the **login** fields (`server`/`email`/`password`/`otp`) keep
+    their `app.rs` editors for now — they carry side-effects (save-email
+    persistence, 2FA method cycling, password masking) that warrant a
+    separate pass; folded into a later input batch.
+  - *Deferred:* the remaining `input::common` helpers (`search_key`,
+    `list_nav`, `confirm_key`/`run_confirm`) land with Batches 5/7 where the
+    list/confirm/search surfaces are reworked.
 
 ## UI system
 

@@ -12,7 +12,7 @@ use ratatui::{
 };
 
 use crate::tui::app::App;
-use crate::tui::view::widgets::{center_rect, cursor_line, rounded_block};
+use crate::tui::view::widgets::{center_rect, editor_line, rounded_block};
 
 /// Renders the rename popup. No-op when no rename is in flight.
 pub fn draw_popup(frame: &mut Frame, area: Rect, app: &App) {
@@ -58,7 +58,7 @@ pub fn draw_popup(frame: &mut Frame, area: Rect, app: &App) {
             Span::styled("  type a new name", Style::default().fg(t.placeholder)),
         ])
     } else {
-        cursor_line(&state.input, state.cursor, t)
+        editor_line(&state.input, t)
     };
     frame.render_widget(
         Paragraph::new(line).block(rounded_block(Style::default().fg(t.accent))),

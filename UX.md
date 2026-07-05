@@ -227,8 +227,8 @@ it in sync with `README.md`.
 
 ## Inline editing & the text-input model
 
-Every text input is a `domain::LineEditor` (UTF-8-safe byte cursor on a char
-boundary; readline word ops `Ctrl+W`/`Ctrl+U`/`Ctrl+←/→`/`Ctrl+A`/`Ctrl+E`
+Every text input is a `domain::LineEditor` (UTF-8-safe char-index cursor;
+readline word ops `Ctrl+W`/`Ctrl+U`/`Ctrl+←/→`/`Ctrl+A`/`Ctrl+E`
 wired once in `route_line_editor` so every input inherits them; `ZeroizeOnDrop`
 because any input can hold a secret). Detail / edit / create render one
 `EditField` per field card. Conventions: `Tab`/`↑↓` move between fields, reveal

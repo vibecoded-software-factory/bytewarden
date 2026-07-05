@@ -10,7 +10,7 @@ use ratatui::{
 
 use crate::tui::app::App;
 use crate::tui::import::ImportFocus;
-use crate::tui::view::widgets::{center_rect, cursor_line, rounded_block};
+use crate::tui::view::widgets::{center_rect, editor_line, rounded_block};
 
 const FORMAT_HINT_FOCUSED: &str = "  (← → to cycle)";
 const FORMAT_HINT_BLURRED: &str = "  (Tab to focus, ← → to cycle)";
@@ -98,7 +98,7 @@ pub fn draw_popup(frame: &mut Frame, area: Rect, app: &App) {
                 Span::styled("  /path/to/export.json", Style::default().fg(t.placeholder)),
             ])
         } else {
-            cursor_line(&state.path, state.path_cursor, t)
+            editor_line(&state.path, t)
         }
     } else {
         Line::from(Span::styled(

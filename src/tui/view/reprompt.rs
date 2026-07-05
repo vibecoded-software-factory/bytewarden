@@ -70,7 +70,7 @@ pub fn draw_popup(frame: &mut Frame, area: Rect, app: &App) {
 
     // Always rendered masked — the popup never reveals the typed
     // password, even with F2.
-    let dots = "●".repeat(state.input.chars().count());
+    let dots = "●".repeat(state.input.len_chars());
     let line = if state.input.is_empty() {
         Line::from(vec![
             Span::styled("█", Style::default().fg(t.accent)),

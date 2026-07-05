@@ -9,7 +9,7 @@ use ratatui::{
 };
 
 use crate::tui::app::App;
-use crate::tui::view::widgets::{center_rect, cursor_line, rounded_block};
+use crate::tui::view::widgets::{center_rect, editor_line, rounded_block};
 
 /// Renders the attachment-upload popup over the detail screen.
 pub fn draw_popup(frame: &mut Frame, area: Rect, app: &App) {
@@ -66,7 +66,7 @@ pub fn draw_popup(frame: &mut Frame, area: Rect, app: &App) {
             Span::styled("  /path/to/file.pdf", Style::default().fg(t.placeholder)),
         ])
     } else {
-        cursor_line(&state.path, state.path_cursor, t)
+        editor_line(&state.path, t)
     };
     frame.render_widget(
         Paragraph::new(line).block(rounded_block(Style::default().fg(t.accent))),

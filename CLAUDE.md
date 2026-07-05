@@ -240,8 +240,8 @@ vim layer is a contract: the `Esc` chain backs out one layer at a time and
 
 ## The text-input model
 
-Every text input is a `domain::LineEditor` (UTF-8-safe byte cursor on a char
-boundary; `insert`/`backspace`/`delete`/`left`/`right`/`home`/`end`/`set`/
+Every text input is a `domain::LineEditor` (UTF-8-safe char-index cursor;
+`insert`/`backspace`/`delete`/`left`/`right`/`home`/`end`/`set`/
 `clear` + readline word ops, `ZeroizeOnDrop` because inputs can hold secrets).
 Handlers feed keys through `input::common::route_line_editor` (returns `true`
 when the text changed → rebuild a filter) or, for the search box,

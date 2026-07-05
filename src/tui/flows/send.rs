@@ -49,8 +49,8 @@ pub fn commit(app: &mut App) {
     let Some(state) = app.send_create.as_ref() else {
         return;
     };
-    let name = state.name.trim().to_string();
-    let content = state.content.clone();
+    let name = state.name.text().trim().to_string();
+    let content = state.content.text().to_string();
     let days = state.days;
     if name.is_empty() {
         app.set_action(ActionState::Error("Name cannot be empty.".into()));
