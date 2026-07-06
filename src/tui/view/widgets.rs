@@ -2,7 +2,7 @@
 
 use ratatui::{
     Frame,
-    layout::{Constraint, Layout, Rect},
+    layout::{Constraint, Layout, Margin, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{
@@ -27,23 +27,37 @@ pub fn cmdlog_height(total: u16) -> u16 {
 
 /// Draws a dim vertical scrollbar on the right border of a bordered
 /// `area` — **only when the content overflows** the visible rows, so
-/// short lists stay clean. Built on Ratatui's `Scrollbar` so the glyphs
-/// and thumb sizing are correct. `content_len` is the total row count,
-/// `offset` the index of the first visible row.
-pub fn draw_scrollbar(frame: &mut Frame, area: Rect, content_len: usize, offset: usize, t: &Theme) {
+/// short lists stay clean. `content_len` is the total row count and
+/// `selected` is the index of the **current (selected) row**.
+///
+/// Two subtleties Ratatui's `Scrollbar` forces:
+/// - It only puts the thumb at the very bottom when `position ==
+///   content_length - 1`, so we feed it the **selection index** (which
+///   spans `0..=len-1`), not the top-of-viewport offset (which tops out
+///   at `len - viewport` and would leave the thumb short of the end).
+/// - Rendered over the full block rect it paints the rounded corners; we
+///   inset the track by one row top and bottom so it sits *between* the
+///   borders instead of overrunning them.
+pub fn draw_scrollbar(frame: &mut Frame, area: Rect, content_len: usize, selected: usize, t: &Theme) {
     let viewport = area.height.saturating_sub(2) as usize; // inside the borders
     if viewport == 0 || content_len <= viewport {
         return;
     }
     let mut state = ScrollbarState::new(content_len)
         .viewport_content_length(viewport)
-        .position(offset);
+        .position(selected);
     let sb = Scrollbar::new(ScrollbarOrientation::VerticalRight)
         .thumb_style(Style::default().fg(t.dim))
         .track_style(Style::default().fg(t.muted))
         .begin_symbol(None)
         .end_symbol(None);
-    frame.render_stateful_widget(sb, area, &mut state);
+    // Inset one row top/bottom so the track lands between the horizontal
+    // borders and never overwrites the rounded corners.
+    let track = area.inner(Margin {
+        horizontal: 0,
+        vertical: 1,
+    });
+    frame.render_stateful_widget(sb, track, &mut state);
 }
 
 /// Returns the accent color when focused, the inactive color otherwise.

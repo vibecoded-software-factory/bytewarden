@@ -514,8 +514,9 @@ fn render_list(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         area,
         &mut state,
     );
-    // Scroll cue on the right border when the list overflows.
-    draw_scrollbar(frame, area, flen, app.vault.scroll_offset, t);
+    // Scroll cue on the right border when the list overflows. Driven by
+    // the selection (which reaches both ends) rather than the top offset.
+    draw_scrollbar(frame, area, flen, sel.unwrap_or(0), t);
 }
 
 fn render_cmd_log(frame: &mut Frame, app: &App, area: ratatui::layout::Rect, cmd_h: u16) {
