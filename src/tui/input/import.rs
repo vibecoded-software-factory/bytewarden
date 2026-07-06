@@ -6,6 +6,20 @@ use crate::tui::app::App;
 use crate::tui::flows::import::{cancel, commit, focus_step};
 use crate::tui::import::ImportFocus;
 
+/// Click: focus the field under the pointer.
+pub fn mouse(app: &mut App, col: u16, row: u16) {
+    let Some(idx) = crate::tui::view::widgets::field_hit_at(col, row) else {
+        return;
+    };
+    if let Some(s) = app.import.as_mut() {
+        s.focus = if idx == 0 {
+            ImportFocus::Format
+        } else {
+            ImportFocus::Path
+        };
+    }
+}
+
 /// Dispatches a single key event on the import popup.
 pub fn handle(app: &mut App, key: KeyEvent) {
     match key.code {

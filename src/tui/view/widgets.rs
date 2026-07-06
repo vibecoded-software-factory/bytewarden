@@ -31,6 +31,34 @@ thread_local! {
     /// on it generically — the same pattern as the scroll registry.
     static BUTTONS: std::cell::RefCell<Vec<(Rect, ClickAction)>> =
         const { std::cell::RefCell::new(Vec::new()) };
+
+    /// Frame-local **form-field hit registry**: a popup form records each of
+    /// its field rects + a small field index here as it draws, and its mouse
+    /// handler maps the index back to its own focus enum. Shared because only
+    /// one popup form draws per frame; cleared each frame by
+    /// [`reset_scroll_regions`].
+    static FIELD_HITS: std::cell::RefCell<Vec<(Rect, usize)>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// Records a clickable form-field rect → its index (see [`FIELD_HITS`]).
+pub fn register_field_hit(rect: Rect, idx: usize) {
+    if rect.width > 0 && rect.height > 0 {
+        FIELD_HITS.with(|h| h.borrow_mut().push((rect, idx)));
+    }
+}
+
+/// The form-field index under `(column, row)`, if any.
+pub fn field_hit_at(column: u16, row: u16) -> Option<usize> {
+    FIELD_HITS.with(|h| {
+        h.borrow()
+            .iter()
+            .rev()
+            .find(|(r, _)| {
+                column >= r.x && column < r.x + r.width && row >= r.y && row < r.y + r.height
+            })
+            .map(|(_, i)| *i)
+    })
 }
 
 /// A semantic action a rendered "button" triggers on click — the mouse twin of
@@ -72,6 +100,7 @@ pub fn reset_scroll_regions() {
     SCROLL_REGIONS.with(|s| s.borrow_mut().clear());
     MODAL_RECT.with(|m| *m.borrow_mut() = None);
     BUTTONS.with(|b| b.borrow_mut().clear());
+    FIELD_HITS.with(|h| h.borrow_mut().clear());
 }
 
 /// Records a clickable button for this frame (rect + the action it triggers).
