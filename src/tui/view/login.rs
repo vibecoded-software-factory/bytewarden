@@ -2,7 +2,7 @@
 
 use ratatui::{
     Frame,
-    layout::{Constraint, Layout},
+    layout::{Constraint, Layout, Rect},
     style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, BorderType, Borders, Padding, Paragraph},
@@ -16,6 +16,45 @@ use crate::tui::view::starfield::fill_stars;
 use crate::tui::view::widgets::{
     focus_border, input_with_cursor, render_checkbox, render_cmd_bar_with_help, rounded_block,
 };
+
+thread_local! {
+    /// Frame-local hit map for the login form — one `(rect, field)` per
+    /// clickable field, recorded from the exact layout rects as the form
+    /// draws (so a click lands on the field the user sees, with no
+    /// re-derived row arithmetic that can drift from the renderer).
+    static LOGIN_HITS: std::cell::RefCell<Vec<(Rect, LoginField)>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
+fn register_field(rect: Rect, field: LoginField) {
+    if rect.width > 0 && rect.height > 0 {
+        LOGIN_HITS.with(|h| h.borrow_mut().push((rect, field)));
+    }
+}
+
+/// The login field under `(column, row)`, if any — consumed by the mouse
+/// layer to focus / toggle the field the pointer is over.
+pub fn login_field_at(column: u16, row: u16) -> Option<LoginField> {
+    LOGIN_HITS.with(|h| {
+        h.borrow()
+            .iter()
+            .rev()
+            .find(|(r, _)| {
+                column >= r.x && column < r.x + r.width && row >= r.y && row < r.y + r.height
+            })
+            .map(|(_, f)| f.clone())
+    })
+}
+
+/// Unions two vertically-adjacent rects (a field's label row + its input
+/// box) so a click on either focuses the field.
+fn union(a: Rect, b: Rect) -> Rect {
+    let x = a.x.min(b.x);
+    let y = a.y.min(b.y);
+    let right = (a.x + a.width).max(b.x + b.width);
+    let bottom = (a.y + a.height).max(b.y + b.height);
+    Rect::new(x, y, right - x, bottom - y)
+}
 
 /// Renders the login screen.
 pub fn draw(frame: &mut Frame, app: &mut App) {
@@ -31,6 +70,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         return;
     }
 
+    LOGIN_HITS.with(|h| h.borrow_mut().clear());
     let t = &app.theme;
     let area = frame.area();
 
@@ -85,7 +125,6 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         .padding(Padding::horizontal(2));
     let inner = block.inner(form_area);
     frame.render_widget(block, form_area);
-    app.mouse_areas.login = Some(form_area);
 
     // Build the inner vertical splits dynamically — OTP rows only exist
     // when needed (device verification *or* permanent 2FA).
@@ -141,7 +180,17 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         ) = (0, 0, 7, 8, 9, 10);
         f = splits;
     }
-    let _ = (idx_otp_lbl, idx_otp_in); // silence unused-variable in non-OTP branch
+    // Register each field's clickable area (label row + input box) from the
+    // exact layout rects, so the mouse focuses whatever the user points at.
+    register_field(union(f[1], f[2]), LoginField::Server);
+    register_field(union(f[3], f[4]), LoginField::Email);
+    register_field(union(f[5], f[6]), LoginField::Password);
+    if app.login.awaiting_code() {
+        register_field(union(f[idx_otp_lbl], f[idx_otp_in]), LoginField::Otp);
+    }
+    register_field(f[idx_save], LoginField::SaveEmail);
+    register_field(f[idx_lock], LoginField::AutoLock);
+    register_field(f[idx_keep], LoginField::KeepSession);
 
     // ── Server ────────────────────────────────────────────────────────────
     let server_dirty = app.login.server_input.text().trim() != app.login.server_committed;

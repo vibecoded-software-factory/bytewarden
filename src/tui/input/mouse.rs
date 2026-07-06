@@ -73,72 +73,21 @@ fn apply_click_action(app: &mut App, action: ClickAction) {
 }
 
 fn mouse_login(app: &mut App, col: u16, row: u16) {
-    let Some(form) = app.mouse_areas.login else {
+    // The renderer records each field's exact rect as it draws; focus (and,
+    // for the checkboxes, toggle) whatever the pointer is over. No row math
+    // that can drift from the layout.
+    let Some(field) = crate::tui::view::login::login_field_at(col, row) else {
         return;
     };
-    if col < form.x || col >= form.x + form.width || row < form.y || row >= form.y + form.height {
-        return;
-    }
-
-    // Login form layout (must match `tui/view/login.rs`):
-    //
-    //   no OTP (20 inner rows incl. border):
-    //     0     padding
-    //     1     server label       │  5    email label   │  9    pass label    │ 13 save
-    //     2-4   server input       │  6-8  email input   │ 10-12 pass input    │ 14 auto-lock
-    //                                                                          │ 15 keep-session
-    //
-    //   OTP shown (24 inner rows incl. border): 4 extra rows for OTP
-    //     0     padding
-    //     1     server label       │  5    email label   │  9    pass label    │ 17 save
-    //     2-4   server input       │  6-8  email input   │ 10-12 pass input    │ 18 auto-lock
-    //     13    otp label          │ 14-16 otp input                           │ 19 keep-session
-    let inner_row = row.saturating_sub(form.y + 1);
-    let row = inner_row;
-
-    // Server / email / password / [otp] rows are positioned identically
-    // in both layouts (OTP appears after password, before save).
-    if row < 5 {
-        app.login.active_field = LoginField::Server;
-        return;
-    }
-    if row < 9 {
-        app.login.active_field = LoginField::Email;
-        return;
-    }
-    if row < 13 {
-        app.login.active_field = LoginField::Password;
-        return;
-    }
-
-    // After password, the offsets diverge depending on whether the
-    // OTP block is shown. Branch explicitly so a click on the OTP
-    // input doesn't accidentally toggle the save-email / auto-lock /
-    // keep-session checkboxes.
-    if app.login.awaiting_code() {
-        if row < 17 {
-            app.login.active_field = LoginField::Otp;
-        } else if row < 18 {
-            app.login.active_field = LoginField::SaveEmail;
-            app.toggle_save_email();
-        } else if row < 19 {
-            app.login.active_field = LoginField::AutoLock;
+    app.login.active_field = field.clone();
+    match field {
+        LoginField::SaveEmail => app.toggle_save_email(),
+        LoginField::AutoLock => {
             app.auto_lock.enabled = !app.auto_lock.enabled;
             app.settings.write_auto_lock(app.auto_lock.enabled);
-        } else {
-            app.login.active_field = LoginField::KeepSession;
-            app.toggle_keep_session();
         }
-    } else if row < 14 {
-        app.login.active_field = LoginField::SaveEmail;
-        app.toggle_save_email();
-    } else if row < 15 {
-        app.login.active_field = LoginField::AutoLock;
-        app.auto_lock.enabled = !app.auto_lock.enabled;
-        app.settings.write_auto_lock(app.auto_lock.enabled);
-    } else {
-        app.login.active_field = LoginField::KeepSession;
-        app.toggle_keep_session();
+        LoginField::KeepSession => app.toggle_keep_session(),
+        _ => {}
     }
 }
 

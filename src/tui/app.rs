@@ -953,6 +953,54 @@ mod tests {
     }
 
     #[test]
+    fn clicking_a_login_field_focuses_it() {
+        use crate::tui::screens::{LoginField, Screen};
+        use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
+
+        let (mut app, _req_rx, _resp_tx) = fresh_app();
+        app.screen = Screen::Login;
+        app.login.active_field = LoginField::Server;
+        let mut term = Terminal::new(TestBackend::new(90, 30)).unwrap();
+        term.draw(|f| crate::tui::view::draw(f, &mut app)).unwrap();
+        // Locate the "Master Password:" label and click it — the mouse should
+        // focus the password field regardless of the exact form geometry.
+        let buf = term.backend().buffer();
+        let mut text = String::new();
+        for y in 0..buf.area().height {
+            for x in 0..buf.area().width {
+                if let Some(c) = buf.cell((x, y)) {
+                    text.push_str(c.symbol());
+                }
+            }
+            text.push('\n');
+        }
+        let (col, row) = text
+            .lines()
+            .enumerate()
+            .find_map(|(y, line)| {
+                line.find("Master Password:")
+                    .map(|b| (line[..b].chars().count() as u16, y as u16))
+            })
+            .expect("the password label is rendered");
+        crate::tui::input::mouse::handle(
+            &mut app,
+            MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Left),
+                column: col,
+                row,
+                modifiers: KeyModifiers::NONE,
+            },
+        );
+        assert_eq!(
+            app.login.active_field,
+            LoginField::Password,
+            "clicking the password label focused the password field"
+        );
+    }
+
+    #[test]
     fn clicking_a_settings_sidebar_section_selects_it() {
         use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
         use ratatui::Terminal;

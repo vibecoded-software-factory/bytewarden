@@ -19,7 +19,6 @@ pub struct MouseAreas {
     pub list: Option<Rect>,
     pub cmdlog: Option<Rect>,
     pub detail: Option<Rect>,
-    pub login: Option<Rect>,
 }
 
 impl MouseAreas {
