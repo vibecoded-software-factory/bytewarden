@@ -6,7 +6,7 @@
 
 use ratatui::{
     Frame,
-    layout::{Constraint, Layout},
+    layout::{Constraint, Layout, Rect},
     style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph},
@@ -17,11 +17,40 @@ use crate::tui::app::App;
 use crate::tui::detail_fields::build_detail_fields;
 use crate::tui::view::action::action_text_style;
 use crate::tui::view::widgets::{
-    cursor_line, field_areas, render_cmd_bar_with_help, render_field_card,
+    cursor_line, field_areas_windowed, render_cmd_bar_with_help, render_field_card,
 };
+
+thread_local! {
+    /// Frame-local hit map for the detail/edit field cards — one `(rect,
+    /// field index)` per visible card, recorded from the exact layout rects
+    /// so a click focuses the card the user sees (no `/4` row arithmetic).
+    static DETAIL_HITS: std::cell::RefCell<Vec<(Rect, usize)>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
+fn register_field(rect: Rect, idx: usize) {
+    if rect.width > 0 && rect.height > 0 {
+        DETAIL_HITS.with(|h| h.borrow_mut().push((rect, idx)));
+    }
+}
+
+/// The field index under `(column, row)`, if any — consumed by the mouse
+/// layer to focus (and, on a repeat click, reveal) the field card.
+pub fn detail_field_at(column: u16, row: u16) -> Option<usize> {
+    DETAIL_HITS.with(|h| {
+        h.borrow()
+            .iter()
+            .rev()
+            .find(|(r, _)| {
+                column >= r.x && column < r.x + r.width && row >= r.y && row < r.y + r.height
+            })
+            .map(|(_, i)| *i)
+    })
+}
 
 /// Renders the detail screen.
 pub fn draw(frame: &mut Frame, app: &mut App) {
+    DETAIL_HITS.with(|h| h.borrow_mut().clear());
     let area = frame.area();
     let item = match app.vault.selected_item() {
         Some(i) => i.clone(),
@@ -72,7 +101,6 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         chunks[0],
     );
 
-    app.mouse_areas.detail = Some(chunks[1]);
     crate::tui::view::widgets::register_scroll(
         chunks[1],
         crate::tui::view::widgets::ScrollTarget::Detail,
@@ -101,15 +129,16 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     }
 }
 
-fn render_read_only(frame: &mut Frame, app: &App, item: &Item, area: ratatui::layout::Rect) {
+fn render_read_only(frame: &mut Frame, app: &App, item: &Item, area: Rect) {
     let t = &app.theme;
     let fields = build_detail_fields(item, app.show_password, app.detail_field);
     let sel = app.detail_field.min(fields.len().saturating_sub(1));
-    let fas = field_areas(fields.len(), area);
-    for (i, field) in fields.iter().enumerate() {
-        if i >= fas.len() {
+    let (fas, start) = field_areas_windowed(fields.len(), sel, area);
+    for (vis, area) in fas.iter().enumerate() {
+        let i = start + vis;
+        let Some(field) = fields.get(i) else {
             break;
-        }
+        };
         let is_sel = i == sel;
         let bcol = if is_sel { t.accent } else { t.inactive };
         let hint = if field.hidden && is_sel {
@@ -128,18 +157,20 @@ fn render_read_only(frame: &mut Frame, app: &App, item: &Item, area: ratatui::la
                 Style::default().fg(t.inactive),
             ))
         };
-        render_field_card(frame, &field.label, hint, vline, bcol, fas[i], t);
+        render_field_card(frame, &field.label, hint, vline, bcol, *area, t);
+        register_field(*area, i);
     }
 }
 
-fn render_edit_form(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
+fn render_edit_form(frame: &mut Frame, app: &App, area: Rect) {
     let t = &app.theme;
     let ef = &app.edit.fields;
-    let fas = field_areas(ef.len(), area);
-    for (i, field) in ef.iter().enumerate() {
-        if i >= fas.len() {
+    let (fas, start) = field_areas_windowed(ef.len(), app.edit.field_idx, area);
+    for (vis, area) in fas.iter().enumerate() {
+        let i = start + vis;
+        let Some(field) = ef.get(i) else {
             break;
-        }
+        };
         let sel = i == app.edit.field_idx;
         let bcol = if sel { t.accent } else { t.inactive };
         // Compose the hint: type tag for custom rows + reveal/hide/read-only.
@@ -170,6 +201,7 @@ fn render_edit_form(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         } else {
             Line::from(Span::styled(display, Style::default().fg(t.inactive)))
         };
-        render_field_card(frame, &field.label, &combined_hint, vline, bcol, fas[i], t);
+        render_field_card(frame, &field.label, &combined_hint, vline, bcol, *area, t);
+        register_field(*area, i);
     }
 }

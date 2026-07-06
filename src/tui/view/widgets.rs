@@ -449,6 +449,34 @@ pub fn field_areas(count: usize, area: Rect) -> std::rc::Rc<[Rect]> {
     .split(area)
 }
 
+/// Number of 4-row field cards that fit in `area`.
+pub fn field_card_capacity(area: Rect) -> usize {
+    (area.height / 4).max(1) as usize
+}
+
+/// Lays out the field cards that fit in `area`, windowed so the `selected`
+/// card is always visible. Returns the visible card rects paired with the
+/// index of the first visible field, so the caller renders `fields[start..]`
+/// and can map a clicked rect back to its real field index. When every card
+/// fits, this is [`field_areas`] with `start == 0`.
+pub fn field_areas_windowed(
+    count: usize,
+    selected: usize,
+    area: Rect,
+) -> (std::rc::Rc<[Rect]>, usize) {
+    let cap = field_card_capacity(area);
+    if count <= cap {
+        return (field_areas(count, area), 0);
+    }
+    // Keep the selected card at or above the bottom edge until it would fall
+    // off the top — the same windowing the preset picker uses.
+    let start = selected
+        .min(count - 1)
+        .saturating_sub(cap - 1)
+        .min(count - cap);
+    (field_areas(cap, area), start)
+}
+
 /// Renders a single labelled field card (1-row label + 3-row bordered
 /// value box).
 pub fn render_field_card(

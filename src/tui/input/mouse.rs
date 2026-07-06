@@ -143,22 +143,37 @@ fn mouse_detail(app: &mut App, col: u16, row: u16) {
         app.go_back();
         return;
     }
-    let Some(area) = app.mouse_areas.detail else {
+    // The renderer records each visible field card's exact rect; focus the
+    // card the pointer is over.
+    let Some(field_idx) = crate::tui::view::detail::detail_field_at(col, row) else {
         return;
     };
-    if col < area.x || col >= area.x + area.width || row < area.y || row >= area.y + area.height {
+    if app.edit.active {
+        // Edit mode: click focuses the field. Revealing a hidden field stays
+        // on F2 so it goes through the reprompt gate.
+        app.edit.field_idx = field_idx;
         return;
     }
-
-    let field_idx = (row.saturating_sub(area.y) / 4) as usize;
-    let total = app.detail_field_count();
-    if field_idx < total {
-        if field_idx == app.detail_field {
-            app.show_password = !app.show_password;
-        } else {
-            app.show_password = false;
-            app.detail_field = field_idx;
+    if field_idx == app.detail_field {
+        // A repeat click on the focused card reveals/hides it — the mouse twin
+        // of F2, and it honours the same reprompt gate on the exposing edge so
+        // the mouse can't bypass the master-password re-check.
+        if !app.show_password
+            && app
+                .vault
+                .selected_item()
+                .is_some_and(|i| i.needs_reprompt())
+            && crate::tui::flows::reprompt::maybe_open(
+                app,
+                crate::tui::reprompt::ProtectedAction::RevealDetail,
+            )
+        {
+            return;
         }
+        app.show_password = !app.show_password;
+    } else {
+        app.show_password = false;
+        app.detail_field = field_idx;
     }
 }
 
