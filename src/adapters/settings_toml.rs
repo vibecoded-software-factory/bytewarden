@@ -120,6 +120,30 @@ impl TomlSettingsAdapter {
             .create(&self.dir);
         let _ = fs::set_permissions(&self.dir, fs::Permissions::from_mode(CONFIG_DIR_MODE));
     }
+
+    /// Replaces the `key = value` line (or inserts it right after the
+    /// first present key in `after`, else at the top), preserving every
+    /// other line. The shared spine of the top-level scalar writers.
+    fn upsert_scalar(&self, key: &str, value: String, after: &[&str]) {
+        self.ensure_dir();
+        let existing = fs::read_to_string(self.file()).unwrap_or_default();
+        let prefix = format!("{key} =");
+        let mut lines: Vec<String> = existing
+            .lines()
+            .filter(|l| !l.trim().starts_with(&prefix))
+            .map(|l| l.to_string())
+            .collect();
+        let pos = after
+            .iter()
+            .find_map(|k| {
+                let p = format!("{k} =");
+                lines.iter().position(|l| l.trim().starts_with(&p))
+            })
+            .map(|i| i + 1)
+            .unwrap_or(0);
+        lines.insert(pos, format!("{key} = {value}"));
+        write_file_secure(&self.file(), &(lines.join("\n") + "\n"));
+    }
 }
 
 /// Writes `contents` to `path` so the on-disk file is **never** visible
@@ -298,6 +322,31 @@ impl SettingsPort for TomlSettingsAdapter {
             .unwrap_or(0);
         lines.insert(pos, format!("keep_session = {keep_session}"));
         write_file_secure(&self.file(), &(lines.join("\n") + "\n"));
+    }
+
+    fn write_lock_after_secs(&self, secs: u64) {
+        // Stored as whole minutes to match what `read` parses.
+        self.upsert_scalar(
+            "lock_after_minutes",
+            (secs / 60).to_string(),
+            &["auto_lock", "keep_session", "save_email"],
+        );
+    }
+
+    fn write_clipboard_clear_secs(&self, secs: u64) {
+        self.upsert_scalar(
+            "clipboard_clear_secs",
+            secs.to_string(),
+            &["keep_session", "auto_lock", "save_email"],
+        );
+    }
+
+    fn write_list_items_timeout_secs(&self, secs: u64) {
+        self.upsert_scalar(
+            "list_items_timeout_secs",
+            secs.to_string(),
+            &["clipboard_clear_secs", "keep_session", "save_email"],
+        );
     }
 
     fn write_theme_name(&self, name: &str) {
@@ -682,5 +731,54 @@ mod tests {
         assert_eq!(mode(&a.file()), 0o644); // sanity
         a.write(true, Some("u@x"));
         assert_eq!(mode(&a.file()), CONFIG_FILE_MODE);
+    }
+
+    #[test]
+    fn write_lock_after_secs_round_trips_as_minutes() {
+        let (a, _t) = fresh();
+        a.write_lock_after_secs(15 * 60);
+        let on_disk = std::fs::read_to_string(a.file()).unwrap();
+        assert!(on_disk.contains("lock_after_minutes = 15"));
+        assert_eq!(a.read().lock_after_secs, 15 * 60);
+    }
+
+    #[test]
+    fn write_clipboard_clear_secs_round_trips_and_overwrites() {
+        let (a, _t) = fresh();
+        a.write_clipboard_clear_secs(45);
+        a.write_clipboard_clear_secs(0);
+        let on_disk = std::fs::read_to_string(a.file()).unwrap();
+        assert_eq!(on_disk.matches("clipboard_clear_secs =").count(), 1);
+        assert_eq!(a.read().clipboard_clear_secs, 0);
+    }
+
+    #[test]
+    fn write_list_items_timeout_secs_round_trips() {
+        let (a, _t) = fresh();
+        a.write_list_items_timeout_secs(240);
+        assert_eq!(a.read().list_items_timeout_secs, 240);
+    }
+
+    #[test]
+    fn scalar_writers_preserve_email_and_theme() {
+        let (a, _t) = fresh();
+        a.write(true, Some("u@x"));
+        std::fs::write(
+            a.file(),
+            format!(
+                "{}\n[theme]\naccent = \"#cba6f7\"\n",
+                std::fs::read_to_string(a.file()).unwrap()
+            ),
+        )
+        .unwrap();
+        a.write_clipboard_clear_secs(10);
+        a.write_list_items_timeout_secs(300);
+        let on_disk = std::fs::read_to_string(a.file()).unwrap();
+        assert!(on_disk.contains("save_email = true"));
+        assert!(on_disk.contains("email = \"u@x\""));
+        assert!(on_disk.contains("clipboard_clear_secs = 10"));
+        assert!(on_disk.contains("list_items_timeout_secs = 300"));
+        assert!(on_disk.contains("[theme]"));
+        assert!(on_disk.contains("accent = \"#cba6f7\""));
     }
 }

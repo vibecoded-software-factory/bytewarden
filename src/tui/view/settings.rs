@@ -1,7 +1,8 @@
 //! Settings overlay renderer — a section sidebar plus the active
-//! section's panel, centered over the originating screen. Today the only
-//! section is Theme (a live-previewing preset picker); new sections slot
-//! into the sidebar without changing the layout.
+//! section's panel, centered over the originating screen. Theme is a
+//! live-previewing preset picker; the other sections (Security,
+//! Advanced) are value-lists edited in place with `←/→`. New sections
+//! slot into the sidebar without changing the layout.
 
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
@@ -38,6 +39,15 @@ pub fn draw_popup(frame: &mut Frame, area: Rect, app: &App) {
     let inner = outer.inner(popup);
     frame.render_widget(outer, popup);
 
+    // One column of breathing room each side so the sub-panels don't sit
+    // flush against the outer border.
+    let inner = Rect {
+        x: inner.x + 1,
+        y: inner.y,
+        width: inner.width.saturating_sub(2),
+        height: inner.height,
+    };
+
     let rows = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Min(3), Constraint::Length(1)])
@@ -52,7 +62,10 @@ pub fn draw_popup(frame: &mut Frame, area: Rect, app: &App) {
 
     let hint = match app.settings_ui.focus {
         SettingsFocus::Sidebar => "↑/↓ section · →/Enter open · Esc close",
-        SettingsFocus::Panel => "↑/↓ preview · Enter apply+save · ←/Tab back · Esc cancel",
+        SettingsFocus::Panel => match SettingsSection::ALL[app.settings_ui.section] {
+            SettingsSection::Theme => "↑/↓ preview · Enter apply+save · ←/Tab back · Esc cancel",
+            _ => "↑/↓ row · ←/→ change · Tab back · Esc close",
+        },
     };
     frame.render_widget(
         Paragraph::new(Line::from(Span::styled(hint, Style::default().fg(t.dim)))),
@@ -105,7 +118,57 @@ fn draw_sidebar(frame: &mut Frame, app: &App, area: Rect) {
 fn draw_panel(frame: &mut Frame, app: &App, area: Rect) {
     match SettingsSection::ALL[app.settings_ui.section] {
         SettingsSection::Theme => draw_theme_panel(frame, app, area),
+        section => draw_rows_panel(frame, app, area, section),
     }
+}
+
+/// A value-list section: one `label … value` row each, the label left-
+/// aligned to a common column and the value in accent (selected) / dim.
+fn draw_rows_panel(frame: &mut Frame, app: &App, area: Rect, section: SettingsSection) {
+    let t = &app.theme;
+    let focused = app.settings_ui.focus == SettingsFocus::Panel;
+    let block = focus_block(app, section.label(), focused);
+    let body = block.inner(area);
+    frame.render_widget(block, area);
+
+    let rows = section.rows();
+    let sel = app.settings_ui.row.min(rows.len().saturating_sub(1));
+    let label_w = rows
+        .iter()
+        .map(|r| r.label().chars().count())
+        .max()
+        .unwrap_or(0);
+
+    let lines: Vec<Line> = rows
+        .iter()
+        .enumerate()
+        .map(|(i, &r)| {
+            let selected = i == sel;
+            let marker = if selected { "▶ " } else { "  " };
+            let name_style = if selected && focused {
+                Style::default().fg(t.accent).add_modifier(Modifier::BOLD)
+            } else if selected {
+                Style::default()
+                    .fg(t.foreground)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(t.foreground)
+            };
+            let value_style = if selected {
+                Style::default().fg(t.accent)
+            } else {
+                Style::default().fg(t.dim)
+            };
+            Line::from(vec![
+                Span::styled(
+                    format!("{marker}{:<width$}  ", r.label(), width = label_w),
+                    name_style,
+                ),
+                Span::styled(app.settings_row_value(r), value_style),
+            ])
+        })
+        .collect();
+    frame.render_widget(Paragraph::new(lines), body);
 }
 
 fn draw_theme_panel(frame: &mut Frame, app: &App, area: Rect) {
