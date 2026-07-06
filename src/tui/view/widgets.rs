@@ -150,7 +150,7 @@ pub fn render_cmd_bar_with_help(
         short,
         col,
         t,
-        Some("F1 help · F9 settings"),
+        Some("F1 help · F10 settings"),
     );
 }
 

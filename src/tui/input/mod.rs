@@ -96,10 +96,10 @@ fn f1_opens_help(screen: &Screen) -> bool {
     )
 }
 
-/// Returns the screens where pressing F9 should open the Settings
+/// Returns the screens where pressing F10 should open the Settings
 /// overlay. Like [`f1_opens_help`] plus the standalone Generator;
 /// excluded on the modal popups, which own their input.
-fn f9_opens_settings(screen: &Screen) -> bool {
+fn f10_opens_settings(screen: &Screen) -> bool {
     matches!(
         screen,
         Screen::Vault | Screen::Login | Screen::Detail | Screen::Create | Screen::Generator
@@ -137,15 +137,15 @@ pub fn handle_events(app: &mut App, ev: Event) {
                 app.screen = Screen::Help;
                 return;
             }
-            // Global Settings shortcut — F9 toggles the Settings overlay.
+            // Global Settings shortcut — F10 toggles the Settings overlay.
             // It opens from the main screens (never stacked on a popup)
             // and closes (cancel) when already open. Pure UI overlay, so
             // it sits before the busy gate like F1.
-            if key.code == KeyCode::F(9) {
+            if key.code == KeyCode::F(10) {
                 if app.screen == Screen::Settings {
                     app.settings_cancel();
                     return;
-                } else if f9_opens_settings(&app.screen) {
+                } else if f10_opens_settings(&app.screen) {
                     app.open_settings();
                     return;
                 }
@@ -153,7 +153,7 @@ pub fn handle_events(app: &mut App, ev: Event) {
             // Global command palette (Ctrl+P) — toggles the fuzzy,
             // context-aware action list. Opens from the vault / detail
             // (where the actions apply) and closes when already open. A
-            // UI overlay, so it sits before the busy gate like F1 / F9.
+            // UI overlay, so it sits before the busy gate like F1 / F10.
             if key.code == KeyCode::Char('p') && key.modifiers == KeyModifiers::CONTROL {
                 if app.screen == Screen::CommandPalette {
                     crate::tui::flows::palette::cancel(app);

@@ -14,7 +14,7 @@ pub enum Screen {
     /// Help popup overlay.
     Help,
     /// Settings overlay — a sectioned preferences screen (Theme first),
-    /// opened with `F9`.
+    /// opened with `F10`.
     Settings,
     /// "Create new item" form (with type-picker first step).
     Create,

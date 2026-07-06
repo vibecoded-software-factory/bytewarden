@@ -1,7 +1,7 @@
 //! Settings overlay input.
 //!
 //! Two panes: a section sidebar (left) and the active section's panel
-//! (right). `Tab` / arrows move between and within them. `Esc`/`F9`
+//! (right). `Tab` / arrows move between and within them. `Esc`/`F10`
 //! cancel (restoring any live preview); `Enter` confirms. Today the only
 //! section is Theme — a live-previewing preset picker.
 
@@ -21,7 +21,7 @@ pub fn handle(app: &mut App, key: KeyEvent) {
 fn handle_sidebar(app: &mut App, key: KeyEvent) {
     let len = SettingsSection::ALL.len();
     match key.code {
-        KeyCode::Esc | KeyCode::F(9) => app.settings_cancel(),
+        KeyCode::Esc | KeyCode::F(10) => app.settings_cancel(),
         KeyCode::Char('j') | KeyCode::Down if app.settings_ui.section + 1 < len => {
             app.settings_ui.section += 1;
         }
@@ -44,7 +44,7 @@ fn handle_panel(app: &mut App, key: KeyEvent) {
 fn handle_theme_panel(app: &mut App, key: KeyEvent) {
     let len = theme::Preset::ALL.len();
     match key.code {
-        KeyCode::Esc | KeyCode::F(9) => app.settings_cancel(),
+        KeyCode::Esc | KeyCode::F(10) => app.settings_cancel(),
         KeyCode::Char('h') | KeyCode::Left | KeyCode::Tab | KeyCode::BackTab => {
             app.settings_ui.focus = SettingsFocus::Sidebar;
         }
