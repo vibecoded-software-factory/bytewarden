@@ -8,8 +8,8 @@ use ratatui::{
 use crate::tui::action::ActionState;
 use crate::tui::app::App;
 
-/// Spinner glyph rotation.
-const SPINNER: [&str; 4] = ["-", "\\", "|", "/"];
+/// Four-frame Braille spinner — a single spinning dot.
+const SPINNER: [&str; 4] = ["⠋", "⠙", "⠸", "⠴"];
 
 /// Returns the spinner glyph for the given tick. Rotates every 3 ticks
 /// for a calmer animation than 1-tick rotation.
