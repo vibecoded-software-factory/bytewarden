@@ -206,9 +206,9 @@ fn render_vaults(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         t,
     ));
 
-    // Blank spacer before the named folder/collection rows — a clean
-    // grouping gap instead of a heavy rule.
-    rows.push(ListItem::new(Line::from("")));
+    // Muted rule before the named folder/collection rows — an explicit
+    // group divider rather than a blank gap.
+    rows.push(separator_row(area.width, t));
 
     // One row per folder (alphabetised at load time). Per-folder
     // count comes from the precomputed map — see
@@ -277,6 +277,19 @@ fn render_vaults(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     );
 }
 
+/// A muted dotted rule spanning the panel, used as a group divider in
+/// the sidebar lists (before the named folders, before Trash) — an
+/// explicit separator instead of a blank gap. `width` is the panel's
+/// outer width; the rule insets by the 2-cell highlight-symbol gutter
+/// every row reserves so it lines up with the row content.
+fn separator_row<'a>(width: u16, t: &crate::tui::theme::Theme) -> ListItem<'a> {
+    let w = (width as usize).saturating_sub(4);
+    ListItem::new(Line::from(Span::styled(
+        "┈".repeat(w),
+        Style::default().fg(t.muted),
+    )))
+}
+
 fn folder_row<'a>(
     label: &str,
     active: bool,
@@ -339,8 +352,8 @@ fn render_filters(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     let mut filter_items_with_sep: Vec<ListItem> = Vec::with_capacity(filter_items.len() + 1);
     for (i, item) in filter_items.into_iter().enumerate() {
         if i == ITEM_FILTERS.len() - 1 {
-            // Blank spacer before the Trash entry — clean gap, no rule.
-            filter_items_with_sep.push(ListItem::new(Line::from("")));
+            // Muted rule before the Trash entry — an explicit divider.
+            filter_items_with_sep.push(separator_row(area.width, t));
         }
         filter_items_with_sep.push(item);
     }
