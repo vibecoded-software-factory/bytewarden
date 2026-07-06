@@ -1334,6 +1334,67 @@ mod tests {
     }
 
     #[test]
+    fn clicking_a_collection_row_toggles_it() {
+        use crate::tui::assign_collections::{AssignCollectionsPurpose, AssignCollectionsState};
+        use crate::tui::screens::Screen;
+        use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
+
+        let coll = |id: &str, name: &str| crate::domain::Collection {
+            id: id.into(),
+            name: name.into(),
+            organization_id: Some("o1".into()),
+        };
+        let (mut app, _req_rx, _resp_tx) = fresh_app();
+        app.assign_collections = Some(AssignCollectionsState::new(
+            vec![coll("c1", "EngTeamColl"), coll("c2", "OpsTeamColl")],
+            &[],
+            0,
+            Screen::Create,
+            AssignCollectionsPurpose::UpdateField,
+        ));
+        app.screen = Screen::AssignCollections;
+        let mut term = Terminal::new(TestBackend::new(90, 30)).unwrap();
+        term.draw(|f| crate::tui::view::draw(f, &mut app)).unwrap();
+        let buf = term.backend().buffer();
+        let mut text = String::new();
+        for y in 0..buf.area().height {
+            for x in 0..buf.area().width {
+                if let Some(c) = buf.cell((x, y)) {
+                    text.push_str(c.symbol());
+                }
+            }
+            text.push('\n');
+        }
+        let (col, row) = text
+            .lines()
+            .enumerate()
+            .find_map(|(y, line)| {
+                line.find("OpsTeamColl")
+                    .map(|b| (line[..b].chars().count() as u16, y as u16))
+            })
+            .expect("the OpsTeamColl row is rendered");
+        crate::tui::input::mouse::handle(
+            &mut app,
+            MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Left),
+                column: col,
+                row,
+                modifiers: KeyModifiers::NONE,
+            },
+        );
+        assert!(
+            app.assign_collections
+                .as_ref()
+                .unwrap()
+                .selected
+                .contains("c2"),
+            "clicking the OpsTeamColl row checked it"
+        );
+    }
+
+    #[test]
     fn redact_cmd_replaces_cached_session_key() {
         assert_eq!(
             redact_cmd("bw unlock SECRETKEY", Some("SECRETKEY")),

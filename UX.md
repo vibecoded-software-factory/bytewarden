@@ -278,6 +278,11 @@ Popups are centered and **always drawn over their base screen** by
   security note (error-colored for plaintext CSV/JSON, dim for encrypted).
 - **Memberships** (`Memberships`) is a read-only picker: organisations with
   their collections, pre-sorted; `Esc`/`Enter`/`q` close.
+- **AssignCollections** is mouse-operable: its rows are clickable — a click
+  toggles that collection (the mouse twin of `Space`), read from the list's
+  realised scroll offset (`view::assign_collections::collection_row_at`) so it
+  stays correct when scrolled — and a `draw_scrollbar` rides a reserved
+  right-column gutter when the collections overflow the panel.
 
 ## Command palette (`Ctrl+P`)
 
