@@ -100,11 +100,11 @@ pub fn rounded_block(border_style: Style) -> Block<'static> {
         .border_style(border_style)
 }
 
-/// Square-bordered section [`Block`] with a top-left title and a dim
+/// Rounded-bordered section [`Block`] with a top-left title and a dim
 /// bottom-right counter. Focused → accent border + **bold** title;
 /// otherwise the `inactive` tint. `focused` is passed explicitly so the
-/// widget never has to reverse-engineer it. (Section panels are square;
-/// popups / field cards use the rounded [`rounded_block`].)
+/// widget never has to reverse-engineer it. Section panels share the
+/// rounded chrome with popups / field cards ([`rounded_block`]).
 pub fn titled_block(title: &str, bottom: &str, focused: bool, t: &Theme) -> Block<'static> {
     let col = if focused { t.accent } else { t.inactive };
     let mut title_style = Style::default().fg(col);
@@ -113,6 +113,7 @@ pub fn titled_block(title: &str, bottom: &str, focused: bool, t: &Theme) -> Bloc
     }
     Block::default()
         .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
         .title(Span::styled(title.to_string(), title_style))
         .title_bottom(
             Line::from(Span::styled(bottom.to_string(), Style::default().fg(t.dim)))

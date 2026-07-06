@@ -141,16 +141,16 @@ contracts* for the full rebuild table.
 
 ## Chrome & widgets (`view::widgets`)
 
-**Border convention (hard rule).** **Section panels are square**
-(`widgets::titled_block`, `Borders::ALL`, no `BorderType::Rounded`) — the
-numbered `─[N]-Name` title and the accent-when-focused border carry the
-identity, so a heavy/rounded frame isn't needed and the columns line up
-crisply. **Popups, field cards and pickers are rounded**
-(`widgets::rounded_block` / `render_field_card`) — the rounded frame + the
-centered `MODAL_*` band is what says "overlay". Don't mix: a new panel is
-square via `titled_block`; a new overlay/card is rounded via `rounded_block`.
+**Border convention (hard rule).** **Every bordered surface is rounded**
+(`BorderType::Rounded`, `Borders::ALL`) — section panels via
+`widgets::titled_block`, popups / field cards / pickers via
+`widgets::rounded_block` / `render_field_card`. Section panels carry their
+identity through the numbered `─[N]-Name` title and the accent-when-focused
+border; overlays add the centered `MODAL_*` band to say "overlay". Don't
+hand-roll a `Block` with a different border type: a new panel is rounded via
+`titled_block`, a new overlay/card via `rounded_block`.
 
-- `widgets::titled_block(title, bottom, focused, theme)` — the square section
+- `widgets::titled_block(title, bottom, focused, theme)` — the rounded section
   panel: focused → accent border + **bold** title, else the `inactive` tint.
   `focused` is passed explicitly (the widget never reverse-engineers it from
   the color). Used for every panel.
