@@ -44,6 +44,7 @@ pub fn handle(app: &mut App, mouse: MouseEvent) {
                 }
                 Screen::CommandPalette => crate::tui::input::palette::mouse(app, col, row),
                 Screen::Create => crate::tui::input::create::mouse(app, col, row),
+                Screen::Generator => crate::tui::input::generator::mouse(app, col, row),
                 _ => {}
             }
         }

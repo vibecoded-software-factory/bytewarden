@@ -14,8 +14,35 @@ use crate::tui::generator::{GeneratorFocus, GeneratorState, focusable_for};
 use crate::tui::view::action::action_line;
 use crate::tui::view::widgets::{focus_color, render_cmd_bar, rounded_block};
 
+thread_local! {
+    /// Frame-local hit map — one `(rect, control)` per generator control
+    /// row (and the Result box), recorded from the exact layout rects.
+    static GEN_HITS: std::cell::RefCell<Vec<(Rect, GeneratorFocus)>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
+fn register_hit(rect: Rect, f: GeneratorFocus) {
+    if rect.width > 0 && rect.height > 0 {
+        GEN_HITS.with(|h| h.borrow_mut().push((rect, f)));
+    }
+}
+
+/// The generator control under `(column, row)`, if any.
+pub fn gen_hit_at(column: u16, row: u16) -> Option<GeneratorFocus> {
+    GEN_HITS.with(|h| {
+        h.borrow()
+            .iter()
+            .rev()
+            .find(|(r, _)| {
+                column >= r.x && column < r.x + r.width && row >= r.y && row < r.y + r.height
+            })
+            .map(|(_, f)| *f)
+    })
+}
+
 /// Renders the generator screen.
 pub fn draw(frame: &mut Frame, app: &mut App) {
+    GEN_HITS.with(|h| h.borrow_mut().clear());
     let t = &app.theme;
     let area = frame.area();
 
@@ -107,6 +134,7 @@ fn render_body(frame: &mut Frame, app: &App, area: Rect) {
         let focused = *f == g.focus;
         let area = rows[row_idx];
         row_idx += 1;
+        register_hit(area, *f);
         render_control(frame, area, g, *f, focused, t);
     }
     // The "spacer above result" sits at row_idx; advance past it.
@@ -114,6 +142,7 @@ fn render_body(frame: &mut Frame, app: &App, area: Rect) {
 
     // Result box
     if row_idx < rows.len() {
+        register_hit(rows[row_idx], GeneratorFocus::Result);
         let focused = g.focus == GeneratorFocus::Result;
         let bcol = if focused { t.accent } else { t.inactive };
         let value = if g.result.is_empty() {
