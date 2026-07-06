@@ -71,8 +71,8 @@ pub fn handle(app: &mut App, key: KeyEvent) {
             app.toggle_save_email();
         }
         KeyCode::Char(' ') if app.login.active_field == LoginField::AutoLock => {
-            app.auto_lock = !app.auto_lock;
-            app.settings.write_auto_lock(app.auto_lock);
+            app.auto_lock.enabled = !app.auto_lock.enabled;
+            app.settings.write_auto_lock(app.auto_lock.enabled);
         }
         KeyCode::Char(' ') if app.login.active_field == LoginField::KeepSession => {
             app.toggle_keep_session();

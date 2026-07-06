@@ -15,6 +15,7 @@
 pub mod action;
 pub mod app;
 pub mod assign_collections;
+pub mod auto_lock;
 pub mod cmd_log;
 pub mod debug_log;
 pub mod detail_fields;
@@ -141,7 +142,7 @@ fn run_loop(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<()
         if event::poll(poll_timeout(&app.action_state, app.is_busy()))? {
             let ev = event::read()?;
             input::handle_events(app, ev);
-            app.reset_activity();
+            app.auto_lock.reset();
         } else {
             flows::auth::check_auto_lock(app);
             tick_state(app, &mut done_ticks);

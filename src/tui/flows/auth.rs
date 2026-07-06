@@ -588,13 +588,13 @@ pub fn handle_fingerprint(app: &mut App, r: Result<String, BwError>) {
 /// Locks the vault if the inactivity timer has elapsed. No-op while a
 /// request is in flight so an auto-lock can't race a pending response.
 pub fn check_auto_lock(app: &mut App) {
-    if !app.auto_lock || app.is_busy() {
+    if !app.auto_lock.enabled || app.is_busy() {
         return;
     }
     if app.screen != Screen::Vault && app.screen != Screen::Detail {
         return;
     }
-    if app.last_activity.elapsed().as_secs() >= app.lock_after_secs {
+    if app.auto_lock.is_expired() {
         lock_vault(app);
     }
 }
