@@ -523,11 +523,11 @@ fn render_cmd_log(frame: &mut Frame, app: &App, area: ratatui::layout::Rect, cmd
     let clf = app.focus == Focus::CmdLog;
     let color = focus_color(clf, t.accent, t.inactive);
     let visible = (cmd_h as usize).saturating_sub(2);
-    let total = app.cmd_log.len();
+    let total = app.cmd_log.entries.len();
     // Entry-based scroll-back with a `↑N` tag — the shared command-log
     // convention. One line per entry:
     // `✓ <cmd>  →  <detail>` (was a two-line `$ cmd` / `icon detail`).
-    let scroll = app.cmd_log_scroll.min(total.saturating_sub(visible));
+    let scroll = app.cmd_log.scroll.min(total.saturating_sub(visible));
     let scroll_tag = if scroll == 0 {
         String::new()
     } else {
@@ -553,7 +553,7 @@ fn render_cmd_log(frame: &mut Frame, app: &App, area: ratatui::layout::Rect, cmd
     }
     let end = total - scroll;
     let start = end.saturating_sub(visible);
-    let lines: Vec<Line> = app.cmd_log[start..end]
+    let lines: Vec<Line> = app.cmd_log.entries[start..end]
         .iter()
         .map(|e| {
             let mark = if e.ok { "✓" } else { "✗" };

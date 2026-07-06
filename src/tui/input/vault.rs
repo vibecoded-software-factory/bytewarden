@@ -152,10 +152,10 @@ pub fn handle(app: &mut App, key: KeyEvent) {
         },
 
         Focus::CmdLog => match key.code {
-            KeyCode::Char('j') | KeyCode::Down => app.cmd_log_scroll_up(1),
-            KeyCode::Char('k') | KeyCode::Up => app.cmd_log_scroll_down(1),
-            KeyCode::PageDown => app.cmd_log_scroll_down(5),
-            KeyCode::PageUp => app.cmd_log_scroll_up(5),
+            KeyCode::Char('j') | KeyCode::Down => app.cmd_log.scroll_up(1),
+            KeyCode::Char('k') | KeyCode::Up => app.cmd_log.scroll_down(1),
+            KeyCode::PageDown => app.cmd_log.scroll_down(5),
+            KeyCode::PageUp => app.cmd_log.scroll_up(5),
             KeyCode::Tab | KeyCode::Esc => app.cycle_focus(),
             _ => {}
         },

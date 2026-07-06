@@ -15,6 +15,7 @@
 pub mod action;
 pub mod app;
 pub mod assign_collections;
+pub mod cmd_log;
 pub mod debug_log;
 pub mod detail_fields;
 pub mod edit_field;
