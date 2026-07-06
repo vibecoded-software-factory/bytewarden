@@ -59,7 +59,7 @@ pub fn draw_popup(frame: &mut Frame, area: Rect, app: &App) {
             Block::default()
                 .title(" Confirm Delete Attachment ")
                 .borders(Borders::ALL)
-                .border_type(BorderType::Double)
+                .border_type(BorderType::Rounded)
                 .border_style(Style::default().fg(t.error)),
         ),
         popup,
