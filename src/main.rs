@@ -34,13 +34,15 @@ fn main() -> Result<()> {
     let settings_adapter = TomlSettingsAdapter::new();
     let cfg = settings_adapter.read();
 
-    let vault = Box::new(
-        BwCliAdapter::new_with(seed_session_key)
-            .with_list_items_timeout(cfg.list_items_timeout_secs),
-    );
+    let adapter = BwCliAdapter::new_with(seed_session_key)
+        .with_list_items_timeout(cfg.list_items_timeout_secs);
+    // Share the list-items-timeout knob with the render thread so the
+    // Settings overlay can retune it live (the adapter runs on the worker).
+    let list_items_timeout = adapter.list_items_timeout_handle();
+    let vault = Box::new(adapter);
     let clipboard = Box::new(SystemClipboardAdapter::new());
     let settings = Box::new(settings_adapter);
     let generator = Box::new(BwGeneratorAdapter::new());
 
-    tui::run(vault, clipboard, settings, generator)
+    tui::run(vault, clipboard, settings, generator, list_items_timeout)
 }

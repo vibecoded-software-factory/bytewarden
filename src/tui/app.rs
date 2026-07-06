@@ -16,6 +16,8 @@
 //! input/view layers; methods on `App` itself are deliberately limited
 //! to thin getters/mutators.
 
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
 use std::time::{Duration, Instant};
 
@@ -134,10 +136,13 @@ pub struct App {
     /// thread is gone, so no response will ever arrive. [`Self::begin`]
     /// refuses while set and a persistent error is shown.
     pub worker_dead: bool,
-    /// Configurable `bw list items` wall-clock budget (from settings),
-    /// used to size the watchdog so a legitimately slow load on a huge
-    /// vault isn't mistaken for a lost ticket.
-    pub list_items_timeout_secs: u64,
+    /// Configurable `bw list items` wall-clock budget (seconds). Shared
+    /// with the worker's `bw` adapter behind an [`Arc<AtomicU64>`]: the
+    /// Settings overlay writes to it and the adapter reads it on the next
+    /// list, so a change takes effect without a restart. Also sizes the
+    /// watchdog so a legitimately slow load isn't mistaken for a lost
+    /// ticket.
+    pub list_items_timeout: Arc<AtomicU64>,
 
     // ── Auto-lock ─────────────────────────────────────────────────────────
     /// The inactivity auto-lock timer. See
@@ -277,6 +282,7 @@ impl App {
         worker_rx: Receiver<WorkerResponse>,
         clipboard: Box<dyn ClipboardPort>,
         settings: Box<dyn SettingsPort>,
+        list_items_timeout: Arc<AtomicU64>,
     ) -> Self {
         let cfg = settings.read();
         let saved_email = cfg.email.clone().unwrap_or_default();
@@ -305,7 +311,7 @@ impl App {
             in_flight: None,
             request_started: None,
             worker_dead: false,
-            list_items_timeout_secs: cfg.list_items_timeout_secs,
+            list_items_timeout,
             auto_lock: AutoLock::new(cfg.auto_lock, cfg.lock_after_secs),
             clipboard_clear_secs: cfg.clipboard_clear_secs,
             mouse_areas: MouseAreas::default(),
@@ -433,7 +439,11 @@ impl App {
         // Above every fixed per-op timeout (≤60 s) and the configurable
         // list budget, plus generous slack — it only ever fires on a
         // genuinely lost ticket, not a slow-but-live call.
-        let budget = self.list_items_timeout_secs.max(90).saturating_add(60);
+        let budget = self
+            .list_items_timeout
+            .load(Ordering::Relaxed)
+            .max(90)
+            .saturating_add(60);
         if started.elapsed() > Duration::from_secs(budget) {
             self.in_flight = None;
             self.request_started = None;
@@ -472,7 +482,9 @@ impl App {
                     format!("{} s", self.clipboard_clear_secs)
                 }
             }
-            SettingRow::ListTimeout => format!("{} s", self.list_items_timeout_secs),
+            SettingRow::ListTimeout => {
+                format!("{} s", self.list_items_timeout.load(Ordering::Relaxed))
+            }
         }
     }
 
@@ -503,9 +515,11 @@ impl App {
                     .write_clipboard_clear_secs(self.clipboard_clear_secs);
             }
             SettingRow::ListTimeout => {
-                self.list_items_timeout_secs = step(self.list_items_timeout_secs, 30, 30, 900);
-                self.settings
-                    .write_list_items_timeout_secs(self.list_items_timeout_secs);
+                let secs = step(self.list_items_timeout.load(Ordering::Relaxed), 30, 30, 900);
+                // Store to the shared handle so the worker's adapter picks
+                // up the new budget on its next list — then persist it.
+                self.list_items_timeout.store(secs, Ordering::Relaxed);
+                self.settings.write_list_items_timeout_secs(secs);
             }
         }
     }
@@ -836,6 +850,7 @@ mod tests {
             worker_rx,
             Box::new(NoopClipboard),
             Box::new(DefaultSettings),
+            Arc::new(AtomicU64::new(180)),
         );
         (app, req_rx, resp_tx)
     }
