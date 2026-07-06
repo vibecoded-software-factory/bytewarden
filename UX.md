@@ -218,6 +218,15 @@ hand-roll a `Block` with a different border type: a new panel is rounded via
   (`widgets::register_button` / `button_at`, a `ClickAction` per rect, the same
   frame-local pattern as the scroll registry). The command bar's `F1 help` /
   `F10 settings` anchor is clickable — the mouse twin of the function keys.
+- **Clickable overlay rows** — an overlay with internal navigation records a
+  per-row hit map as it draws (same frame-local pattern; e.g.
+  `view::settings::SettingsHit` / `settings_hit_at`) and its `input` module
+  exposes a `mouse(app, col, row)` that maps the hit to the exact state its
+  keyboard navigation would set. The **Settings** overlay is fully
+  mouse-operable this way: click a sidebar section to select it, a panel row to
+  focus it (a second click cycles/toggles its value), or a theme preset to
+  preview it (a second click applies + saves) — the mouse twin of `↑/↓`,
+  `←/→` and `Enter`.
 - `widgets::center_rect` / `MODAL_WIDTH_PCT` / `MODAL_HEIGHT` — the standard
   centered-modal geometry every list/picker/settings overlay imitates so they
   line up; `help_line`, `unread`/`favorite_star` emphasis, `key_style`,

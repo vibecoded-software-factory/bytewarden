@@ -25,6 +25,45 @@ pub fn handle(app: &mut App, key: KeyEvent) {
     }
 }
 
+/// A click inside the settings overlay: select a sidebar section, select a
+/// panel row (a second click on the selected row cycles it), or preview/apply a
+/// theme preset — the mouse twin of the keyboard navigation.
+pub fn mouse(app: &mut App, col: u16, row: u16) {
+    use crate::tui::view::settings::{SettingsHit, settings_hit_at};
+    let Some(hit) = settings_hit_at(col, row) else {
+        return;
+    };
+    match hit {
+        SettingsHit::Section(i) => {
+            set_section(app, i);
+            app.settings_ui.focus = SettingsFocus::Sidebar;
+        }
+        SettingsHit::Row(i) => {
+            let section = SettingsSection::ALL[app.settings_ui.section];
+            let reselect =
+                app.settings_ui.focus == SettingsFocus::Panel && app.settings_ui.row == i;
+            app.settings_ui.row = i;
+            app.settings_ui.focus = SettingsFocus::Panel;
+            if reselect && let Some(&r) = section.rows().get(i) {
+                // Clicking the already-selected row cycles / toggles it.
+                app.settings_adjust(r, true);
+            }
+        }
+        SettingsHit::Theme(i) => {
+            let reselect =
+                app.settings_ui.focus == SettingsFocus::Panel && app.settings_ui.theme_idx == i;
+            app.settings_ui.focus = SettingsFocus::Panel;
+            app.settings_ui.theme_idx = i;
+            if reselect {
+                // Clicking the already-previewed preset applies + saves it.
+                app.settings_confirm_theme();
+            } else {
+                app.settings_preview_theme();
+            }
+        }
+    }
+}
+
 fn handle_sidebar(app: &mut App, key: KeyEvent) {
     let len = SettingsSection::ALL.len();
     match key.code {
