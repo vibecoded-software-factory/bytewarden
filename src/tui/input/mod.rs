@@ -17,6 +17,7 @@ pub mod folder_delete_confirm;
 pub mod folder_name;
 pub mod generator;
 pub mod import;
+pub mod item_actions;
 pub mod login;
 pub mod logout_confirm;
 pub mod memberships;
@@ -203,6 +204,7 @@ pub(crate) fn dispatch_screen_key(app: &mut App, key: KeyEvent) {
         Screen::RepromptUnlock => reprompt::handle(app, key),
         Screen::AssignCollections => assign_collections::handle(app, key),
         Screen::CommandPalette => palette::handle(app, key),
+        Screen::ItemActions => item_actions::handle(app, key),
     }
 }
 

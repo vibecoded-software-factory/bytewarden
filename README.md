@@ -850,6 +850,7 @@ Mouse capture is enabled at boot and disabled cleanly on exit.
 | Click panel | Focus that panel |
 | Click list item | Select it |
 | Click same item again | Open detail (double-click semantics) |
+| **Right-click a vault item** | **Open its action menu** (open · copy user/pass · edit · favorite · delete) |
 | Click filter row | Apply filter immediately |
 | Scroll wheel | Scroll the hovered panel (list / cmdlog / filters / help) |
 | `Shift` + scroll wheel | Horizontal pan in the help popup |
@@ -1172,6 +1173,7 @@ CONFIRMATIONS
 
 MOUSE
   Wheel vertical · Shift+wheel horizontal · click focuses / selects
+  Right-click a vault item · action menu (open/copy/edit/favorite/delete)
 ```
 
 ---

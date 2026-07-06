@@ -15,6 +15,7 @@ pub mod folder_name;
 pub mod generator;
 pub mod help;
 pub mod import;
+pub mod item_actions;
 pub mod login;
 pub mod logo;
 pub mod logout_confirm;
@@ -227,6 +228,10 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
                 _ => vault::draw(frame, app),
             }
             palette::draw(frame, app);
+        }
+        Screen::ItemActions => {
+            vault::draw(frame, app);
+            item_actions::draw_popup(frame, frame.area(), app);
         }
     }
 }

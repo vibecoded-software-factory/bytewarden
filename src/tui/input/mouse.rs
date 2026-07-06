@@ -38,8 +38,14 @@ pub fn handle(app: &mut App, mouse: MouseEvent) {
                 Screen::Vault => mouse_vault(app, col, row),
                 Screen::Detail => mouse_detail(app, col, row),
                 Screen::Settings => crate::tui::input::settings::mouse(app, col, row),
+                Screen::ItemActions => crate::tui::input::item_actions::mouse(app, col, row),
                 _ => {}
             }
+        }
+        // Right-click a vault row opens its secondary-action menu — the mouse
+        // twin of the per-item shortcuts (copy / edit / favorite / delete).
+        MouseEventKind::Down(MouseButton::Right) if app.screen == Screen::Vault => {
+            mouse_vault_right(app, col, row)
         }
         MouseEventKind::ScrollDown => mouse_scroll(
             app,
@@ -133,6 +139,24 @@ fn mouse_vault(app: &mut App, col: u16, row: u16) {
                 crate::tui::flows::vault::request_load_trash(app);
             }
         }
+    }
+}
+
+/// Right-click on a vault list row: seat the selection on that row and open
+/// its per-item action menu, so every action targets the clicked item through
+/// the ordinary `selected_item` path.
+fn mouse_vault_right(app: &mut App, col: u16, row: u16) {
+    if app.mouse_areas.focus_for(col, row) != Some(Focus::List) {
+        return;
+    }
+    let Some(row_idx) = app.mouse_areas.list_row(row) else {
+        return;
+    };
+    let visible_idx = app.vault.scroll_offset + row_idx;
+    if visible_idx < app.vault.filtered_items().len() {
+        app.focus = Focus::List;
+        app.vault.selected_index = visible_idx;
+        crate::tui::flows::item_actions::open(app);
     }
 }
 

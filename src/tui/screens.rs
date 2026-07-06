@@ -59,6 +59,9 @@ pub enum Screen {
     /// Command palette overlay — a fuzzy-searchable list of context-aware
     /// actions, opened with `Ctrl+P`.
     CommandPalette,
+    /// Per-item action menu overlay — the secondary-action list opened by
+    /// right-clicking a vault row, drawn over the vault.
+    ItemActions,
 }
 
 /// Panels inside the [`Screen::Vault`] layout that can hold focus.
