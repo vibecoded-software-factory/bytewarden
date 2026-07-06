@@ -8,6 +8,22 @@ use crate::tui::flows::{assign_collections, generator, items};
 use crate::tui::input::is_alt;
 use crate::tui::input::nav::{nav_clamp, nav_wrap, text_input};
 
+/// Click: in the type-picker step, pick the clicked type (select +
+/// advance to the form); in the form step, focus the clicked field.
+pub fn mouse(app: &mut App, col: u16, row: u16) {
+    let Some(idx) = crate::tui::view::create::create_hit_at(col, row) else {
+        return;
+    };
+    if app.create.choosing_type {
+        if idx < CREATE_ITEM_TYPES.len() {
+            app.create.type_idx = idx;
+            items::create_select_type(app);
+        }
+    } else if idx < app.create.fields.len() {
+        app.create.field_idx = idx;
+    }
+}
+
 /// Dispatches a single key event on the create screen.
 pub fn handle(app: &mut App, key: KeyEvent) {
     if app.create.choosing_type {

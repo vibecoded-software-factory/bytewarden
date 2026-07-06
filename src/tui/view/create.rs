@@ -2,7 +2,7 @@
 
 use ratatui::{
     Frame,
-    layout::{Constraint, Layout},
+    layout::{Constraint, Layout, Rect},
     style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph},
@@ -15,8 +15,37 @@ use crate::tui::view::widgets::{
     cursor_line, field_areas, render_cmd_bar_with_help, render_field_card, rounded_block,
 };
 
+thread_local! {
+    /// Frame-local hit map — one `(rect, index)` per clickable row. In
+    /// the type-picker step the index is the item-type; in the form step
+    /// it is the field index. Recorded from the exact layout rects.
+    static CREATE_HITS: std::cell::RefCell<Vec<(Rect, usize)>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
+fn register_hit(rect: Rect, idx: usize) {
+    if rect.width > 0 && rect.height > 0 {
+        CREATE_HITS.with(|h| h.borrow_mut().push((rect, idx)));
+    }
+}
+
+/// The row index under `(column, row)`, if any — a type index while
+/// choosing the type, otherwise a field index.
+pub fn create_hit_at(column: u16, row: u16) -> Option<usize> {
+    CREATE_HITS.with(|h| {
+        h.borrow()
+            .iter()
+            .rev()
+            .find(|(r, _)| {
+                column >= r.x && column < r.x + r.width && row >= r.y && row < r.y + r.height
+            })
+            .map(|(_, i)| *i)
+    })
+}
+
 /// Renders the create screen.
 pub fn draw(frame: &mut Frame, app: &mut App) {
+    CREATE_HITS.with(|h| h.borrow_mut().clear());
     let t = &app.theme;
     let area = frame.area();
     let chunks = Layout::vertical([
@@ -64,6 +93,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
             let sel = i == app.create.type_idx;
             let col = if sel { t.accent } else { t.inactive };
             let prefix = if sel { "▶ " } else { "  " };
+            register_hit(areas[i], i);
             frame.render_widget(
                 Paragraph::new(Line::from(Span::styled(
                     format!("{}{}", prefix, ct.label()),
@@ -93,6 +123,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
             }
             let sel = i == app.create.field_idx;
             let bcol = if sel { t.accent } else { t.inactive };
+            register_hit(fas[i], i);
             let hint = if field.is_organization() && sel {
                 "  (← → to cycle)"
             } else if field.is_collections() && sel {

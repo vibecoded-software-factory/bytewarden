@@ -43,6 +43,7 @@ pub fn handle(app: &mut App, mouse: MouseEvent) {
                     crate::tui::input::assign_collections::mouse(app, col, row)
                 }
                 Screen::CommandPalette => crate::tui::input::palette::mouse(app, col, row),
+                Screen::Create => crate::tui::input::create::mouse(app, col, row),
                 _ => {}
             }
         }
