@@ -905,6 +905,54 @@ mod tests {
     }
 
     #[test]
+    fn clicking_the_help_anchor_opens_help() {
+        use crate::tui::screens::Screen;
+        use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
+
+        let (mut app, _req_rx, _resp_tx) = fresh_app();
+        app.screen = Screen::Vault;
+        let mut term = Terminal::new(TestBackend::new(90, 24)).unwrap();
+        term.draw(|f| crate::tui::view::draw(f, &mut app)).unwrap();
+        // Locate the `F1 help · F10 settings` anchor in the buffer, click `F1`.
+        let buf = term.backend().buffer();
+        let mut text = String::new();
+        for y in 0..buf.area().height {
+            for x in 0..buf.area().width {
+                if let Some(c) = buf.cell((x, y)) {
+                    text.push_str(c.symbol());
+                }
+            }
+            text.push('\n');
+        }
+        let (col, row) = text
+            .lines()
+            .enumerate()
+            .find_map(|(y, line)| {
+                // `find` gives a byte index; the hint has multi-byte glyphs, so
+                // count chars up to the match for the real column.
+                line.find("F1 help")
+                    .map(|b| (line[..b].chars().count() as u16, y as u16))
+            })
+            .expect("the F1 help anchor is rendered");
+        crate::tui::input::mouse::handle(
+            &mut app,
+            MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Left),
+                column: col + 1,
+                row,
+                modifiers: KeyModifiers::NONE,
+            },
+        );
+        assert_eq!(
+            app.screen,
+            Screen::Help,
+            "clicking the F1 anchor opened help"
+        );
+    }
+
+    #[test]
     fn submit_dispatches_toast_and_request() {
         let (mut app, req_rx, _resp_tx) = fresh_app();
         assert!(app.submit(InFlight::Sync, "Syncing…", WorkerRequest::Sync));

@@ -214,6 +214,10 @@ hand-roll a `Block` with a different border type: a new panel is rounded via
   is the mouse twin of `Esc`: `input::mouse` routes a synthetic `Esc` through
   the active screen's own handler (`dispatch_screen_key`), so each overlay
   cancels the exact way its keyboard `Esc` does — no per-overlay close table.
+- **Clickable chrome buttons** — a shared button registry
+  (`widgets::register_button` / `button_at`, a `ClickAction` per rect, the same
+  frame-local pattern as the scroll registry). The command bar's `F1 help` /
+  `F10 settings` anchor is clickable — the mouse twin of the function keys.
 - `widgets::center_rect` / `MODAL_WIDTH_PCT` / `MODAL_HEIGHT` — the standard
   centered-modal geometry every list/picker/settings overlay imitates so they
   line up; `help_line`, `unread`/`favorite_star` emphasis, `key_style`,
