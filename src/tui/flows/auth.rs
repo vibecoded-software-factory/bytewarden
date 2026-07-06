@@ -557,7 +557,6 @@ pub fn handle_logout(app: &mut App, r: Result<(), BwError>) {
             // Wipe the command log: it can carry item names, folder ids,
             // export/import paths and the user's e-mail.
             app.cmd_log.clear();
-            app.cmd_log_scroll = 0;
             app.screen = Screen::Login;
             app.login.active_field = LoginField::Email;
             app.set_action(ActionState::Done("Logged out ✓".into()));

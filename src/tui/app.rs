@@ -26,6 +26,7 @@ use crate::domain::folder::Folder;
 use crate::domain::item::Item;
 use crate::ports::{ClipboardPort, SettingsPort};
 use crate::tui::action::{ActionState, CmdEntry};
+use crate::tui::cmd_log::CmdLog;
 use crate::tui::generator::GeneratorState;
 use crate::tui::item_forms::{CreateForm, EditForm};
 use crate::tui::login_form::LoginForm;
@@ -35,9 +36,6 @@ use crate::tui::settings_overlay::{SettingsFocus, SettingsOverlay};
 use crate::tui::theme::{self, Theme};
 use crate::tui::vault::Vault;
 use crate::tui::worker::{InFlight, WorkerRequest, WorkerResponse};
-
-/// Maximum number of entries kept in the command-log panel.
-const CMD_LOG_LIMIT: usize = 50;
 
 /// Per-page step size when paging through the vault list.
 pub const PAGE_STEP: usize = 10;
@@ -107,8 +105,9 @@ pub struct App {
     pub detail_field: usize,
 
     // ── Command log ───────────────────────────────────────────────────────
-    pub cmd_log: Vec<CmdEntry>,
-    pub cmd_log_scroll: usize,
+    /// The redacted `bw` command backlog + its scroll. See
+    /// [`crate::tui::cmd_log::CmdLog`].
+    pub cmd_log: CmdLog,
 
     // ── Action / worker state ─────────────────────────────────────────────
     pub action_state: ActionState,
@@ -293,8 +292,7 @@ impl App {
             authenticated: false,
             show_password: false,
             detail_field: 0,
-            cmd_log: Vec::new(),
-            cmd_log_scroll: 0,
+            cmd_log: CmdLog::default(),
             action_state: ActionState::Idle,
             action_tick: 0,
             in_flight: None,
@@ -575,13 +573,13 @@ impl App {
 
     // ── Command log + action state ────────────────────────────────────────
 
-    /// Appends a redacted command + its result to the log. Caps total
-    /// entries at [`CMD_LOG_LIMIT`].
+    /// Appends a redacted command + its result to the log.
     ///
     /// When `BYTEWARDEN_DEBUG=1` is set the same redacted line is also
     /// appended to `~/.bytewarden.log` for offline troubleshooting —
     /// see [`crate::tui::debug_log`]. The check is cheap when the env
-    /// var is unset, so leaving it off costs nothing.
+    /// var is unset, so leaving it off costs nothing. The capping +
+    /// scroll bookkeeping lives on [`CmdLog::push`].
     pub fn push_cmd(&mut self, cmd: &str, ok: bool, detail: &(impl std::fmt::Display + ?Sized)) {
         // `detail` is `&dyn Display` so a typed `BwError`, a `&str`
         // literal and a `&format!(…)` result all pass without the caller
@@ -600,18 +598,6 @@ impl App {
             ok,
             detail,
         });
-        if self.cmd_log.len() > CMD_LOG_LIMIT {
-            self.cmd_log.remove(0);
-        }
-        self.cmd_log_scroll = 0;
-    }
-
-    pub fn cmd_log_scroll_up(&mut self, n: usize) {
-        let max = self.cmd_log.len().saturating_sub(1);
-        self.cmd_log_scroll = (self.cmd_log_scroll + n).min(max);
-    }
-    pub fn cmd_log_scroll_down(&mut self, n: usize) {
-        self.cmd_log_scroll = self.cmd_log_scroll.saturating_sub(n);
     }
 
     pub fn set_action(&mut self, state: ActionState) {

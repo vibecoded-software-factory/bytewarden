@@ -209,9 +209,9 @@ fn mouse_scroll(app: &mut App, col: u16, row: u16, dir: i8, shift: bool) {
             }
             Some(Focus::CmdLog) => {
                 if dir > 0 {
-                    app.cmd_log_scroll_up(1)
+                    app.cmd_log.scroll_up(1)
                 } else {
-                    app.cmd_log_scroll_down(1)
+                    app.cmd_log.scroll_down(1)
                 }
             }
             _ => {
