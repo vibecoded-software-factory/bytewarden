@@ -235,8 +235,11 @@ hand-roll a `Block` with a different border type: a new panel is rounded via
   the real layout rects, so the hit-testing can never drift from the renderer.
 - **Right-click action menu** — right-clicking a vault row opens
   `Screen::ItemActions`, a compact centered menu of that item's secondary
-  actions (open · copy username · copy password · edit · toggle favorite ·
-  delete; in the trash: open · restore · delete). The mouse layer seats the list
+  actions (open · copy username · copy password · copy TOTP · edit · move to
+  collection · toggle favorite · delete; in the trash: open · restore · delete).
+  Actions appear only when applicable — the copies only when the login carries
+  that field, move only when the item is personal and can move into a single
+  org's collection. The mouse layer seats the list
   cursor on the clicked row first, so every action runs against it through the
   ordinary `selected_item` path. Each action **delegates to the existing flow**
   (`flows::item_actions`), so the secret-exposing ones keep their reprompt gate —

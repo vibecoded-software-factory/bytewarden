@@ -124,6 +124,32 @@ pub fn open_for_move(app: &mut App) {
     if !matches!(app.screen, Screen::Detail) || app.edit.active {
         return;
     }
+    open_for_move_from(app, Screen::Detail);
+}
+
+/// Whether the selected item can be moved into an organisation right now:
+/// it's personal (not already in an org), the user belongs to exactly one
+/// org, and that org has at least one visible collection. Used to decide
+/// whether to offer "Move" in the right-click menu without surfacing a
+/// toast for the cases the move flow would just reject.
+pub fn can_move_selected(app: &App) -> bool {
+    let Some(item) = app.vault.selected_item() else {
+        return false;
+    };
+    if item.organization_id.is_some() || app.organizations.len() != 1 {
+        return false;
+    }
+    let org_id = app.organizations[0].id.as_str();
+    app.collections
+        .iter()
+        .any(|c| c.organization_id.as_deref() == Some(org_id))
+}
+
+/// Core of the move flow, opened from `origin` (the detail screen via
+/// `open_for_move`, or the vault via the right-click menu). `origin` is
+/// where cancel returns the user. The personal / single-org /
+/// has-collections preconditions are enforced inline with friendly toasts.
+pub fn open_for_move_from(app: &mut App, origin: Screen) {
     let Some(item) = app.vault.selected_item() else {
         return;
     };
@@ -166,7 +192,7 @@ pub fn open_for_move(app: &mut App) {
         available,
         &[],
         0,
-        Screen::Detail,
+        origin,
         AssignCollectionsPurpose::MoveToOrg {
             item_id,
             organization_id: org_id,

@@ -308,7 +308,7 @@ fn vault_sections(out: &mut Vec<Line<'static>>, focus: &Focus, t: &Theme) {
     ));
     out.push(help_line(
         "Right-click",
-        "Item action menu (open/copy/edit/favorite/delete)",
+        "Item action menu (open/copy/edit/move/favorite/delete)",
         t,
     ));
     out.push(blank());

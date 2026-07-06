@@ -8,7 +8,7 @@
 //! the mouse can't bypass the master-password re-check.
 
 use crate::tui::app::App;
-use crate::tui::flows::{copy, items};
+use crate::tui::flows::{assign_collections, copy, items};
 use crate::tui::item_actions::{ItemAction, ItemActionsState, actions_for};
 use crate::tui::screens::Screen;
 
@@ -19,7 +19,8 @@ pub fn open(app: &mut App) {
         return;
     };
     let is_trash = app.vault.is_trash_view();
-    let actions = actions_for(item, is_trash);
+    let can_move = assign_collections::can_move_selected(app);
+    let actions = actions_for(item, is_trash, can_move);
     if actions.is_empty() {
         return;
     }
@@ -71,10 +72,12 @@ pub fn run(app: &mut App, action: ItemAction) {
         ItemAction::Open => app.go_to_detail(),
         ItemAction::CopyUsername => copy::copy_username_to_clipboard(app),
         ItemAction::CopyPassword => copy::copy_password_to_clipboard(app),
+        ItemAction::CopyTotp => copy::copy_totp_to_clipboard(app),
         ItemAction::Edit => {
             app.go_to_detail();
             items::enter_edit_mode(app);
         }
+        ItemAction::Move => assign_collections::open_for_move_from(app, Screen::Vault),
         ItemAction::ToggleFavorite => items::toggle_favorite(app),
         ItemAction::Restore => items::queue_restore_item(app),
         ItemAction::Delete => items::open_confirm_delete(app),
