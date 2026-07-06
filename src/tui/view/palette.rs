@@ -36,8 +36,8 @@ pub fn draw(frame: &mut Frame, app: &App) {
     ])
     .split(inner);
 
-    // Query row: `⌕ ` prefix + the editor with its block cursor.
-    let mut ql = vec![Span::styled("⌕ ", Style::default().fg(t.dim))];
+    // Query row: `󰍉 ` prefix + the editor with its block cursor.
+    let mut ql = vec![Span::styled("󰍉 ", Style::default().fg(t.dim))];
     ql.extend(cursor_line(state.query.text(), state.query.cursor(), t).spans);
     frame.render_widget(Paragraph::new(Line::from(ql)), rows[0]);
 
