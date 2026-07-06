@@ -166,8 +166,9 @@ hand-roll a `Block` with a different border type: a new panel is rounded via
 - `widgets::list_table` / `list_title` / `middle_ellipsis` /
   `trim_end_ellipsis` / `table_row_at` — the list renderer + sizing helpers.
 - `widgets::draw_search_box(...)` — the `─[/]-Search` box; a leading `󰍉 `
-  magnifying-glass affordance (always accent), then the placeholder when
-  empty/unfocused or the block cursor when focused (via `editor_spans`).
+  magnifying-glass affordance (one-column left margin, coloured to match the
+  current state's text — not accent), then the placeholder when empty/unfocused
+  or the block cursor when focused (via `editor_spans`).
 - `widgets::editor_spans` / `editor_spans_masked` / `editor_lines` — the one
   text-input renderer over a `LineEditor` (masked `●` for secret fields —
   the login master password / OTP, detail hidden fields until reveal).
