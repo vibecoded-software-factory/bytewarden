@@ -39,19 +39,15 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     .split(area);
     let body = Layout::horizontal([Constraint::Percentage(26), Constraint::Percentage(74)])
         .split(outer[0]);
-    // Both sidebar list panels hug their content (no box stretches to
-    // fill), top-aligned; whatever's left below them is a background
-    // gutter. The Folders box adds a one-row grouping gap only when there
-    // are named folders/collections to separate from the two pseudo-rows.
-    let has_named = !app.folders.is_empty() || !app.collections.is_empty();
-    let folder_rows = 2 + has_named as usize + app.folders.len() + app.collections.len();
-    let folders_h = (folder_rows as u16 + 2).clamp(4, 14);
-    // All item-type filters + the one-row separator before Trash + borders.
-    let items_h = ITEM_FILTERS.len() as u16 + 1 + 2;
+    // Folders is sized to its content (small box at the top); the Items
+    // filter fills the rest of the column, its border reaching the bottom
+    // with the list top-aligned, so there's no dead gutter below the
+    // sidebar.
+    let folder_rows = 3 + app.folders.len() + app.collections.len();
+    let folders_h = (folder_rows as u16 + 2).clamp(5, 14);
     let sidebar = Layout::vertical([
         Constraint::Length(3),
         Constraint::Length(folders_h),
-        Constraint::Length(items_h),
         Constraint::Min(0),
     ])
     .split(body[0]);
@@ -211,12 +207,8 @@ fn render_vaults(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     ));
 
     // Blank spacer before the named folder/collection rows — a clean
-    // grouping gap instead of a heavy rule. Skipped when there are none,
-    // so an empty vault doesn't show a trailing blank row.
-    let has_named = !app.folders.is_empty() || !app.collections.is_empty();
-    if has_named {
-        rows.push(ListItem::new(Line::from("")));
-    }
+    // grouping gap instead of a heavy rule.
+    rows.push(ListItem::new(Line::from("")));
 
     // One row per folder (alphabetised at load time). Per-folder
     // count comes from the precomputed map — see
@@ -263,9 +255,8 @@ fn render_vaults(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     }
 
     // The visual selection index has to skip the separator row at
-    // position 2 (present only when there are named rows) so it lines up
-    // with the underlying logical index.
-    let display_sel = if has_named && app.vault.folder_selected >= 2 {
+    // position 2 so it lines up with the underlying logical index.
+    let display_sel = if app.vault.folder_selected >= 2 {
         app.vault.folder_selected + 1
     } else {
         app.vault.folder_selected
