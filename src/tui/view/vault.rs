@@ -22,6 +22,19 @@ use crate::tui::view::widgets::{
     titled_block,
 };
 
+thread_local! {
+    /// The vault `Table`'s real first-visible-row index after the last
+    /// render. The table auto-scrolls to keep the selection visible via
+    /// its own `TableState`, so this — not `app.vault.scroll_offset` —
+    /// is what maps a clicked row back to its item.
+    static VAULT_LIST_OFFSET: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// The vault list's actual top-visible row index from the last frame.
+pub fn vault_list_offset() -> usize {
+    VAULT_LIST_OFFSET.with(|o| o.get())
+}
+
 /// Renders the vault screen.
 pub fn draw(frame: &mut Frame, app: &mut App) {
     let t = &app.theme;
@@ -550,6 +563,9 @@ fn render_list(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         area,
         &mut state,
     );
+    // Capture the table's real post-render offset so a click maps to the
+    // right item even when the auto-scroll has moved past `scroll_offset`.
+    VAULT_LIST_OFFSET.with(|o| o.set(state.offset()));
     // Scroll cue on the right border when the list overflows. Driven by
     // the selection (which reaches both ends) rather than the top offset.
     draw_scrollbar(frame, area, flen, sel.unwrap_or(0), t);

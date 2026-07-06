@@ -48,6 +48,10 @@ pub fn handle(app: &mut App, mouse: MouseEvent) {
                 Screen::Export => crate::tui::input::export::mouse(app, col, row),
                 Screen::Import => crate::tui::input::import::mouse(app, col, row),
                 Screen::SendCreate => crate::tui::input::send_create::mouse(app, col, row),
+                // Read-only overlays: a click anywhere closes them (the
+                // mouse twin of "any key dismisses").
+                Screen::Help => app.go_back(),
+                Screen::Memberships => crate::tui::flows::memberships::close(app),
                 _ => {}
             }
         }
@@ -118,7 +122,7 @@ fn mouse_vault(app: &mut App, col: u16, row: u16) {
     if focus == Focus::List
         && let Some(row_idx) = app.mouse_areas.list_row(row)
     {
-        let visible_idx = app.vault.scroll_offset + row_idx;
+        let visible_idx = crate::tui::view::vault::vault_list_offset() + row_idx;
         if visible_idx < app.vault.filtered_items().len() {
             if app.vault.selected_index == visible_idx {
                 app.go_to_detail();
@@ -164,7 +168,7 @@ fn mouse_vault_right(app: &mut App, col: u16, row: u16) {
     let Some(row_idx) = app.mouse_areas.list_row(row) else {
         return;
     };
-    let visible_idx = app.vault.scroll_offset + row_idx;
+    let visible_idx = crate::tui::view::vault::vault_list_offset() + row_idx;
     if visible_idx < app.vault.filtered_items().len() {
         app.focus = Focus::List;
         app.vault.selected_index = visible_idx;
