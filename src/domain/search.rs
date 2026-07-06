@@ -9,7 +9,7 @@
 //! Calling [`fuzzy_score`] re-lowercases the item's name, username, every
 //! URI and the notes on every invocation, which adds up across a large
 //! vault and a fast typist. The TUI keeps a parallel
-//! `Vec<LoweredItem>` populated from `app.items`/`app.trashed_items`
+//! `Vec<LoweredItem>` populated from `app.vault.items`/`app.vault.trashed_items`
 //! and calls [`fuzzy_score_lowered`] instead, so the lowercase work
 //! happens once per item per *mutation* rather than once per item per
 //! *keystroke*.
@@ -27,8 +27,8 @@ use crate::domain::item::Item;
 /// Pre-lowercased view of the searchable fields of an [`Item`].
 ///
 /// Owns its strings — the TUI builds these once when items are loaded
-/// (or mutated) and keeps the vector parallel to `app.items` /
-/// `app.trashed_items`. Reading them on every keystroke is then O(N)
+/// (or mutated) and keeps the vector parallel to `app.vault.items` /
+/// `app.vault.trashed_items`. Reading them on every keystroke is then O(N)
 /// of cheap `&str::contains` calls instead of O(N) of allocations.
 ///
 /// Carries the same `Zeroize`/`ZeroizeOnDrop` derives as [`Item`] — the

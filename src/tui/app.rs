@@ -2,9 +2,12 @@
 //!
 //! `App` holds:
 //!
-//! * Navigation state (current screen, focus, scroll offsets, selection).
-//! * Form-input state (login form, search box, edit/create field arrays).
-//! * Cached domain data ([`Item`] vectors for the vault and the trash).
+//! * Navigation state (current screen, focus).
+//! * The vault list ([`crate::tui::vault::Vault`]: items + trash + the
+//!   search/filter caches + the list cursor and its invalidation
+//!   contract) and the session reference data (folders, collections…).
+//! * Per-screen form state, each in its own sub-struct (login, edit,
+//!   create, settings overlay) plus the popup states.
 //! * The worker channels + the in-flight ticket ([`crate::tui::worker`]).
 //! * The injected synchronous ports (clipboard, settings).
 //!
@@ -18,7 +21,6 @@ use std::time::{Duration, Instant};
 
 use zeroize::Zeroizing;
 
-use crate::domain::LoweredItem;
 use crate::domain::filter::{ITEM_FILTERS, ItemFilter};
 use crate::domain::folder::Folder;
 use crate::domain::item::Item;
@@ -31,6 +33,7 @@ use crate::tui::mouse_areas::MouseAreas;
 use crate::tui::screens::{Focus, LoginField, Screen};
 use crate::tui::settings_overlay::{SettingsFocus, SettingsOverlay};
 use crate::tui::theme::{self, Theme};
+use crate::tui::vault::Vault;
 use crate::tui::worker::{InFlight, WorkerRequest, WorkerResponse};
 
 /// Maximum number of entries kept in the command-log panel.
@@ -55,51 +58,18 @@ pub(crate) fn redact_cmd(cmd: &str, marker: Option<&str>) -> String {
 
 /// Global TUI state.
 pub struct App {
-    // ── Screen / focus / filter ───────────────────────────────────────────
+    // ── Screen / focus ────────────────────────────────────────────────────
     pub screen: Screen,
     pub should_quit: bool,
     pub focus: Focus,
-    pub active_filter: ItemFilter,
-    pub filter_selected: usize,
 
-    // ── Vault data ────────────────────────────────────────────────────────
-    pub items: Vec<Item>,
-    pub selected_index: usize,
-    pub scroll_offset: usize,
-    /// Trashed items — fetched on demand when [`ItemFilter::Trash`] is
-    /// selected.
-    pub trashed_items: Vec<Item>,
+    // ── Vault list ────────────────────────────────────────────────────────
+    /// The vault's item data + search/filter caches + list-navigation
+    /// cursor, with its own invalidation contract. See
+    /// [`crate::tui::vault::Vault`].
+    pub vault: Vault,
 
-    /// Pre-lowercased projection of [`Self::items`], kept parallel and
-    /// the same length. Refreshed by [`Self::rebuild_search_caches`]
-    /// whenever the items vec is replaced or the in-place edits inside
-    /// it might have changed a searchable field. Used by the search
-    /// hot path so a keystroke doesn't allocate one lowercased string
-    /// per item per keystroke.
-    pub items_lowered: Vec<LoweredItem>,
-    /// Same idea as [`Self::items_lowered`] but for the trash view.
-    pub trashed_lowered: Vec<LoweredItem>,
-    /// Indices into either [`Self::items`] or [`Self::trashed_items`]
-    /// (depending on the active filter), already filtered by the
-    /// current item-type / folder / search-query trio and sorted by
-    /// fuzzy score when a query is active. Read by
-    /// [`Self::filtered_items`] in O(K), eliminating the per-frame
-    /// O(N) recomputation.
-    pub filtered_cache: Vec<usize>,
-    /// Number of items whose `folder_id` is `None`. Cached so the
-    /// folders sidebar can render the "(No folder)" badge in O(1)
-    /// instead of scanning every item per frame.
-    pub no_folder_count: usize,
-    /// `folder_id → number of items in that folder`. Cached so the
-    /// folders sidebar can render the per-folder badges in O(1) per
-    /// row instead of paying an O(items) scan per row per frame
-    /// (which on a 5 k-item, 20-folder vault adds up to 100 k+
-    /// iterations per redraw — and a redraw happens on every
-    /// keystroke).
-    pub folder_counts: std::collections::HashMap<String, usize>,
-    /// `collection_id → number of items belonging to that collection`.
-    /// Same rationale as [`Self::folder_counts`].
-    pub collection_counts: std::collections::HashMap<String, usize>,
+    // ── Session reference data ────────────────────────────────────────────
     /// All folders visible in the current session (sorted alphabetically
     /// by name). Refreshed via the worker on login / after folder edits.
     pub folders: Vec<Folder>,
@@ -118,11 +88,6 @@ pub struct App {
     /// the call fails or hasn't been made yet — the popup falls back
     /// to a hard-coded `bitwardenjson` so it still works.
     pub import_formats: Vec<String>,
-    /// Currently active folder/collection filter (ANDed with
-    /// `active_filter`).
-    pub active_folder: crate::tui::folders::FolderFilter,
-    /// Highlight index in the Folders sidebar panel.
-    pub folder_selected: usize,
 
     // ── Login form ────────────────────────────────────────────────────────
     /// The login screen's form state — buffers, focus, toggles and the
@@ -136,9 +101,6 @@ pub struct App {
     /// synchronously to decide unlock-vs-login. Set from the
     /// boot-status / login response handlers; cleared on logout.
     pub authenticated: bool,
-
-    // ── Search ────────────────────────────────────────────────────────────
-    pub search_query: String,
 
     // ── Detail / edit / create ────────────────────────────────────────────
     pub show_password: bool,
@@ -322,27 +284,13 @@ impl App {
             screen: Screen::Splash,
             should_quit: false,
             focus: Focus::Search,
-            active_filter: ItemFilter::All,
-            filter_selected: 0,
-            items: Vec::new(),
-            selected_index: 0,
-            scroll_offset: 0,
-            trashed_items: Vec::new(),
-            items_lowered: Vec::new(),
-            trashed_lowered: Vec::new(),
-            filtered_cache: Vec::new(),
-            no_folder_count: 0,
-            folder_counts: std::collections::HashMap::new(),
-            collection_counts: std::collections::HashMap::new(),
+            vault: Vault::default(),
             folders: Vec::new(),
             collections: Vec::new(),
             organizations: Vec::new(),
             import_formats: Vec::new(),
-            active_folder: crate::tui::folders::FolderFilter::All,
-            folder_selected: 0,
             login: LoginForm::new(saved_email, cfg.save_email, cfg.keep_session),
             authenticated: false,
-            search_query: String::new(),
             show_password: false,
             detail_field: 0,
             cmd_log: Vec::new(),
@@ -545,13 +493,13 @@ impl App {
 
     pub fn go_to_vault(&mut self) {
         self.screen = Screen::Vault;
-        self.selected_index = 0;
-        self.scroll_offset = 0;
+        self.vault.selected_index = 0;
+        self.vault.scroll_offset = 0;
         self.focus = Focus::Search;
     }
 
     pub fn go_to_detail(&mut self) {
-        if !self.filtered_items().is_empty() {
+        if !self.vault.filtered_items().is_empty() {
             self.screen = Screen::Detail;
             self.show_password = false;
             self.detail_field = 0;
@@ -603,222 +551,26 @@ impl App {
         };
     }
 
-    // ── Filter / list movement ────────────────────────────────────────────
-
-    pub fn filter_move_down(&mut self) {
-        if self.filter_selected < ITEM_FILTERS.len() - 1 {
-            self.filter_selected += 1;
-        }
-    }
-    pub fn filter_move_up(&mut self) {
-        if self.filter_selected > 0 {
-            self.filter_selected -= 1;
-        }
-    }
+    // ── Filter / search (cross into focus) ────────────────────────────────
 
     /// Activates the highlighted filter. Returns `true` when the new
     /// filter is [`ItemFilter::Trash`] so the caller can kick off the
     /// trash load on the worker (the trash list is fetched on demand).
     pub fn apply_filter(&mut self) -> bool {
-        self.active_filter = ITEM_FILTERS[self.filter_selected].clone();
-        self.selected_index = 0;
-        self.scroll_offset = 0;
+        self.vault.active_filter = ITEM_FILTERS[self.vault.filter_selected].clone();
+        self.vault.selected_index = 0;
+        self.vault.scroll_offset = 0;
         self.focus = Focus::List;
-        self.rebuild_filtered_cache();
-        self.active_filter == ItemFilter::Trash
-    }
-
-    pub fn move_down(&mut self) {
-        let len = self.filtered_items().len();
-        if len > 0 && self.selected_index < len - 1 {
-            self.selected_index += 1;
-            if self.selected_index >= self.scroll_offset + VAULT_VIEWPORT_ROWS {
-                self.scroll_offset += 1;
-            }
-        }
-    }
-    pub fn move_up(&mut self) {
-        if self.selected_index > 0 {
-            self.selected_index -= 1;
-            if self.selected_index < self.scroll_offset {
-                self.scroll_offset = self.selected_index;
-            }
-        }
-    }
-    pub fn move_down_page(&mut self) {
-        for _ in 0..PAGE_STEP {
-            self.move_down();
-        }
-    }
-    pub fn move_up_page(&mut self) {
-        for _ in 0..PAGE_STEP {
-            self.move_up();
-        }
-    }
-
-    // ── Vault data accessors ──────────────────────────────────────────────
-
-    /// Returns references to the items that should currently be visible
-    /// in the main list, after applying the active item-type filter,
-    /// the active folder filter, and the search-box ranking.
-    ///
-    /// Reads from [`Self::filtered_cache`], which is rebuilt eagerly
-    /// at every relevant mutation by [`Self::rebuild_filtered_cache`].
-    /// In the rendering hot path this is O(K) — one indirection per
-    /// visible row — instead of the O(N) re-filter-and-rerank the
-    /// previous implementation paid per frame.
-    pub fn filtered_items(&self) -> Vec<&Item> {
-        let source = if self.active_filter == ItemFilter::Trash {
-            &self.trashed_items
-        } else {
-            &self.items
-        };
-        self.filtered_cache
-            .iter()
-            .filter_map(|&i| source.get(i))
-            .collect()
-    }
-
-    pub fn selected_item(&self) -> Option<&Item> {
-        self.filtered_items().get(self.selected_index).copied()
-    }
-
-    /// Id of the currently selected (filtered) item, if any — captured
-    /// before a reload so the cursor can be put back on the same item.
-    pub fn selected_item_id(&self) -> Option<String> {
-        self.selected_item().map(|i| i.id.clone())
-    }
-
-    /// Re-anchors the list cursor onto the item with `id` after a reload
-    /// that may have reordered or replaced the list. Falls back to
-    /// clamping the old index into range when the item is gone (deleted
-    /// elsewhere, filtered out). Keeps `scroll_offset` consistent so the
-    /// cursor stays visible. This is the invalidation contract: a
-    /// background/post-mutation refresh must never yank the cursor onto
-    /// an unrelated row just because indices shifted.
-    pub fn reanchor_selection(&mut self, id: Option<&str>) {
-        let len = self.filtered_items().len();
-        self.selected_index = match id {
-            Some(id) => self
-                .filtered_items()
-                .iter()
-                .position(|i| i.id == id)
-                .unwrap_or_else(|| self.selected_index.min(len.saturating_sub(1))),
-            None => self.selected_index.min(len.saturating_sub(1)),
-        };
-        if len == 0 {
-            self.selected_index = 0;
-        }
-        if self.selected_index < self.scroll_offset {
-            self.scroll_offset = self.selected_index;
-        }
-    }
-
-    /// Rebuilds [`Self::items_lowered`] from [`Self::items`] and
-    /// [`Self::trashed_lowered`] from [`Self::trashed_items`]. Called
-    /// after any mutation that could touch a searchable field
-    /// (load, sync, create, edit, delete, restore, favorite toggle).
-    ///
-    /// Always pairs with a [`Self::rebuild_filtered_cache`] call,
-    /// because the filtered cache references items by index — adding
-    /// or removing items shifts those indices.
-    pub fn rebuild_search_caches(&mut self) {
-        self.items_lowered = self.items.iter().map(LoweredItem::from_item).collect();
-        self.trashed_lowered = self
-            .trashed_items
-            .iter()
-            .map(LoweredItem::from_item)
-            .collect();
-    }
-
-    /// Recomputes [`Self::filtered_cache`] from the current items,
-    /// active filters and search query. Cheap to call — pure CPU,
-    /// no allocations beyond the result vector.
-    pub fn rebuild_filtered_cache(&mut self) {
-        let (source, lowered): (&[Item], &[LoweredItem]) =
-            if self.active_filter == ItemFilter::Trash {
-                (&self.trashed_items, &self.trashed_lowered)
-            } else {
-                (&self.items, &self.items_lowered)
-            };
-        self.filtered_cache = compute_filtered_indices(
-            source,
-            lowered,
-            &self.active_filter,
-            &self.active_folder,
-            &self.search_query,
-        );
-    }
-
-    /// Rebuilds both caches in the order required by their
-    /// invariants (lowered first — filtered references the lowered
-    /// vec for scoring). Use this from any mutation that replaces
-    /// items wholesale or might have altered a searchable field.
-    pub fn rebuild_caches(&mut self) {
-        self.rebuild_search_caches();
-        self.rebuild_filtered_cache();
-        self.rebuild_sidebar_counts();
-    }
-
-    /// Rebuilds [`Self::no_folder_count`], [`Self::folder_counts`] and
-    /// [`Self::collection_counts`] from the current `app.items`. One
-    /// pass over the items list, O(N) total — replaces the previous
-    /// O(items × (folders + collections)) per-frame work in the folder
-    /// sidebar renderer.
-    ///
-    /// Cleared keys for folders / collections that no longer have any
-    /// items are intentionally dropped from the maps so the renderer
-    /// reads `Some(0)` only when the row truly has zero entries (the
-    /// missing-key path also resolves to zero, so the renderer treats
-    /// both identically).
-    pub fn rebuild_sidebar_counts(&mut self) {
-        self.no_folder_count = 0;
-        self.folder_counts.clear();
-        self.collection_counts.clear();
-        for item in &self.items {
-            match item.folder_id.as_deref() {
-                None => self.no_folder_count += 1,
-                Some(id) => *self.folder_counts.entry(id.to_string()).or_insert(0) += 1,
-            }
-            for cid in &item.collection_ids {
-                *self.collection_counts.entry(cid.clone()).or_insert(0) += 1;
-            }
-        }
-    }
-
-    /// Item count for a given filter — used to render sidebar badges.
-    pub fn count_for(&self, filter: &ItemFilter) -> usize {
-        match filter {
-            ItemFilter::All => self.items.len(),
-            ItemFilter::Favorites => self.items.iter().filter(|i| i.favorite).count(),
-            ItemFilter::Trash => self.trashed_items.len(),
-            f => self
-                .items
-                .iter()
-                .filter(|i| f.type_id() == Some(i.item_type))
-                .count(),
-        }
-    }
-
-    pub fn perform_search(&mut self) {
-        self.selected_index = 0;
-        self.scroll_offset = 0;
-        self.rebuild_filtered_cache();
+        self.vault.rebuild_filtered_cache();
+        self.vault.is_trash_view()
     }
 
     pub fn clear_search(&mut self) {
-        self.search_query.clear();
+        self.vault.search_query.clear();
         self.focus = Focus::List;
-        self.selected_index = 0;
-        self.scroll_offset = 0;
-        self.rebuild_filtered_cache();
-    }
-
-    // ── Trash mode ────────────────────────────────────────────────────────
-
-    /// Shorthand — `true` when the active filter is [`ItemFilter::Trash`].
-    pub fn is_trash_view(&self) -> bool {
-        self.active_filter == ItemFilter::Trash
+        self.vault.selected_index = 0;
+        self.vault.scroll_offset = 0;
+        self.vault.rebuild_filtered_cache();
     }
 
     // ── Command log + action state ────────────────────────────────────────
@@ -921,25 +673,14 @@ impl App {
     /// Delegates to the shared [`crate::tui::detail_fields`] builder so
     /// the count never diverges from what the renderer actually shows.
     pub fn detail_field_count(&self) -> usize {
-        let Some(item) = self.selected_item() else {
+        let Some(item) = self.vault.selected_item() else {
             return 0;
         };
         crate::tui::detail_fields::build_detail_fields(item, false, 0).len()
     }
-
-    /// Sorts the in-memory vault list alphabetically (case-insensitive).
-    ///
-    /// Uses `sort_by_cached_key` so the lowercased key is computed once
-    /// per item per sort instead of once per comparison. Rebuilds both
-    /// search caches because the indices stored in `filtered_cache`
-    /// and the parallel positions in `items_lowered` are now stale.
-    pub fn sort_items(&mut self) {
-        self.items.sort_by_cached_key(|i| i.name.to_lowercase());
-        self.rebuild_caches();
-    }
 }
 
-/// Pure helper extracted from [`App::rebuild_filtered_cache`] so the
+/// Pure helper extracted from [`crate::tui::vault::Vault::rebuild_filtered_cache`] so the
 /// filtering+ranking logic can be tested in isolation (without
 /// instantiating an `App` plus four trait-object adapters).
 ///
@@ -1134,37 +875,40 @@ mod tests {
     #[test]
     fn reanchor_selection_follows_the_item_by_id() {
         let (mut app, _req_rx, _resp_tx) = fresh_app();
-        app.items = vec![
+        app.vault.items = vec![
             item("a", "A", 1, None),
             item("b", "B", 1, None),
             item("c", "C", 1, None),
         ];
-        app.rebuild_caches();
-        app.selected_index = 1; // "b"
-        assert_eq!(app.selected_item_id().as_deref(), Some("b"));
+        app.vault.rebuild_caches();
+        app.vault.selected_index = 1; // "b"
+        assert_eq!(app.vault.selected_item_id().as_deref(), Some("b"));
         // The list comes back reordered — the cursor must follow "b".
-        app.items = vec![
+        app.vault.items = vec![
             item("c", "C", 1, None),
             item("b", "B", 1, None),
             item("a", "A", 1, None),
         ];
-        app.rebuild_caches();
-        app.reanchor_selection(Some("b"));
-        assert_eq!(app.selected_item().map(|i| i.id.clone()), Some("b".into()));
+        app.vault.rebuild_caches();
+        app.vault.reanchor_selection(Some("b"));
+        assert_eq!(
+            app.vault.selected_item().map(|i| i.id.clone()),
+            Some("b".into())
+        );
     }
 
     #[test]
     fn reanchor_clamps_when_the_item_is_gone() {
         let (mut app, _req_rx, _resp_tx) = fresh_app();
-        app.items = vec![item("a", "A", 1, None), item("b", "B", 1, None)];
-        app.rebuild_caches();
-        app.selected_index = 1; // "b"
+        app.vault.items = vec![item("a", "A", 1, None), item("b", "B", 1, None)];
+        app.vault.rebuild_caches();
+        app.vault.selected_index = 1; // "b"
         // "b" deleted elsewhere — the list is now shorter.
-        app.items = vec![item("a", "A", 1, None)];
-        app.rebuild_caches();
-        app.reanchor_selection(Some("b"));
-        assert_eq!(app.selected_index, 0);
-        assert!(app.selected_item().is_some());
+        app.vault.items = vec![item("a", "A", 1, None)];
+        app.vault.rebuild_caches();
+        app.vault.reanchor_selection(Some("b"));
+        assert_eq!(app.vault.selected_index, 0);
+        assert!(app.vault.selected_item().is_some());
     }
 
     fn item(id: &str, name: &str, item_type: u8, folder: Option<&str>) -> Item {

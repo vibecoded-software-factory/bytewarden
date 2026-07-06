@@ -14,8 +14,8 @@ use crate::tui::screens::Screen;
 pub fn handle(app: &mut App, key: KeyEvent) {
     match key.code {
         KeyCode::Esc | KeyCode::Char('n') => app.screen = Screen::Vault,
-        KeyCode::Enter => items::queue_delete_item(app, app.is_trash_view()),
-        KeyCode::Char('D') if !app.is_trash_view() => items::queue_delete_item(app, true),
+        KeyCode::Enter => items::queue_delete_item(app, app.vault.is_trash_view()),
+        KeyCode::Char('D') if !app.vault.is_trash_view() => items::queue_delete_item(app, true),
         _ => {}
     }
 }

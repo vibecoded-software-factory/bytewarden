@@ -66,7 +66,10 @@ pub fn handle(app: &mut App, key: KeyEvent) {
                     .fields
                     .get(app.edit.field_idx)
                     .is_some_and(|f| f.hidden && !f.revealed)
-                    && app.selected_item().is_some_and(|i| i.needs_reprompt());
+                    && app
+                        .vault
+                        .selected_item()
+                        .is_some_and(|i| i.needs_reprompt());
                 if needs_gate && reprompt::maybe_open(app, ProtectedAction::RevealEditField) {
                     return;
                 }
@@ -106,7 +109,10 @@ pub fn handle(app: &mut App, key: KeyEvent) {
             // (the one that exposes secrets) for reprompt-protected
             // items.
             if !app.show_password
-                && app.selected_item().is_some_and(|i| i.needs_reprompt())
+                && app
+                    .vault
+                    .selected_item()
+                    .is_some_and(|i| i.needs_reprompt())
                 && reprompt::maybe_open(app, ProtectedAction::RevealDetail)
             {
                 return;
@@ -118,18 +124,18 @@ pub fn handle(app: &mut App, key: KeyEvent) {
         // alias because these arms don't require the modifier. `h`/`j`/`k`
         // (back / navigate) are matched above and never reach here.
         KeyCode::Char('c') => copy::copy_selected_field(app),
-        KeyCode::Char('e') if !app.is_trash_view() => items::enter_edit_mode(app),
-        KeyCode::Char('m') if !app.is_trash_view() => assign_collections::open_for_move(app),
-        KeyCode::Char('r') if app.is_trash_view() => items::queue_restore_item(app),
+        KeyCode::Char('e') if !app.vault.is_trash_view() => items::enter_edit_mode(app),
+        KeyCode::Char('m') if !app.vault.is_trash_view() => assign_collections::open_for_move(app),
+        KeyCode::Char('r') if app.vault.is_trash_view() => items::queue_restore_item(app),
         KeyCode::Char('d') => items::open_confirm_delete(app),
-        KeyCode::Char('x') if !app.is_trash_view() => items::queue_check_exposed(app),
-        KeyCode::Char('a') if !app.is_trash_view() => items::open_attachment_upload(app),
+        KeyCode::Char('x') if !app.vault.is_trash_view() => items::queue_check_exposed(app),
+        KeyCode::Char('a') if !app.vault.is_trash_view() => items::open_attachment_upload(app),
         // Attachment rows — `s` downloads, `Alt+Del` deletes (kept on a
         // modifier so a stray Del can't wipe an attachment). The flows
         // toast when the focused row isn't an attachment, so they're safe
         // to press anywhere.
         KeyCode::Char('s') => items::open_attachment_download(app),
-        KeyCode::Delete if is_alt(&key) && !app.is_trash_view() => {
+        KeyCode::Delete if is_alt(&key) && !app.vault.is_trash_view() => {
             items::open_confirm_delete_attachment(app)
         }
         _ => {}

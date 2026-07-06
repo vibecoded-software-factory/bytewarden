@@ -160,22 +160,26 @@ pub fn handle_create(app: &mut App, r: Result<crate::domain::Item, BwError>) {
         Ok(item) => {
             let new_id = item.id.clone();
             let name = item.name.clone();
-            app.items.push(item);
-            app.sort_items();
+            app.vault.items.push(item);
+            app.vault.sort_items();
             // Resolve the new item's position against the *visible* list
-            // (which may differ from `app.items` if the user has an
+            // (which may differ from `app.vault.items` if the user has an
             // active search query). When the new item is hidden by the
             // current filter / search, fall back to the top of the
             // visible list so the highlight is never out of bounds.
-            let new_idx = app.filtered_items().iter().position(|i| i.id == new_id);
+            let new_idx = app
+                .vault
+                .filtered_items()
+                .iter()
+                .position(|i| i.id == new_id);
             match new_idx {
                 Some(idx) => {
-                    app.selected_index = idx;
-                    app.scroll_offset = idx.saturating_sub(5);
+                    app.vault.selected_index = idx;
+                    app.vault.scroll_offset = idx.saturating_sub(5);
                 }
                 None => {
-                    app.selected_index = 0;
-                    app.scroll_offset = 0;
+                    app.vault.selected_index = 0;
+                    app.vault.scroll_offset = 0;
                 }
             }
             app.push_cmd(&cmd, true, &format!("created: {name}"));
@@ -198,7 +202,7 @@ pub fn handle_create(app: &mut App, r: Result<crate::domain::Item, BwError>) {
 /// "Type" pseudo-field, which isn't editable), fall back to the first
 /// editable row.
 pub fn enter_edit_mode(app: &mut App) {
-    let Some(item) = app.selected_item() else {
+    let Some(item) = app.vault.selected_item() else {
         return;
     };
     let item = item.clone();
@@ -240,7 +244,7 @@ pub struct AttachmentUploadState {
 /// Opens the attachment-upload popup for the currently selected item.
 /// No-op + error toast when there's nothing selected.
 pub fn open_attachment_upload(app: &mut App) {
-    let Some(item) = app.selected_item() else {
+    let Some(item) = app.vault.selected_item() else {
         app.set_action(ActionState::Error(
             "Pick an item to attach a file to.".into(),
         ));
@@ -328,7 +332,7 @@ fn split_name(file_name: &str) -> (String, String) {
 /// currently focused detail row. No-op + error toast when the focused
 /// row is not an attachment.
 pub fn open_attachment_download(app: &mut App) {
-    let Some(item) = app.selected_item() else {
+    let Some(item) = app.vault.selected_item() else {
         return;
     };
     let Some(att) = crate::tui::detail_fields::attachment_at(item, app.detail_field) else {
@@ -416,7 +420,7 @@ pub struct AttachmentDeleteState {
 /// Opens the confirm-delete popup for the attachment at the focused
 /// detail row. No-op + error toast otherwise.
 pub fn open_confirm_delete_attachment(app: &mut App) {
-    let Some(item) = app.selected_item() else {
+    let Some(item) = app.vault.selected_item() else {
         return;
     };
     let Some(att) = crate::tui::detail_fields::attachment_at(item, app.detail_field) else {
@@ -497,10 +501,10 @@ pub fn handle_delete_attachment_refresh(
     // happens, finish on the detail screen with the success toast.
     if let Ok(json) = r
         && let Ok(refreshed) = serde_json::from_str::<crate::domain::Item>(&json)
-        && let Some(slot) = app.items.iter_mut().find(|i| i.id == item_id)
+        && let Some(slot) = app.vault.items.iter_mut().find(|i| i.id == item_id)
     {
         *slot = refreshed;
-        app.rebuild_caches();
+        app.vault.rebuild_caches();
     }
     let count = app.detail_field_count();
     if count > 0 && app.detail_field >= count {
@@ -544,9 +548,9 @@ pub fn handle_upload_attachment(app: &mut App, r: Result<crate::domain::Item, Bw
     match r {
         Ok(updated) => {
             app.push_cmd(&cmd, true, &format!("uploaded to {item_name}"));
-            if let Some(slot) = app.items.iter_mut().find(|i| i.id == item_id) {
+            if let Some(slot) = app.vault.items.iter_mut().find(|i| i.id == item_id) {
                 *slot = updated;
-                app.rebuild_caches();
+                app.vault.rebuild_caches();
             }
             app.set_action(ActionState::Done(format!("Attached to \"{item_name}\" ✓")));
             app.attachment_upload = None;
@@ -967,10 +971,10 @@ pub fn handle_save_edit_commit(app: &mut App, r: Result<crate::domain::Item, BwE
     match r {
         Ok(updated) => {
             let name = updated.name.clone();
-            if let Some(i) = app.items.iter_mut().find(|i| i.id == item_id) {
+            if let Some(i) = app.vault.items.iter_mut().find(|i| i.id == item_id) {
                 *i = updated;
             }
-            app.sort_items();
+            app.vault.sort_items();
             app.push_cmd(&cmd, true, &format!("saved: {name}"));
             app.set_action(ActionState::Done("Saved ✓".into()));
             app.edit.active = false;
@@ -983,14 +987,14 @@ pub fn handle_save_edit_commit(app: &mut App, r: Result<crate::domain::Item, BwE
 
 /// Opens the confirm-delete popup if there is an item selected.
 pub fn open_confirm_delete(app: &mut App) {
-    if app.selected_item().is_some() {
+    if app.vault.selected_item().is_some() {
         app.screen = Screen::ConfirmDelete;
     }
 }
 
 /// Queues a delete action (worker).
 pub fn queue_delete_item(app: &mut App, permanent: bool) {
-    let Some(item) = app.selected_item() else {
+    let Some(item) = app.vault.selected_item() else {
         return;
     };
     let (item_id, name) = (item.id.clone(), item.name.clone());
@@ -1023,10 +1027,10 @@ pub fn handle_delete(
     let cmd = format!("bw delete item {item_id}{perm_str}");
     match r {
         Ok(()) => {
-            app.items.retain(|i| i.id != item_id);
-            app.rebuild_caches();
-            if app.selected_index >= app.items.len() && !app.items.is_empty() {
-                app.selected_index = app.items.len() - 1;
+            app.vault.items.retain(|i| i.id != item_id);
+            app.vault.rebuild_caches();
+            if app.vault.selected_index >= app.vault.items.len() && !app.vault.items.is_empty() {
+                app.vault.selected_index = app.vault.items.len() - 1;
             }
             let label = if permanent {
                 "deleted permanently"
@@ -1064,7 +1068,7 @@ pub fn handle_delete_reload_trash(app: &mut App, r: Result<Vec<crate::domain::It
 
 /// Queues a restore action for the selected (trashed) item (worker).
 pub fn queue_restore_item(app: &mut App) {
-    let Some(item) = app.selected_item() else {
+    let Some(item) = app.vault.selected_item() else {
         return;
     };
     let (item_id, name) = (item.id.clone(), item.name.clone());
@@ -1083,14 +1087,14 @@ pub fn handle_restore(app: &mut App, item_id: String, name: String, r: Result<()
     let cmd = format!("bw restore item {item_id}");
     match r {
         Ok(()) => {
-            app.trashed_items.retain(|i| i.id != item_id);
-            app.rebuild_caches();
+            app.vault.trashed_items.retain(|i| i.id != item_id);
+            app.vault.rebuild_caches();
             app.push_cmd(&cmd, true, &format!("{name} restored to vault"));
             app.screen = Screen::Vault;
-            app.active_filter = ItemFilter::All;
-            app.filter_selected = 0;
-            app.selected_index = 0;
-            app.scroll_offset = 0;
+            app.vault.active_filter = ItemFilter::All;
+            app.vault.filter_selected = 0;
+            app.vault.selected_index = 0;
+            app.vault.scroll_offset = 0;
             app.focus = Focus::Search;
             app.set_action(ActionState::Done("Restored ✓".into()));
             // Re-sync items silently so the restored entry is present; the
@@ -1118,7 +1122,7 @@ pub fn handle_restore_reload(app: &mut App, r: Result<Vec<crate::domain::Item>, 
 /// login (the backend would reject the request anyway, but failing fast
 /// saves a round trip).
 pub fn queue_check_exposed(app: &mut App) {
-    let Some(item) = app.selected_item() else {
+    let Some(item) = app.vault.selected_item() else {
         return;
     };
     if item.login.is_none() {
@@ -1163,7 +1167,7 @@ pub fn handle_check_exposed(app: &mut App, r: Result<u32, BwError>) {
 
 /// Favorite-toggle — step 1: fetch the item JSON (worker).
 pub fn toggle_favorite(app: &mut App) {
-    let Some(item) = app.selected_item() else {
+    let Some(item) = app.vault.selected_item() else {
         return;
     };
     let item_id = item.id.clone();
@@ -1185,7 +1189,7 @@ pub fn handle_toggle_fetch(app: &mut App, item_id: String, r: Result<Zeroizing<S
         Ok(j) => j,
         Err(e) => return app.cmd_err(&cmd, &e, "Fetch failed"),
     };
-    let new_fav = match app.items.iter().find(|i| i.id == item_id) {
+    let new_fav = match app.vault.items.iter().find(|i| i.id == item_id) {
         Some(i) => !i.favorite,
         None => return, // item gone from under us
     };
@@ -1218,12 +1222,12 @@ pub fn handle_toggle_commit(
     let cmd = "bw edit item".to_string();
     match r {
         Ok(updated) => {
-            if let Some(i) = app.items.iter_mut().find(|i| i.id == updated.id) {
+            if let Some(i) = app.vault.items.iter_mut().find(|i| i.id == updated.id) {
                 i.favorite = new_favorite;
             }
             // Favorite isn't a search field, but the Favorites filter
             // depends on the boolean, so rebuild the filtered cache.
-            app.rebuild_filtered_cache();
+            app.vault.rebuild_filtered_cache();
             let label = if new_favorite {
                 "★ Favorited"
             } else {

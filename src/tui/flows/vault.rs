@@ -19,8 +19,8 @@ use crate::tui::worker::{InFlight, WorkerRequest};
 /// caches (via `sort_items`). Does **not** touch the cursor — for the
 /// paths that set their own selection afterwards (create, restore).
 pub(crate) fn set_items(app: &mut App, items: Vec<Item>) {
-    app.items = items;
-    app.sort_items();
+    app.vault.items = items;
+    app.vault.sort_items();
 }
 
 /// Like [`set_items`] but **preserves the user's cursor on the same item
@@ -29,17 +29,17 @@ pub(crate) fn set_items(app: &mut App, items: Vec<Item>) {
 /// the user (silent reload, sync, import, move, folder-delete, manual
 /// F5). Capture the id first, replace, then re-anchor.
 pub(crate) fn set_items_keep_cursor(app: &mut App, items: Vec<Item>) {
-    let prev = app.selected_item_id();
+    let prev = app.vault.selected_item_id();
     set_items(app, items);
-    app.reanchor_selection(prev.as_deref());
+    app.vault.reanchor_selection(prev.as_deref());
 }
 
 /// Replaces the trash list (sorted) and rebuilds caches.
 pub(crate) fn set_trash(app: &mut App, items: Vec<Item>) {
     let mut sorted = items;
     sorted.sort_by_cached_key(|i| i.name.to_lowercase());
-    app.trashed_items = sorted;
-    app.rebuild_caches();
+    app.vault.trashed_items = sorted;
+    app.vault.rebuild_caches();
 }
 
 // ── User-initiated loaders ────────────────────────────────────────────────

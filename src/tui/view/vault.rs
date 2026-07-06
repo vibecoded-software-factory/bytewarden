@@ -85,7 +85,7 @@ fn render_hint_bar(
         // On Search the box owns typing, so ↑↓ navigate (not j/k), and
         // row actions ride on `Alt+` (the gradient's text-field rule).
         Focus::Search => {
-            if app.is_trash_view() {
+            if app.vault.is_trash_view() {
                 &[("Esc", "clear"), ("↑↓", "nav"), ("Enter", "open")]
             } else {
                 &[
@@ -108,7 +108,7 @@ fn render_hint_bar(
         Focus::CmdLog => &[("j/k", "scroll"), ("Tab", "next")],
         // Bare letters act on the focused row (the gradient).
         Focus::List | Focus::Status => {
-            if app.is_trash_view() {
+            if app.vault.is_trash_view() {
                 &[("j/k", "nav"), ("Enter", "open"), ("r", "restore")]
             } else {
                 &[
@@ -184,21 +184,21 @@ fn render_vaults(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     let mut rows: Vec<ListItem> = Vec::with_capacity(row_count(&app.folders, &app.collections) + 1);
 
     // Row 0 — All folders.
-    let all_active = matches!(app.active_folder, FolderFilter::All);
+    let all_active = matches!(app.vault.active_folder, FolderFilter::All);
     rows.push(folder_row(
         "  📁 All folders",
         all_active,
-        app.items.len(),
+        app.vault.items.len(),
         t,
     ));
 
     // Row 1 — (No folder). Count is precomputed in
-    // `App::rebuild_sidebar_counts` to avoid an O(items) scan per frame.
-    let none_active = matches!(app.active_folder, FolderFilter::NoFolder);
+    // `Vault::rebuild_sidebar_counts` to avoid an O(items) scan per frame.
+    let none_active = matches!(app.vault.active_folder, FolderFilter::NoFolder);
     rows.push(folder_row(
         "    (No folder)",
         none_active,
-        app.no_folder_count,
+        app.vault.no_folder_count,
         t,
     ));
 
@@ -208,10 +208,16 @@ fn render_vaults(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
 
     // One row per folder (alphabetised at load time). Per-folder
     // count comes from the precomputed map — see
-    // `App::rebuild_sidebar_counts`.
+    // `Vault::rebuild_sidebar_counts`.
     for folder in &app.folders {
-        let active = matches!(&app.active_folder, FolderFilter::Folder(id) if id == &folder.id);
-        let count = app.folder_counts.get(&folder.id).copied().unwrap_or(0);
+        let active =
+            matches!(&app.vault.active_folder, FolderFilter::Folder(id) if id == &folder.id);
+        let count = app
+            .vault
+            .folder_counts
+            .get(&folder.id)
+            .copied()
+            .unwrap_or(0);
         rows.push(folder_row(
             &format!("  📁 {}", folder.name),
             active,
@@ -225,9 +231,9 @@ fn render_vaults(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     // Personal-only accounts skip this section entirely. Same
     // precomputed-count rationale as the folder rows above.
     for collection in &app.collections {
-        let active =
-            matches!(&app.active_folder, FolderFilter::Collection(id) if id == &collection.id);
+        let active = matches!(&app.vault.active_folder, FolderFilter::Collection(id) if id == &collection.id);
         let count = app
+            .vault
             .collection_counts
             .get(&collection.id)
             .copied()
@@ -246,16 +252,16 @@ fn render_vaults(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
 
     // The visual selection index has to skip the separator row at
     // position 2 so it lines up with the underlying logical index.
-    let display_sel = if app.folder_selected >= 2 {
-        app.folder_selected + 1
+    let display_sel = if app.vault.folder_selected >= 2 {
+        app.vault.folder_selected + 1
     } else {
-        app.folder_selected
+        app.vault.folder_selected
     };
     let mut state = ListState::default();
     state.select(Some(display_sel));
 
     let total = row_count(&app.folders, &app.collections);
-    let indicator = format!("{} of {}", app.folder_selected + 1, total);
+    let indicator = format!("{} of {}", app.vault.folder_selected + 1, total);
 
     frame.render_stateful_widget(
         List::new(rows)
@@ -291,7 +297,7 @@ fn render_filters(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     let filter_items: Vec<ListItem> = ITEM_FILTERS
         .iter()
         .map(|f| {
-            let count = app.count_for(f);
+            let count = app.vault.count_for(f);
             let col = match f {
                 ItemFilter::Login => t.item_login,
                 ItemFilter::Card => t.item_card,
@@ -312,7 +318,7 @@ fn render_filters(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
                 ItemFilter::SshKey => "󰣀 ",
                 ItemFilter::Trash => "󰩺 ",
             };
-            let active = *f == app.active_filter;
+            let active = *f == app.vault.active_filter;
             let style = if active {
                 Style::default().fg(col).add_modifier(Modifier::BOLD)
             } else {
@@ -336,13 +342,17 @@ fn render_filters(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     }
 
     let mut state = ListState::default();
-    let display_sel = if app.filter_selected == ITEM_FILTERS.len() - 1 {
-        app.filter_selected + 1 // skip the separator row
+    let display_sel = if app.vault.filter_selected == ITEM_FILTERS.len() - 1 {
+        app.vault.filter_selected + 1 // skip the separator row
     } else {
-        app.filter_selected
+        app.vault.filter_selected
     };
     state.select(Some(display_sel));
-    let indicator = format!("{} of {}", app.filter_selected + 1, ITEM_FILTERS.len());
+    let indicator = format!(
+        "{} of {}",
+        app.vault.filter_selected + 1,
+        ITEM_FILTERS.len()
+    );
 
     frame.render_stateful_widget(
         List::new(filter_items_with_sep)
@@ -359,12 +369,15 @@ fn render_search(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     let sf = app.focus == Focus::Search;
     let line = if sf {
         Line::from(vec![
-            Span::styled(app.search_query.as_str(), Style::default().fg(t.foreground)),
+            Span::styled(
+                app.vault.search_query.as_str(),
+                Style::default().fg(t.foreground),
+            ),
             Span::styled("█", Style::default().fg(t.accent)),
         ])
-    } else if !app.search_query.is_empty() {
+    } else if !app.vault.search_query.is_empty() {
         Line::from(Span::styled(
-            app.search_query.as_str(),
+            app.vault.search_query.as_str(),
             Style::default().fg(t.dim),
         ))
     } else {
@@ -401,7 +414,7 @@ fn list_type_label(item_type: u8) -> &'static str {
 fn render_list(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     let t = &app.theme;
     let lf = app.focus == Focus::List;
-    let filtered = app.filtered_items();
+    let filtered = app.vault.filtered_items();
 
     // Only reserve an indicator column when at least one *visible* item
     // actually carries that indicator. A personal-only account (no
@@ -477,10 +490,10 @@ fn render_list(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         .collect();
 
     let flen = filtered.len();
-    let sel = (flen > 0).then_some(app.selected_index.min(flen.saturating_sub(1)));
+    let sel = (flen > 0).then_some(app.vault.selected_index.min(flen.saturating_sub(1)));
     let mut state = TableState::default().with_selected(sel);
     let indicator = if flen > 0 {
-        format!("{} of {}", app.selected_index + 1, flen)
+        format!("{} of {}", app.vault.selected_index + 1, flen)
     } else {
         "0 of 0".into()
     };
@@ -502,7 +515,7 @@ fn render_list(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         &mut state,
     );
     // Scroll cue on the right border when the list overflows.
-    draw_scrollbar(frame, area, flen, app.scroll_offset, t);
+    draw_scrollbar(frame, area, flen, app.vault.scroll_offset, t);
 }
 
 fn render_cmd_log(frame: &mut Frame, app: &App, area: ratatui::layout::Rect, cmd_h: u16) {

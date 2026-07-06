@@ -40,7 +40,7 @@ pub fn handle(app: &mut App, key: KeyEvent) {
     }
 
     // Global vault shortcuts.
-    if key.code == KeyCode::Char('s') && is_alt(&key) && !app.is_trash_view() {
+    if key.code == KeyCode::Char('s') && is_alt(&key) && !app.vault.is_trash_view() {
         vault::request_sync(app);
         return;
     }
@@ -102,8 +102,8 @@ pub fn handle(app: &mut App, key: KeyEvent) {
         },
 
         Focus::Items => match key.code {
-            KeyCode::Char('j') | KeyCode::Down | KeyCode::PageDown => app.filter_move_down(),
-            KeyCode::Char('k') | KeyCode::Up | KeyCode::PageUp => app.filter_move_up(),
+            KeyCode::Char('j') | KeyCode::Down | KeyCode::PageDown => app.vault.filter_move_down(),
+            KeyCode::Char('k') | KeyCode::Up | KeyCode::PageUp => app.vault.filter_move_up(),
             // Switching to Trash fetches the trash list on demand;
             // `apply_filter` runs (and applies the filter) in the guard.
             KeyCode::Enter if app.apply_filter() => vault::request_load_trash(app),
@@ -114,32 +114,32 @@ pub fn handle(app: &mut App, key: KeyEvent) {
         Focus::Search => match key.code {
             KeyCode::Esc => app.clear_search(),
             KeyCode::Tab => app.cycle_focus(),
-            KeyCode::Char('j') | KeyCode::Down => app.move_down(),
-            KeyCode::Char('k') | KeyCode::Up => app.move_up(),
-            KeyCode::PageDown => app.move_down_page(),
-            KeyCode::PageUp => app.move_up_page(),
-            KeyCode::Enter if !app.filtered_items().is_empty() => {
+            KeyCode::Char('j') | KeyCode::Down => app.vault.move_down(),
+            KeyCode::Char('k') | KeyCode::Up => app.vault.move_up(),
+            KeyCode::PageDown => app.vault.move_down_page(),
+            KeyCode::PageUp => app.vault.move_up_page(),
+            KeyCode::Enter if !app.vault.filtered_items().is_empty() => {
                 app.screen = Screen::Detail;
                 app.show_password = false;
             }
             KeyCode::Backspace => {
-                app.search_query.pop();
-                app.perform_search();
+                app.vault.search_query.pop();
+                app.vault.perform_search();
             }
             _ if is_alt(&key) => handle_alt_shortcuts(app, key),
             // Plain char only feeds search when no modifiers are active.
             KeyCode::Char(c) if key.modifiers == KeyModifiers::NONE => {
-                app.search_query.push(c);
-                app.perform_search();
+                app.vault.search_query.push(c);
+                app.vault.perform_search();
             }
             _ => {}
         },
 
         Focus::List => match key.code {
-            KeyCode::Char('j') | KeyCode::Down => app.move_down(),
-            KeyCode::Char('k') | KeyCode::Up => app.move_up(),
-            KeyCode::PageDown => app.move_down_page(),
-            KeyCode::PageUp => app.move_up_page(),
+            KeyCode::Char('j') | KeyCode::Down => app.vault.move_down(),
+            KeyCode::Char('k') | KeyCode::Up => app.vault.move_up(),
+            KeyCode::PageDown => app.vault.move_down_page(),
+            KeyCode::PageUp => app.vault.move_up_page(),
             KeyCode::Enter | KeyCode::Char('l') => app.go_to_detail(),
             KeyCode::Tab => app.cycle_focus(),
             // Alt+letter still runs the row actions (transition alias);
@@ -169,7 +169,7 @@ pub fn handle(app: &mut App, key: KeyEvent) {
 /// goes through the confirm popup (which offers permanent-delete via
 /// `D` when not already in trash).
 fn list_row_action(app: &mut App, c: char) {
-    let trash = app.is_trash_view();
+    let trash = app.vault.is_trash_view();
     match c {
         'n' if !trash => items::open_create(app),
         'e' if !trash => list_edit(app),
@@ -186,7 +186,7 @@ fn list_row_action(app: &mut App, c: char) {
 /// Opens the highlighted item's detail screen straight in edit mode —
 /// the list-level `e` shortcut. No-op when the list is empty.
 fn list_edit(app: &mut App) {
-    if app.selected_item().is_some() {
+    if app.vault.selected_item().is_some() {
         app.go_to_detail();
         items::enter_edit_mode(app);
     }
@@ -197,11 +197,11 @@ fn handle_alt_shortcuts(app: &mut App, key: KeyEvent) {
     match key.code {
         KeyCode::Char('q') => auth::lock_vault(app),
         KeyCode::Char('d') => items::open_confirm_delete(app),
-        KeyCode::Char('r') if app.is_trash_view() => items::queue_restore_item(app),
-        KeyCode::Char('u') if !app.is_trash_view() => copy::copy_username_to_clipboard(app),
-        KeyCode::Char('c') if !app.is_trash_view() => copy::copy_password_to_clipboard(app),
-        KeyCode::Char('f') if !app.is_trash_view() => items::toggle_favorite(app),
-        KeyCode::Char('n') if !app.is_trash_view() => items::open_create(app),
+        KeyCode::Char('r') if app.vault.is_trash_view() => items::queue_restore_item(app),
+        KeyCode::Char('u') if !app.vault.is_trash_view() => copy::copy_username_to_clipboard(app),
+        KeyCode::Char('c') if !app.vault.is_trash_view() => copy::copy_password_to_clipboard(app),
+        KeyCode::Char('f') if !app.vault.is_trash_view() => items::toggle_favorite(app),
+        KeyCode::Char('n') if !app.vault.is_trash_view() => items::open_create(app),
         _ => {}
     }
 }

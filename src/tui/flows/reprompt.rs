@@ -36,7 +36,10 @@ pub fn maybe_open(app: &mut App, action: ProtectedAction) -> bool {
         app.reprompt_verified = false;
         return false;
     }
-    let needs = app.selected_item().is_some_and(|i| i.needs_reprompt());
+    let needs = app
+        .vault
+        .selected_item()
+        .is_some_and(|i| i.needs_reprompt());
     if !needs {
         return false;
     }

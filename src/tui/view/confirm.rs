@@ -15,6 +15,7 @@ use crate::tui::view::widgets::center_rect;
 pub fn draw_popup(frame: &mut Frame, area: Rect, app: &App) {
     let t = &app.theme;
     let name = app
+        .vault
         .selected_item()
         .map(|i| i.name.as_str())
         .unwrap_or("this item");
@@ -23,7 +24,7 @@ pub fn draw_popup(frame: &mut Frame, area: Rect, app: &App) {
 
     // In trash view, Enter = permanent delete (the item is already
     // trashed). In the regular vault, Enter = trash and D = permanent.
-    let lines = if app.is_trash_view() {
+    let lines = if app.vault.is_trash_view() {
         vec![
             Line::from(""),
             Line::from(vec![
