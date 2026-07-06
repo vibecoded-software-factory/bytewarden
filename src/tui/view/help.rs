@@ -536,7 +536,7 @@ fn blank() -> Line<'static> {
 
 fn global_footer(t: &Theme) -> Line<'static> {
     Line::from(Span::styled(
-        "  F10: settings (theme…)  ·  j/k ↑↓ PgUp/PgDn: scroll  ·  h/l ←→: pan  ·  Home/End: top/bottom  ·  F1/Esc: close",
+        "  F10: settings (theme · security · advanced)  ·  j/k ↑↓ PgUp/PgDn: scroll  ·  h/l ←→: pan  ·  Home/End: top/bottom  ·  F1/Esc: close",
         Style::default().fg(t.dim),
     ))
 }

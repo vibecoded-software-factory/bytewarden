@@ -33,7 +33,7 @@ use crate::tui::item_forms::{CreateForm, EditForm};
 use crate::tui::login_form::LoginForm;
 use crate::tui::mouse_areas::MouseAreas;
 use crate::tui::screens::{Focus, LoginField, Screen};
-use crate::tui::settings_overlay::{SettingsFocus, SettingsOverlay};
+use crate::tui::settings_overlay::{SettingRow, SettingsFocus, SettingsOverlay};
 use crate::tui::theme::{self, Theme};
 use crate::tui::vault::Vault;
 use crate::tui::worker::{InFlight, WorkerRequest, WorkerResponse};
@@ -43,6 +43,11 @@ pub const PAGE_STEP: usize = 10;
 
 /// Visible vault-list rows used to compute scroll behaviour.
 pub const VAULT_VIEWPORT_ROWS: usize = 20;
+
+/// `On`/`Off` label for a boolean settings value.
+fn on_off(b: bool) -> String {
+    if b { "On".into() } else { "Off".into() }
+}
 
 /// Redacts a cached session key from a command string before it's logged.
 /// The `bw` argv never carries the key (it's passed via env), so this is
@@ -142,8 +147,9 @@ pub struct App {
     // ── Clipboard auto-clear ──────────────────────────────────────────────
     /// Seconds after which a copied secret is wiped from the system
     /// clipboard. `0` disables the feature; default is `30` (matches
-    /// the Bitwarden GUI). Read once at boot from the settings port —
-    /// changing the value in `config.toml` requires a restart.
+    /// the Bitwarden GUI). Seeded from the settings port at boot and
+    /// editable live from the Settings overlay; read at each copy, so a
+    /// change takes effect on the next copy without a restart.
     pub clipboard_clear_secs: u64,
 
     // ── Mouse hit-testing ─────────────────────────────────────────────────
@@ -327,6 +333,7 @@ impl App {
                 focus: SettingsFocus::Sidebar,
                 section: 0,
                 theme_idx: settings_theme_idx,
+                row: 0,
                 theme_before: theme,
                 from: Screen::Vault,
             },
@@ -445,7 +452,62 @@ impl App {
         self.settings_ui.theme_before = self.theme.clone();
         self.settings_ui.focus = SettingsFocus::Sidebar;
         self.settings_ui.section = 0;
+        self.settings_ui.row = 0;
         self.screen = Screen::Settings;
+    }
+
+    /// Current display value of a settings row (right-aligned in the
+    /// panel). Bools read `On`/`Off`; durations read their unit; a
+    /// clipboard window of `0` reads `Off`.
+    pub fn settings_row_value(&self, row: SettingRow) -> String {
+        match row {
+            SettingRow::AutoLock => on_off(self.auto_lock.enabled),
+            SettingRow::LockAfter => format!("{} min", self.auto_lock.after_secs / 60),
+            SettingRow::KeepSession => on_off(self.login.keep_session),
+            SettingRow::RememberEmail => on_off(self.login.save_email),
+            SettingRow::ClipboardClear => {
+                if self.clipboard_clear_secs == 0 {
+                    "Off".into()
+                } else {
+                    format!("{} s", self.clipboard_clear_secs)
+                }
+            }
+            SettingRow::ListTimeout => format!("{} s", self.list_items_timeout_secs),
+        }
+    }
+
+    /// Applies a `←/→` change to a settings row and persists it
+    /// immediately (atomic write). Bools toggle on either arrow; numbers
+    /// step by a per-row increment, clamped to a sane range. `forward`
+    /// is `true` for `→` / `l`, `false` for `←` / `h`.
+    pub fn settings_adjust(&mut self, row: SettingRow, forward: bool) {
+        let step = |cur: u64, by: i64, lo: u64, hi: u64| -> u64 {
+            (cur as i64 + if forward { by } else { -by }).clamp(lo as i64, hi as i64) as u64
+        };
+        match row {
+            SettingRow::AutoLock => {
+                self.auto_lock.enabled = !self.auto_lock.enabled;
+                self.settings.write_auto_lock(self.auto_lock.enabled);
+            }
+            SettingRow::KeepSession => self.toggle_keep_session(),
+            SettingRow::RememberEmail => self.toggle_save_email(),
+            SettingRow::LockAfter => {
+                let mins = step(self.auto_lock.after_secs / 60, 1, 1, 240);
+                self.auto_lock.after_secs = mins * 60;
+                self.settings
+                    .write_lock_after_secs(self.auto_lock.after_secs);
+            }
+            SettingRow::ClipboardClear => {
+                self.clipboard_clear_secs = step(self.clipboard_clear_secs, 5, 0, 600);
+                self.settings
+                    .write_clipboard_clear_secs(self.clipboard_clear_secs);
+            }
+            SettingRow::ListTimeout => {
+                self.list_items_timeout_secs = step(self.list_items_timeout_secs, 30, 30, 900);
+                self.settings
+                    .write_list_items_timeout_secs(self.list_items_timeout_secs);
+            }
+        }
     }
 
     /// Applies the highlighted preset to [`Self::theme`] as a live
@@ -753,6 +815,9 @@ mod tests {
         fn write(&self, _: bool, _: Option<&str>) {}
         fn write_auto_lock(&self, _: bool) {}
         fn write_keep_session(&self, _: bool) {}
+        fn write_lock_after_secs(&self, _: u64) {}
+        fn write_clipboard_clear_secs(&self, _: u64) {}
+        fn write_list_items_timeout_secs(&self, _: u64) {}
         fn write_theme_name(&self, _: &str) {}
         fn config_dir(&self) -> std::path::PathBuf {
             std::path::PathBuf::from(".")
@@ -1142,5 +1207,35 @@ mod tests {
         let idx =
             compute_filtered_indices(&items, &l, &ItemFilter::Favorites, &FolderFilter::All, "");
         assert_eq!(idx, vec![1]);
+    }
+
+    #[test]
+    fn settings_adjust_toggles_bools_and_steps_numbers() {
+        use crate::tui::settings_overlay::SettingRow;
+        let (mut app, _rx, _tx) = fresh_app();
+
+        // Bool: either direction toggles; value string tracks it.
+        let before = app.auto_lock.enabled;
+        app.settings_adjust(SettingRow::AutoLock, true);
+        assert_eq!(app.auto_lock.enabled, !before);
+        assert_eq!(
+            app.settings_row_value(SettingRow::AutoLock),
+            if !before { "On" } else { "Off" }
+        );
+
+        // Number: steps by the row's increment and clamps at the floor.
+        app.auto_lock.after_secs = 5 * 60;
+        app.settings_adjust(SettingRow::LockAfter, true);
+        assert_eq!(app.auto_lock.after_secs, 6 * 60);
+        assert_eq!(app.settings_row_value(SettingRow::LockAfter), "6 min");
+        app.auto_lock.after_secs = 60; // 1 min, the floor
+        app.settings_adjust(SettingRow::LockAfter, false);
+        assert_eq!(app.auto_lock.after_secs, 60);
+
+        // Clipboard clear steps by 5 and reads "Off" at zero.
+        app.clipboard_clear_secs = 5;
+        app.settings_adjust(SettingRow::ClipboardClear, false);
+        assert_eq!(app.clipboard_clear_secs, 0);
+        assert_eq!(app.settings_row_value(SettingRow::ClipboardClear), "Off");
     }
 }

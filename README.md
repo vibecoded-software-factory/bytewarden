@@ -481,7 +481,7 @@ Number keys `0`–`4` are disabled while Search is focused so you can type them 
 | `Alt+W` | Create a text **Send** (popup) |
 | `Alt+B` | View **memberships** (organisations + collections) |
 | `F1` | Help popup — context-aware |
-| `F10` | Open **Settings** (Theme preset picker; more sections coming) |
+| `F10` | Open **Settings** (Theme preset picker · Security · Advanced) |
 | `Ctrl+C` | Quit |
 
 All `Alt+` shortcuts also work while Search is focused.

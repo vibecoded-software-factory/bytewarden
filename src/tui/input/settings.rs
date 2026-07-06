@@ -11,6 +11,13 @@ use crate::tui::app::App;
 use crate::tui::settings_overlay::{SettingsFocus, SettingsSection};
 use crate::tui::theme;
 
+/// Resets the per-section row cursor whenever the highlighted section
+/// changes, so a value-list section always opens on its first row.
+fn set_section(app: &mut App, section: usize) {
+    app.settings_ui.section = section;
+    app.settings_ui.row = 0;
+}
+
 pub fn handle(app: &mut App, key: KeyEvent) {
     match app.settings_ui.focus {
         SettingsFocus::Sidebar => handle_sidebar(app, key),
@@ -23,10 +30,10 @@ fn handle_sidebar(app: &mut App, key: KeyEvent) {
     match key.code {
         KeyCode::Esc | KeyCode::F(10) => app.settings_cancel(),
         KeyCode::Char('j') | KeyCode::Down if app.settings_ui.section + 1 < len => {
-            app.settings_ui.section += 1;
+            set_section(app, app.settings_ui.section + 1);
         }
         KeyCode::Char('k') | KeyCode::Up => {
-            app.settings_ui.section = app.settings_ui.section.saturating_sub(1);
+            set_section(app, app.settings_ui.section.saturating_sub(1));
         }
         KeyCode::Enter | KeyCode::Char('l') | KeyCode::Right | KeyCode::Tab => {
             app.settings_ui.focus = SettingsFocus::Panel;
@@ -38,6 +45,35 @@ fn handle_sidebar(app: &mut App, key: KeyEvent) {
 fn handle_panel(app: &mut App, key: KeyEvent) {
     match SettingsSection::ALL[app.settings_ui.section] {
         SettingsSection::Theme => handle_theme_panel(app, key),
+        section => handle_rows_panel(app, key, section),
+    }
+}
+
+/// Value-list panel: `↑/↓` move between rows, `←/→` change the focused
+/// value (toggling bools / stepping numbers, persisted live), `Tab` /
+/// `BackTab` return to the sidebar, `Esc`/`F10` close the overlay.
+fn handle_rows_panel(app: &mut App, key: KeyEvent, section: SettingsSection) {
+    let rows = section.rows();
+    match key.code {
+        KeyCode::Esc | KeyCode::F(10) => app.settings_cancel(),
+        KeyCode::Tab | KeyCode::BackTab => app.settings_ui.focus = SettingsFocus::Sidebar,
+        KeyCode::Char('j') | KeyCode::Down if app.settings_ui.row + 1 < rows.len() => {
+            app.settings_ui.row += 1;
+        }
+        KeyCode::Char('k') | KeyCode::Up => {
+            app.settings_ui.row = app.settings_ui.row.saturating_sub(1);
+        }
+        KeyCode::Char('l') | KeyCode::Right => {
+            if let Some(&row) = rows.get(app.settings_ui.row) {
+                app.settings_adjust(row, true);
+            }
+        }
+        KeyCode::Char('h') | KeyCode::Left => {
+            if let Some(&row) = rows.get(app.settings_ui.row) {
+                app.settings_adjust(row, false);
+            }
+        }
+        _ => {}
     }
 }
 

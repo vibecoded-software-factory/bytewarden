@@ -373,10 +373,13 @@ setting. Height/position follow the standard modal geometry; the width is
 content-driven (sized once to the widest section so it doesn't resize as you
 navigate) and clamped to the terminal. Values **wrap** onto continuation lines
 rather than truncating, and the focused row's hint is pinned to the bottom.
-Sectioned so the surface can grow (Theme, Clipboard, Security…); today Theme is
-a live preset picker whose list **scrolls** — the presets window around the
-highlighted row and a `draw_scrollbar` cue rides the panel's right border when
-they overflow. **Apply-immediately**: each change writes to the settings
+Three sections today: **Theme** (a live preset picker whose list **scrolls** —
+the presets window around the highlighted row and a `draw_scrollbar` cue rides
+the panel's right border when they overflow), **Security** (auto-lock + its
+window, keep-session, remember-email) and **Advanced** (clipboard-clear,
+list-timeout). The non-Theme sections are value-lists: `↑/↓` pick a row, `←/→`
+toggle a bool or step a number in place. Each row maps 1:1 to a `config.toml`
+key. **Apply-immediately**: each change writes to the settings
 cache *and* persists to `config.toml` on adjust (atomic write), so closing just
 leaves. `Esc` steps back (Panel → Sidebar → close); `F10` closes from anywhere.
 

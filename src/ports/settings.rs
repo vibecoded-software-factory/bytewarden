@@ -63,6 +63,19 @@ pub trait SettingsPort {
     /// Persists just the keep-session toggle.
     fn write_keep_session(&self, keep_session: bool);
 
+    /// Persists the auto-lock inactivity threshold. Stored in the TOML as
+    /// whole minutes (`lock_after_minutes`), matching what [`Self::read`]
+    /// parses back.
+    fn write_lock_after_secs(&self, secs: u64);
+
+    /// Persists the clipboard auto-clear window (`clipboard_clear_secs`).
+    /// `0` disables the feature.
+    fn write_clipboard_clear_secs(&self, secs: u64);
+
+    /// Persists the `bw list items` wall-clock budget
+    /// (`list_items_timeout_secs`).
+    fn write_list_items_timeout_secs(&self, secs: u64);
+
     /// Persists the chosen theme preset as `name = "<preset>"` inside the
     /// `[theme]` section, preserving every other key (incl. per-color
     /// overrides). Best-effort, like the other writers.
