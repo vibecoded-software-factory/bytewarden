@@ -19,6 +19,11 @@ thread_local! {
     /// `match` in the input layer. Cleared each frame by [`reset_scroll_regions`].
     static SCROLL_REGIONS: std::cell::RefCell<Vec<(Rect, ScrollTarget)>> =
         const { std::cell::RefCell::new(Vec::new()) };
+
+    /// Frame-local rect of the **active centered overlay** (a popup / confirm /
+    /// settings / help), if one is drawn. The mouse layer uses it for
+    /// click-outside-to-dismiss — one generic close path for every overlay.
+    static MODAL_RECT: std::cell::RefCell<Option<Rect>> = const { std::cell::RefCell::new(None) };
 }
 
 /// What the mouse wheel moves when it's over a registered region. The widget /
@@ -40,10 +45,23 @@ pub enum ScrollTarget {
     Help,
 }
 
-/// Clears the scroll registry. Called once per frame before drawing, alongside
-/// the `MouseAreas` reset.
+/// Clears the frame-local registries (scroll regions + the active modal rect).
+/// Called once per frame before drawing, alongside the `MouseAreas` reset.
 pub fn reset_scroll_regions() {
     SCROLL_REGIONS.with(|s| s.borrow_mut().clear());
+    MODAL_RECT.with(|m| *m.borrow_mut() = None);
+}
+
+/// Records the active centered-overlay rect for this frame. Every overlay drawer
+/// calls this (right where it computes its `center_rect` popup) so the mouse
+/// layer can dismiss the overlay on a click outside it.
+pub fn register_modal(rect: Rect) {
+    MODAL_RECT.with(|m| *m.borrow_mut() = Some(rect));
+}
+
+/// The active centered-overlay rect, if one is drawn this frame.
+pub fn active_modal_rect() -> Option<Rect> {
+    MODAL_RECT.with(|m| *m.borrow())
 }
 
 /// Records a scrollable region for this frame. Overlays draw after the base

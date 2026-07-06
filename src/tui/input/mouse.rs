@@ -1,7 +1,7 @@
 //! Mouse event handler — translates clicks/scrolls into focus changes
 //! and selection moves.
 
-use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 
 use crate::domain::filter::{ITEM_FILTERS, ItemFilter};
 use crate::tui::app::App;
@@ -15,6 +15,18 @@ pub fn handle(app: &mut App, mouse: MouseEvent) {
     match mouse.kind {
         MouseEventKind::Down(MouseButton::Left) => {
             app.last_click = Some((col, row));
+            // A click outside any centered overlay dismisses it — the mouse twin
+            // of Esc, routed through the active screen's own Esc handler (which
+            // knows how to cancel it). A click inside falls through below.
+            if let Some(rect) = crate::tui::view::widgets::active_modal_rect()
+                && !crate::tui::mouse_areas::rect_contains(rect, col, row)
+            {
+                crate::tui::input::dispatch_screen_key(
+                    app,
+                    KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE),
+                );
+                return;
+            }
             match app.screen {
                 Screen::Login => mouse_login(app, col, row),
                 Screen::Vault => mouse_vault(app, col, row),

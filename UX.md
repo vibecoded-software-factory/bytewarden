@@ -208,6 +208,12 @@ hand-roll a `Block` with a different border type: a new panel is rounded via
   position (`scroll_target_at` → one `apply_scroll` table), so there is **no
   per-screen `match`** in the input layer. Adding a scrollable list is one
   `register_scroll` call at its draw site; the wheel handler never changes.
+- **Click-outside-to-dismiss** — every centered overlay records its rect
+  (`widgets::register_modal`, right where it computes its `center_rect` popup;
+  cleared each frame). A `Down` outside the active modal (`active_modal_rect`)
+  is the mouse twin of `Esc`: `input::mouse` routes a synthetic `Esc` through
+  the active screen's own handler (`dispatch_screen_key`), so each overlay
+  cancels the exact way its keyboard `Esc` does — no per-overlay close table.
 - `widgets::center_rect` / `MODAL_WIDTH_PCT` / `MODAL_HEIGHT` — the standard
   centered-modal geometry every list/picker/settings overlay imitates so they
   line up; `help_line`, `unread`/`favorite_star` emphasis, `key_style`,

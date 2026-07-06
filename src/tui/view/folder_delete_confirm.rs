@@ -19,6 +19,7 @@ pub fn draw_popup(frame: &mut Frame, area: Rect, app: &App) {
         .map(|f| f.name.as_str())
         .unwrap_or("this folder");
     let popup = center_rect(50, 11, area);
+    crate::tui::view::widgets::register_modal(popup);
     frame.render_widget(Clear, popup);
 
     let lines = vec![
