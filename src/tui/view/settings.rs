@@ -12,13 +12,14 @@ use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph};
 use crate::tui::app::App;
 use crate::tui::settings_overlay::{SettingsFocus, SettingsSection};
 use crate::tui::theme;
+use crate::tui::view::widgets::draw_scrollbar;
 
 pub fn draw_popup(frame: &mut Frame, area: Rect, app: &App) {
     let t = &app.theme;
     let accent = Style::default().fg(t.accent).add_modifier(Modifier::BOLD);
 
     let w = area.width.saturating_sub(6).clamp(50, 72);
-    let h = area.height.saturating_sub(4).clamp(12, 18);
+    let h = area.height.saturating_sub(4).clamp(12, 24);
     let x = area.x + area.width.saturating_sub(w) / 2;
     let y = area.y + area.height.saturating_sub(h) / 2;
     let popup = Rect {
@@ -32,7 +33,7 @@ pub fn draw_popup(frame: &mut Frame, area: Rect, app: &App) {
     let outer = Block::default()
         .title(Span::styled(" Settings ", accent))
         .borders(Borders::ALL)
-        .border_type(BorderType::Double)
+        .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(t.accent));
     let inner = outer.inner(popup);
     frame.render_widget(outer, popup);
@@ -71,6 +72,7 @@ fn focus_block(app: &App, title: &str, focused: bool) -> Block<'static> {
     Block::default()
         .title(Span::styled(format!(" {title} "), title_style))
         .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(color))
 }
 
@@ -113,27 +115,36 @@ fn draw_theme_panel(frame: &mut Frame, app: &App, area: Rect) {
     let body = block.inner(area);
     frame.render_widget(block, area);
 
-    let mut lines: Vec<Line> = vec![Line::from(Span::styled(
-        "Preset",
-        Style::default().fg(t.dim),
-    ))];
-    for (i, p) in theme::Preset::ALL.iter().enumerate() {
-        let selected = i == app.settings_ui.theme_idx;
-        let marker = if selected { "▶ " } else { "  " };
-        let style = if selected {
-            Style::default().fg(t.accent).add_modifier(Modifier::BOLD)
-        } else {
-            Style::default().fg(t.foreground)
-        };
-        lines.push(Line::from(Span::styled(
-            format!("  {marker}{}", p.label()),
-            style,
-        )));
-    }
-    lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled(
-        "Live preview — Enter saves to config.toml",
-        Style::default().fg(t.dim),
-    )));
+    let presets = theme::Preset::ALL;
+    let total = presets.len();
+    let idx = app.settings_ui.theme_idx.min(total.saturating_sub(1));
+    let vh = body.height as usize; // preset rows that fit in the panel
+
+    // Window the list so the highlighted preset is always on screen: it
+    // sits at (or above) the last visible row once we've scrolled past
+    // the first page, and the window never overshoots the end.
+    let start = idx
+        .saturating_sub(vh.saturating_sub(1))
+        .min(total.saturating_sub(vh));
+    let end = (start + vh).min(total);
+
+    let lines: Vec<Line> = presets[start..end]
+        .iter()
+        .enumerate()
+        .map(|(vis, p)| {
+            let i = start + vis;
+            let selected = i == idx;
+            let marker = if selected { "▶ " } else { "  " };
+            let style = if selected {
+                Style::default().fg(t.accent).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(t.foreground)
+            };
+            Line::from(Span::styled(format!("{marker}{}", p.label()), style))
+        })
+        .collect();
     frame.render_widget(Paragraph::new(lines), body);
+
+    // Scroll cue on the panel's right border when the presets overflow.
+    draw_scrollbar(frame, area, total, idx, t);
 }

@@ -371,7 +371,9 @@ content-driven (sized once to the widest section so it doesn't resize as you
 navigate) and clamped to the terminal. Values **wrap** onto continuation lines
 rather than truncating, and the focused row's hint is pinned to the bottom.
 Sectioned so the surface can grow (Theme, Clipboard, Security…); today Theme is
-a live preset picker. **Apply-immediately**: each change writes to the settings
+a live preset picker whose list **scrolls** — the presets window around the
+highlighted row and a `draw_scrollbar` cue rides the panel's right border when
+they overflow. **Apply-immediately**: each change writes to the settings
 cache *and* persists to `config.toml` on adjust (atomic write), so closing just
 leaves. `Esc` steps back (Panel → Sidebar → close); `F10` closes from anywhere.
 
