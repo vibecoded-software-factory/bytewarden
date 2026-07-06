@@ -384,11 +384,12 @@ fn render_filters(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
 fn render_search(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     let t = &app.theme;
     let sf = app.focus == Focus::Search;
-    // Leading magnifying-glass affordance, always in accent.
-    let icon = || Span::styled("󰍉 ", Style::default().fg(t.accent));
+    // Leading magnifying-glass affordance — a one-column left margin off
+    // the border, and coloured to match the text of the current state
+    // (not accent), so it reads as part of the field rather than a badge.
     let line = if sf {
         Line::from(vec![
-            icon(),
+            Span::styled(" 󰍉 ", Style::default().fg(t.foreground)),
             Span::styled(
                 app.vault.search_query.as_str(),
                 Style::default().fg(t.foreground),
@@ -397,12 +398,12 @@ fn render_search(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         ])
     } else if !app.vault.search_query.is_empty() {
         Line::from(vec![
-            icon(),
+            Span::styled(" 󰍉 ", Style::default().fg(t.dim)),
             Span::styled(app.vault.search_query.as_str(), Style::default().fg(t.dim)),
         ])
     } else {
         Line::from(vec![
-            icon(),
+            Span::styled(" 󰍉 ", Style::default().fg(t.placeholder)),
             Span::styled("type to filter…", Style::default().fg(t.placeholder)),
         ])
     };
