@@ -88,6 +88,22 @@ pub fn copy_password_to_clipboard(app: &mut App) {
     write_clipboard(app, password, "Password copied ✓");
 }
 
+/// Copies the selected item's TOTP code, gated behind the reprompt popup
+/// for `reprompt`-flagged items (the code is a secret). The popup
+/// re-enters via [`ProtectedAction::CopyTotp`] once verification succeeds.
+/// This is the entry point the vault-level callers (right-click menu) use;
+/// the detail-row path reaches [`request_copy_totp`] through its own gate.
+pub fn copy_totp_to_clipboard(app: &mut App) {
+    let Some(item) = app.vault.selected_item() else {
+        return;
+    };
+    let item_id = item.id.clone();
+    if super::reprompt::maybe_open(app, ProtectedAction::CopyTotp(item_id.clone())) {
+        return;
+    }
+    request_copy_totp(app, item_id);
+}
+
 /// Fetches and copies the selected item's TOTP code (worker round-trip).
 pub fn request_copy_totp(app: &mut App, item_id: String) {
     app.submit(

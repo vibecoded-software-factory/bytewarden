@@ -1237,29 +1237,40 @@ mod tests {
     fn item_actions_reflect_the_item_and_view() {
         use crate::tui::item_actions::{ItemAction, actions_for};
 
-        // A login with both username and password offers both copies.
+        // A login with username, password and TOTP offers all three copies.
         let mut full = login_item("a", "Acct", "user@example.com");
-        full.login.as_mut().unwrap().password = Some("pw".into());
-        let acts = actions_for(&full, false);
+        {
+            let l = full.login.as_mut().unwrap();
+            l.password = Some("pw".into());
+            l.totp = Some("otpauth://x".into());
+        }
+        let acts = actions_for(&full, false, false);
         assert!(acts.contains(&ItemAction::CopyUsername));
         assert!(acts.contains(&ItemAction::CopyPassword));
+        assert!(acts.contains(&ItemAction::CopyTotp));
         assert!(acts.contains(&ItemAction::Edit));
         assert!(acts.contains(&ItemAction::ToggleFavorite));
         assert!(acts.contains(&ItemAction::Delete));
+        // Move is hidden unless the caller says the item can move.
+        assert!(!acts.contains(&ItemAction::Move));
+        assert!(actions_for(&full, false, true).contains(&ItemAction::Move));
 
         // A note (no login) offers no copy actions.
         let note = item("n", "Note", 2, None);
-        let note_acts = actions_for(&note, false);
+        let note_acts = actions_for(&note, false, false);
         assert!(!note_acts.contains(&ItemAction::CopyUsername));
         assert!(!note_acts.contains(&ItemAction::CopyPassword));
+        assert!(!note_acts.contains(&ItemAction::CopyTotp));
 
-        // A login whose password is empty hides the password copy.
+        // A login without a password or TOTP hides those copies.
         let user_only = login_item("u", "UserOnly", "u@x");
-        assert!(!actions_for(&user_only, false).contains(&ItemAction::CopyPassword));
+        let uo = actions_for(&user_only, false, false);
+        assert!(!uo.contains(&ItemAction::CopyPassword));
+        assert!(!uo.contains(&ItemAction::CopyTotp));
 
         // The trash view is restore-or-purge only.
         assert_eq!(
-            actions_for(&full, true),
+            actions_for(&full, true, true),
             vec![ItemAction::Open, ItemAction::Restore, ItemAction::Delete]
         );
     }
