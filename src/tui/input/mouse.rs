@@ -132,6 +132,29 @@ fn mouse_vault(app: &mut App, col: u16, row: u16) {
         }
     }
 
+    if focus == Focus::Folders
+        && let Some(vrow) = app.mouse_areas.folders_row(row)
+    {
+        // Map the visible row back to a logical folder index, skipping the
+        // separator that sits at visible row 2 (before the named rows).
+        let total = crate::tui::folders::row_count(&app.folders, &app.collections);
+        let logical = if vrow >= 3 {
+            vrow - 1
+        } else if vrow == 2 {
+            usize::MAX // the separator (or empty space) — nothing to apply
+        } else {
+            vrow
+        };
+        if logical < total {
+            app.vault.folder_selected = logical;
+            app.vault.active_folder =
+                crate::tui::folders::filter_for_row(logical, &app.folders, &app.collections);
+            app.vault.selected_index = 0;
+            app.vault.scroll_offset = 0;
+            app.vault.rebuild_filtered_cache();
+        }
+    }
+
     if focus == Focus::Items
         && let Some(row_idx) = app.mouse_areas.items_row(row)
     {
