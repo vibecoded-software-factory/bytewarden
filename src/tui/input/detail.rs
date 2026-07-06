@@ -10,19 +10,20 @@ use crate::tui::reprompt::ProtectedAction;
 
 /// Dispatches a single key event on the detail screen.
 pub fn handle(app: &mut App, key: KeyEvent) {
-    if app.edit_mode {
-        let n = app.edit_fields.len();
+    if app.edit.active {
+        let n = app.edit.fields.len();
 
         // Alt+G: open the generator targeting the focused row when it
         // is a hidden (i.e. password-like) field.
         if key.code == KeyCode::Char('g')
             && is_alt(&key)
             && app
-                .edit_fields
-                .get(app.edit_field_idx)
+                .edit
+                .fields
+                .get(app.edit.field_idx)
                 .is_some_and(|f| f.hidden)
         {
-            generator::open_for_edit_field(app, app.edit_field_idx);
+            generator::open_for_edit_field(app, app.edit.field_idx);
             return;
         }
 
@@ -48,12 +49,12 @@ pub fn handle(app: &mut App, key: KeyEvent) {
         }
 
         match key.code {
-            KeyCode::Esc => app.edit_mode = false,
+            KeyCode::Esc => app.edit.active = false,
             KeyCode::Enter => items::queue_save_edit(app),
-            KeyCode::Tab => nav_wrap(&mut app.edit_field_idx, n, 1),
-            KeyCode::BackTab => nav_wrap(&mut app.edit_field_idx, n, -1),
-            KeyCode::Down => nav_clamp(&mut app.edit_field_idx, n, 1),
-            KeyCode::Up => nav_clamp(&mut app.edit_field_idx, n, -1),
+            KeyCode::Tab => nav_wrap(&mut app.edit.field_idx, n, 1),
+            KeyCode::BackTab => nav_wrap(&mut app.edit.field_idx, n, -1),
+            KeyCode::Down => nav_clamp(&mut app.edit.field_idx, n, 1),
+            KeyCode::Up => nav_clamp(&mut app.edit.field_idx, n, -1),
             KeyCode::F(2) => {
                 // F2 in edit mode toggles `revealed` on the focused
                 // hidden field. Going `false → true` is the case
@@ -61,16 +62,17 @@ pub fn handle(app: &mut App, key: KeyEvent) {
                 // gates behind the reprompt popup. The reverse
                 // direction (re-hiding) is always free.
                 let needs_gate = app
-                    .edit_fields
-                    .get(app.edit_field_idx)
+                    .edit
+                    .fields
+                    .get(app.edit.field_idx)
                     .is_some_and(|f| f.hidden && !f.revealed)
                     && app.selected_item().is_some_and(|i| i.needs_reprompt());
                 if needs_gate && reprompt::maybe_open(app, ProtectedAction::RevealEditField) {
                     return;
                 }
-                app.edit_toggle_reveal();
+                app.edit.toggle_reveal();
             }
-            _ => text_input(app.edit_field_mut(), key),
+            _ => text_input(app.edit.field_mut(), key),
         }
         return;
     }

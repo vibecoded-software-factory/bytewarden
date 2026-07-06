@@ -19,20 +19,20 @@ use crate::tui::worker::{InFlight, WorkerRequest};
 
 /// Opens the "create item" screen on the type-picker step.
 pub fn open_create(app: &mut App) {
-    app.create_type_idx = 0;
-    app.create_type = CreateItemType::Login;
-    app.create_choosing_type = true;
-    app.create_fields = Vec::new();
-    app.create_field_idx = 0;
+    app.create.type_idx = 0;
+    app.create.item_type = CreateItemType::Login;
+    app.create.choosing_type = true;
+    app.create.fields = Vec::new();
+    app.create.field_idx = 0;
     app.screen = Screen::Create;
 }
 
 /// Confirms the type-picker selection and renders the matching form.
 pub fn create_select_type(app: &mut App) {
-    app.create_type = CREATE_ITEM_TYPES[app.create_type_idx].clone();
-    app.create_fields = build_create_fields_with_orgs(&app.create_type, &app.organizations);
-    app.create_field_idx = 0;
-    app.create_choosing_type = false;
+    app.create.item_type = CREATE_ITEM_TYPES[app.create.type_idx].clone();
+    app.create.fields = build_create_fields_with_orgs(&app.create.item_type, &app.organizations);
+    app.create.field_idx = 0;
+    app.create.choosing_type = false;
 }
 
 /// Cycles the create-form's "Organization" row by `dir` (+1 right,
@@ -47,7 +47,7 @@ pub fn cycle_create_org(app: &mut App, dir: i32) {
     if app.organizations.is_empty() {
         return;
     }
-    let Some(field) = app.create_fields.get(app.create_field_idx) else {
+    let Some(field) = app.create.fields.get(app.create.field_idx) else {
         return;
     };
     if !field.is_organization() {
@@ -72,22 +72,22 @@ pub fn cycle_create_org(app: &mut App, dir: i32) {
             .map(|o| o.name.clone())
             .unwrap_or_else(|| "Personal".into()),
     };
-    if let Some(f) = app.create_fields.get_mut(app.create_field_idx) {
+    if let Some(f) = app.create.fields.get_mut(app.create.field_idx) {
         f.value = zeroize::Zeroizing::new(new_display);
         f.cursor = f.value.chars().count();
         f.organization_id = new_id.clone();
     }
     // Sync the sibling Collections row.
-    let org_idx = app.create_field_idx;
-    let coll_pos = app.create_fields.iter().position(|f| f.is_collections());
+    let org_idx = app.create.field_idx;
+    let coll_pos = app.create.fields.iter().position(|f| f.is_collections());
     match (coll_pos, new_id.as_ref()) {
         (Some(pos), None) => {
             // Going Personal → drop the row.
-            app.create_fields.remove(pos);
+            app.create.fields.remove(pos);
         }
         (Some(pos), Some(_)) => {
             // Switched org → reset the row (user must reselect).
-            if let Some(f) = app.create_fields.get_mut(pos) {
+            if let Some(f) = app.create.fields.get_mut(pos) {
                 f.value = zeroize::Zeroizing::new(String::new());
                 f.cursor = 0;
                 f.collection_ids = Vec::new();
@@ -97,7 +97,7 @@ pub fn cycle_create_org(app: &mut App, dir: i32) {
             // Personal → real org. Insert a Collections row right
             // after the Organization row so the form layout stays
             // grouped.
-            app.create_fields.insert(
+            app.create.fields.insert(
                 org_idx + 1,
                 crate::tui::edit_field::EditField::collections("", Vec::new()),
             );
@@ -109,7 +109,8 @@ pub fn cycle_create_org(app: &mut App, dir: i32) {
 /// Validates the create form and dispatches the create to the worker.
 pub fn queue_create_item(app: &mut App) {
     let name = app
-        .create_fields
+        .create
+        .fields
         .first()
         .map(|f| f.value.trim().to_string())
         .unwrap_or_default();
@@ -121,13 +122,15 @@ pub fn queue_create_item(app: &mut App) {
     // form's Organization row carries the resolved id; if it's set
     // we expect a sibling Collections row with at least one UUID.
     let org_set = app
-        .create_fields
+        .create
+        .fields
         .iter()
         .find(|f| f.is_organization())
         .and_then(|f| f.organization_id.clone());
     if org_set.is_some() {
         let coll_count = app
-            .create_fields
+            .create
+            .fields
             .iter()
             .find(|f| f.is_collections())
             .map(|f| f.collection_ids.len())
@@ -139,7 +142,10 @@ pub fn queue_create_item(app: &mut App) {
             return;
         }
     }
-    let json = Zeroizing::new(build_create_payload(&app.create_type, &app.create_fields));
+    let json = Zeroizing::new(build_create_payload(
+        &app.create.item_type,
+        &app.create.fields,
+    ));
     app.submit(
         InFlight::CreateItem,
         "Creating…",
@@ -211,10 +217,10 @@ pub fn enter_edit_mode(app: &mut App) {
         .unwrap_or(0)
         .min(fields.len().saturating_sub(1));
 
-    app.edit_item_id = item.id.clone();
-    app.edit_fields = fields;
-    app.edit_field_idx = initial_idx;
-    app.edit_mode = true;
+    app.edit.item_id = item.id.clone();
+    app.edit.fields = fields;
+    app.edit.field_idx = initial_idx;
+    app.edit.active = true;
 }
 
 // ── Attachment upload popup ───────────────────────────────────────────────
@@ -578,10 +584,10 @@ impl RenameFieldState {
 /// Opens the rename popup for the focused custom field. No-op + error
 /// toast when the focused row is not a custom field.
 pub fn open_rename_field(app: &mut App) {
-    if !app.edit_mode {
+    if !app.edit.active {
         return;
     }
-    let Some(field) = app.edit_fields.get(app.edit_field_idx) else {
+    let Some(field) = app.edit.fields.get(app.edit.field_idx) else {
         return;
     };
     if !field.is_custom() {
@@ -590,7 +596,7 @@ pub fn open_rename_field(app: &mut App) {
         ));
         return;
     }
-    app.rename_field = Some(RenameFieldState::new(app.edit_field_idx, &field.label));
+    app.rename_field = Some(RenameFieldState::new(app.edit.field_idx, &field.label));
     app.screen = Screen::RenameField;
 }
 
@@ -612,12 +618,14 @@ pub fn commit_rename_field(app: &mut App) {
     // Reject collisions with sibling custom-field labels — the user
     // wouldn't be able to tell which is which on the detail screen.
     let current_label: Option<String> = app
-        .edit_fields
+        .edit
+        .fields
         .get(state.target_idx)
         .filter(|f| f.is_custom())
         .map(|f| f.label.clone());
     let siblings: Vec<&str> = app
-        .edit_fields
+        .edit
+        .fields
         .iter()
         .enumerate()
         .filter(|(i, f)| *i != state.target_idx && f.is_custom())
@@ -632,7 +640,7 @@ pub fn commit_rename_field(app: &mut App) {
         app.set_action(ActionState::Error(msg));
         return;
     }
-    if let Some(field) = app.edit_fields.get_mut(state.target_idx) {
+    if let Some(field) = app.edit.fields.get_mut(state.target_idx) {
         if !field.is_custom() {
             app.set_action(ActionState::Error(
                 "Field is no longer a custom row.".into(),
@@ -662,11 +670,12 @@ pub fn cancel_rename_field(app: &mut App) {
 /// renameable from the TUI, so the user picks the type via Alt+T but
 /// inherits the auto-generated name.
 pub fn add_custom_field(app: &mut App) {
-    if !app.edit_mode {
+    if !app.edit.active {
         return;
     }
     let next_n = app
-        .edit_fields
+        .edit
+        .fields
         .iter()
         .filter_map(|f| {
             f.label
@@ -678,8 +687,8 @@ pub fn add_custom_field(app: &mut App) {
         .unwrap_or(1);
     let label = format!("Custom {next_n}");
     let new_field = crate::tui::edit_field::EditField::custom(&label, "", 0);
-    app.edit_fields.push(new_field);
-    app.edit_field_idx = app.edit_fields.len() - 1;
+    app.edit.fields.push(new_field);
+    app.edit.field_idx = app.edit.fields.len() - 1;
     app.set_action(ActionState::Done(format!("Added {label} ✓")));
 }
 
@@ -688,10 +697,10 @@ pub fn add_custom_field(app: &mut App) {
 /// [`remove_uri_row`]). Built-in schema rows cannot be removed and
 /// produce an error toast.
 pub fn remove_current_field(app: &mut App) {
-    if !app.edit_mode {
+    if !app.edit.active {
         return;
     }
-    let Some(field) = app.edit_fields.get(app.edit_field_idx) else {
+    let Some(field) = app.edit.fields.get(app.edit.field_idx) else {
         return;
     };
     if field.is_uri() {
@@ -704,9 +713,9 @@ pub fn remove_current_field(app: &mut App) {
         return;
     }
     let removed_label = field.label.clone();
-    app.edit_fields.remove(app.edit_field_idx);
-    if app.edit_field_idx >= app.edit_fields.len() && !app.edit_fields.is_empty() {
-        app.edit_field_idx = app.edit_fields.len() - 1;
+    app.edit.fields.remove(app.edit.field_idx);
+    if app.edit.field_idx >= app.edit.fields.len() && !app.edit.fields.is_empty() {
+        app.edit.field_idx = app.edit.fields.len() - 1;
     }
     app.set_action(ActionState::Done(format!("Removed {removed_label} ✓")));
 }
@@ -720,14 +729,15 @@ pub fn remove_current_field(app: &mut App) {
 /// No-op when the focused item is not a login (the form has no URI
 /// rows in that case).
 pub fn add_uri_row(app: &mut App) {
-    if !app.edit_mode {
+    if !app.edit.active {
         return;
     }
     use crate::tui::edit_field::{EditField, EditFieldKind};
 
     // Find the highest existing URI slot, then add 1.
     let next_idx = app
-        .edit_fields
+        .edit
+        .fields
         .iter()
         .filter_map(|f| match f.kind {
             EditFieldKind::Uri { index, .. } => Some(index),
@@ -741,25 +751,28 @@ pub fn add_uri_row(app: &mut App) {
     // existing URI row (so they stay contiguous), or just before the
     // TOTP row if no URIs exist yet but a Login section is present.
     let last_uri_pos = app
-        .edit_fields
+        .edit
+        .fields
         .iter()
         .rposition(|f| matches!(f.kind, EditFieldKind::Uri { .. }));
     let insert_at = last_uri_pos.map(|p| p + 1).unwrap_or_else(|| {
         // Place it just after Password if present, else at the end.
-        app.edit_fields
+        app.edit
+            .fields
             .iter()
             .position(|f| f.label == "Password")
             .map(|p| p + 1)
-            .unwrap_or(app.edit_fields.len())
+            .unwrap_or(app.edit.fields.len())
     });
 
     // Always emit indexed labels — adding a URI guarantees the form
     // has 2+ entries from now on, so the user sees the slot number.
     let url_label = format!("URL {}", next_idx + 1);
     let match_label = format!("URL {} Match", next_idx + 1);
-    app.edit_fields
+    app.edit
+        .fields
         .insert(insert_at, EditField::uri_url(&url_label, "", next_idx));
-    app.edit_fields.insert(
+    app.edit.fields.insert(
         insert_at + 1,
         EditField::uri_match(&match_label, "", next_idx),
     );
@@ -768,19 +781,19 @@ pub fn add_uri_row(app: &mut App) {
     // their indexed form so the visual scheme is consistent.
     relabel_uris(app);
 
-    app.edit_field_idx = insert_at;
+    app.edit.field_idx = insert_at;
     app.set_action(ActionState::Done(format!("Added URL {} ✓", next_idx + 1)));
 }
 
 /// Removes the URI pair (URL + URL Match rows) the focused row
 /// belongs to. No-op when the focused row is not a URI row.
 pub fn remove_uri_row(app: &mut App) {
-    if !app.edit_mode {
+    if !app.edit.active {
         return;
     }
     use crate::tui::edit_field::EditFieldKind;
 
-    let Some(focused) = app.edit_fields.get(app.edit_field_idx) else {
+    let Some(focused) = app.edit.fields.get(app.edit.field_idx) else {
         return;
     };
     let target_index = match focused.kind {
@@ -791,10 +804,11 @@ pub fn remove_uri_row(app: &mut App) {
         }
     };
 
-    app.edit_fields
+    app.edit
+        .fields
         .retain(|f| !matches!(f.kind, EditFieldKind::Uri { index, .. } if index == target_index));
-    if app.edit_field_idx >= app.edit_fields.len() && !app.edit_fields.is_empty() {
-        app.edit_field_idx = app.edit_fields.len() - 1;
+    if app.edit.field_idx >= app.edit.fields.len() && !app.edit.fields.is_empty() {
+        app.edit.field_idx = app.edit.fields.len() - 1;
     }
 
     relabel_uris(app);
@@ -814,7 +828,8 @@ fn relabel_uris(app: &mut App) {
     // Collect the URI row positions in form order, paired with their
     // role, so we can rewrite both labels and slot indices.
     let positions: Vec<(usize, UriRole)> = app
-        .edit_fields
+        .edit
+        .fields
         .iter()
         .enumerate()
         .filter_map(|(pos, f)| match f.kind {
@@ -842,7 +857,7 @@ fn relabel_uris(app: &mut App) {
             (UriRole::Url, true) => format!("URL {next_visual}"),
             (UriRole::Match, true) => format!("URL {next_visual} Match"),
         };
-        if let Some(field) = app.edit_fields.get_mut(pos) {
+        if let Some(field) = app.edit.fields.get_mut(pos) {
             field.label = label;
             // Renumber the slot index too so the patcher emits a
             // tightly-packed `uris[]` (no gaps).
@@ -864,10 +879,10 @@ fn relabel_uris(app: &mut App) {
 /// read-only — Alt+T on one of them surfaces an explanatory toast and
 /// leaves the type alone.
 pub fn cycle_field_type(app: &mut App) {
-    if !app.edit_mode {
+    if !app.edit.active {
         return;
     }
-    let Some(field) = app.edit_fields.get_mut(app.edit_field_idx) else {
+    let Some(field) = app.edit.fields.get_mut(app.edit.field_idx) else {
         return;
     };
     let Some(t) = field.custom_type() else {
@@ -895,7 +910,7 @@ pub fn cycle_field_type(app: &mut App) {
 
 /// Save edit — step 1: fetch the item JSON to patch (worker).
 pub fn queue_save_edit(app: &mut App) {
-    let item_id = app.edit_item_id.clone();
+    let item_id = app.edit.item_id.clone();
     app.submit(
         InFlight::SaveEditFetch,
         "Saving…",
@@ -905,7 +920,7 @@ pub fn queue_save_edit(app: &mut App) {
 
 /// Save edit — step 1 response: patch the fetched JSON and commit it.
 pub fn handle_save_edit_fetch(app: &mut App, r: Result<Zeroizing<String>, BwError>) {
-    let item_id = app.edit_item_id.clone();
+    let item_id = app.edit.item_id.clone();
     let cmd = format!("bw edit item {item_id}");
     let base_json = match r {
         Ok(j) => j,
@@ -917,7 +932,8 @@ pub fn handle_save_edit_fetch(app: &mut App, r: Result<Zeroizing<String>, BwErro
     // name → null (no folder); the patcher is forgiving by design.
     let folders_snapshot = app.folders.clone();
     let edit_fields_resolved: Vec<crate::tui::edit_field::EditField> = app
-        .edit_fields
+        .edit
+        .fields
         .iter()
         .map(|f| {
             if f.label != "Folder" {
@@ -946,7 +962,7 @@ pub fn handle_save_edit_fetch(app: &mut App, r: Result<Zeroizing<String>, BwErro
 
 /// Save edit — step 2 response: the committed item.
 pub fn handle_save_edit_commit(app: &mut App, r: Result<crate::domain::Item, BwError>) {
-    let item_id = app.edit_item_id.clone();
+    let item_id = app.edit.item_id.clone();
     let cmd = format!("bw edit item {item_id}");
     match r {
         Ok(updated) => {
@@ -957,7 +973,7 @@ pub fn handle_save_edit_commit(app: &mut App, r: Result<crate::domain::Item, BwE
             app.sort_items();
             app.push_cmd(&cmd, true, &format!("saved: {name}"));
             app.set_action(ActionState::Done("Saved ✓".into()));
-            app.edit_mode = false;
+            app.edit.active = false;
         }
         Err(e) => app.cmd_err(&cmd, &e, "Save failed"),
     }

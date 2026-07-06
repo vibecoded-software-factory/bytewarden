@@ -139,7 +139,7 @@ fn run_protected_action(app: &mut App, action: ProtectedAction) {
             app.show_password = !app.show_password;
         }
         ProtectedAction::RevealEditField => {
-            app.edit_toggle_reveal();
+            app.edit.toggle_reveal();
         }
     }
     // Safety net: if the action's path didn't trip a guard (e.g. it

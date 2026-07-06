@@ -19,13 +19,13 @@ use std::time::{Duration, Instant};
 use zeroize::Zeroizing;
 
 use crate::domain::LoweredItem;
-use crate::domain::filter::{CreateItemType, ITEM_FILTERS, ItemFilter};
+use crate::domain::filter::{ITEM_FILTERS, ItemFilter};
 use crate::domain::folder::Folder;
 use crate::domain::item::Item;
 use crate::ports::{ClipboardPort, SettingsPort};
 use crate::tui::action::{ActionState, CmdEntry};
-use crate::tui::edit_field::EditField;
 use crate::tui::generator::GeneratorState;
+use crate::tui::item_forms::{CreateForm, EditForm};
 use crate::tui::login_form::LoginForm;
 use crate::tui::mouse_areas::MouseAreas;
 use crate::tui::screens::{Focus, LoginField, Screen};
@@ -217,15 +217,11 @@ pub struct App {
     pub last_click: Option<(u16, u16)>,
 
     // ── Edit / create forms ───────────────────────────────────────────────
-    pub edit_fields: Vec<EditField>,
-    pub edit_field_idx: usize,
-    pub edit_item_id: String,
-    pub create_fields: Vec<EditField>,
-    pub create_field_idx: usize,
-    pub create_type: CreateItemType,
-    pub create_type_idx: usize,
-    pub create_choosing_type: bool,
-    pub edit_mode: bool,
+    /// The edit-item form (Detail screen's editable mode). See
+    /// [`crate::tui::item_forms::EditForm`].
+    pub edit: EditForm,
+    /// The create-item form. See [`crate::tui::item_forms::CreateForm`].
+    pub create: CreateForm,
 
     // ── Generator state ───────────────────────────────────────────────────
     pub generator: GeneratorState,
@@ -401,15 +397,8 @@ impl App {
             clipboard_clear_secs: cfg.clipboard_clear_secs,
             mouse_areas: MouseAreas::default(),
             last_click: None,
-            edit_fields: Vec::new(),
-            edit_field_idx: 0,
-            edit_item_id: String::new(),
-            create_fields: Vec::new(),
-            create_field_idx: 0,
-            create_type: CreateItemType::Login,
-            create_type_idx: 0,
-            create_choosing_type: true,
-            edit_mode: false,
+            edit: EditForm::default(),
+            create: CreateForm::default(),
             generator: GeneratorState::default(),
             rename_field: None,
             folder_name: None,
@@ -608,8 +597,8 @@ impl App {
     pub fn go_back(&mut self) {
         match self.screen {
             Screen::Detail => {
-                if self.edit_mode {
-                    self.edit_mode = false;
+                if self.edit.active {
+                    self.edit.active = false;
                 } else {
                     self.screen = Screen::Vault;
                 }
@@ -926,25 +915,6 @@ impl App {
         let e = e.to_string();
         self.push_cmd(cmd, false, &e);
         self.set_action(ActionState::Error(format!("{label}: {e}")));
-    }
-
-    // ── Edit / create field accessors ─────────────────────────────────────
-
-    pub fn edit_field_mut(&mut self) -> Option<&mut EditField> {
-        self.edit_fields.get_mut(self.edit_field_idx)
-    }
-
-    pub fn create_field_mut(&mut self) -> Option<&mut EditField> {
-        self.create_fields.get_mut(self.create_field_idx)
-    }
-
-    /// Toggles the reveal flag on the focused (hidden) edit field.
-    pub fn edit_toggle_reveal(&mut self) {
-        if let Some(f) = self.edit_field_mut()
-            && f.hidden
-        {
-            f.revealed = !f.revealed;
-        }
     }
 
     // ── Login form plumbing (settings-backed) ─────────────────────────────
