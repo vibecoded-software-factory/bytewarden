@@ -291,7 +291,7 @@ weight of the action before you press it. Every screen follows the same tiers:
   `Alt+O` logout. On **typing surfaces** (the Search box, the edit/create
   forms) the row actions *also* park on `Alt+letter` so a text field can't trap
   you (`Alt+C` copy while searching; `Alt+G` generate into a field).
-- **`/` = focus search** · `Esc`/`h` back · `F1` help · `F9` Settings ·
+- **`/` = focus search** · `Esc`/`h` back · `F1` help · `F10` Settings ·
   `0`–`4` focus panel · `Tab` cycle · `j/k`+`↑/↓` navigate · `PgUp/PgDn` page ·
   `Enter`/`l` open. On the **Search** box `↑/↓` (not `j/k`, which type) move
   the list selection.
@@ -350,7 +350,7 @@ border tint), the starfield tiers fade from accent, and the item-type colors
 map to distinct hues (`item_note` stays teal so it never reads as the green
 `success`). Multiple presets ship (`Preset::ALL`, dark→light order; `Nord` is
 `Preset::DEFAULT`); `name = "<preset>"` in `[theme]` picks the base and
-per-key hex entries override it. The Settings picker (`F9`) applies live.
+per-key hex entries override it. The Settings picker (`F10`) applies live.
 Adding a preset = one `Palette` arm in `Preset::palette`.
 
 **Themes adapt to the terminal's color capability** at application time
@@ -361,9 +361,9 @@ without a `COLORTERM=truecolor|24bit` hint gets every RGB quantized to the
 nearest xterm-256 index (deterministic, controlled by us), and truecolor
 passes through. `foreground: Reset` survives every mode.
 
-## Settings overlay (`F9`)
+## Settings overlay (`F10`)
 
-`F9` opens a centered **Settings** overlay (`Screen::Settings`, drawn over
+`F10` opens a centered **Settings** overlay (`Screen::Settings`, drawn over
 `settings_from`) — a left **section sidebar** + the active section's **panel**;
 `Tab` switches sidebar ↔ panel, `↑/↓` move within, `←/→` change the focused
 setting. Height/position follow the standard modal geometry; the width is
@@ -373,7 +373,7 @@ rather than truncating, and the focused row's hint is pinned to the bottom.
 Sectioned so the surface can grow (Theme, Clipboard, Security…); today Theme is
 a live preset picker. **Apply-immediately**: each change writes to the settings
 cache *and* persists to `config.toml` on adjust (atomic write), so closing just
-leaves. `Esc` steps back (Panel → Sidebar → close); `F9` closes from anywhere.
+leaves. `Esc` steps back (Panel → Sidebar → close); `F10` closes from anywhere.
 
 ## Responsiveness — what adapts (and how)
 

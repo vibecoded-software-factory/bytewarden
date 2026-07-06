@@ -64,7 +64,7 @@ pub fn palette_commands(app: &App) -> Vec<PaletteCommand> {
         cmd("Create text Send", "Alt+W", super::send::open),
         cmd("Memberships", "Alt+B", super::memberships::open),
         cmd("Show fingerprint", "Alt+I", super::auth::show_fingerprint),
-        cmd("Settings", "F9", App::open_settings),
+        cmd("Settings", "F10", App::open_settings),
         cmd("Lock vault", "Alt+L", super::auth::lock_vault),
         cmd("Log out", "Alt+O", super::auth::open_confirm_logout),
     ];

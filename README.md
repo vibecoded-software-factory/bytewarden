@@ -221,7 +221,7 @@ to grayscale, a non-truecolor terminal (`COLORTERM` unset) gets each color
 quantized to the nearest xterm-256 index, and truecolor passes through.
 
 You can also switch presets live from inside the app — open **Settings** with
-`F9` (Theme section), preview with `↑/↓`, `Enter` saves.
+`F10` (Theme section), preview with `↑/↓`, `Enter` saves.
 
 ```toml
 [theme]
@@ -481,7 +481,7 @@ Number keys `0`–`4` are disabled while Search is focused so you can type them 
 | `Alt+W` | Create a text **Send** (popup) |
 | `Alt+B` | View **memberships** (organisations + collections) |
 | `F1` | Help popup — context-aware |
-| `F9` | Open **Settings** (Theme preset picker; more sections coming) |
+| `F10` | Open **Settings** (Theme preset picker; more sections coming) |
 | `Ctrl+C` | Quit |
 
 All `Alt+` shortcuts also work while Search is focused.
@@ -1122,7 +1122,7 @@ ride on `Alt+` instead.
 
 ```
 GLOBAL (any screen)
-  Ctrl+C quit · F1 help · F9 settings · Ctrl+P command palette
+  Ctrl+C quit · F1 help · F10 settings · Ctrl+P command palette
   Esc/h back · Tab cycle focus · 0..4 focus panel · / focus search
 
 LOGIN

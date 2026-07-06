@@ -1,4 +1,4 @@
-//! Settings overlay (`F9`) state.
+//! Settings overlay (`F10`) state.
 //!
 //! The preferences overlay's transient state, split out of the
 //! [`crate::tui::app::App`] god-struct into its own screen-local
@@ -49,7 +49,7 @@ pub struct SettingsOverlay {
     /// [`crate::tui::theme::Preset::ALL`]). Previews live as it moves.
     pub theme_idx: usize,
     /// Theme active when the overlay opened — restored if the user
-    /// cancels (`Esc`/`F9`) instead of confirming.
+    /// cancels (`Esc`/`F10`) instead of confirming.
     pub theme_before: Theme,
     /// Screen the overlay was opened from (returned to on close).
     pub from: Screen,

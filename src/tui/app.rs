@@ -239,7 +239,7 @@ pub struct App {
     // ── Theme ─────────────────────────────────────────────────────────────
     pub theme: Theme,
 
-    // ── Settings overlay (F9) ─────────────────────────────────────────────
+    // ── Settings overlay (F10) ─────────────────────────────────────────────
     /// The Settings overlay's transient state. See
     /// [`crate::tui::settings_overlay::SettingsOverlay`].
     pub settings_ui: SettingsOverlay,
@@ -438,7 +438,7 @@ impl App {
     }
 
     /// Opens the Settings overlay over the current screen. Stashes the
-    /// originating screen and the active theme (so `Esc`/`F9` can restore
+    /// originating screen and the active theme (so `Esc`/`F10` can restore
     /// it), and starts focus on the section sidebar.
     pub fn open_settings(&mut self) {
         self.settings_ui.from = self.screen.clone();
