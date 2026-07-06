@@ -294,6 +294,16 @@ fn apply_scroll(app: &mut App, target: ScrollTarget, dir: i8, shift: bool) {
                 crate::tui::flows::palette::move_selection(app, -1)
             }
         }
+        ScrollTarget::SettingsTheme => {
+            let n = crate::tui::theme::Preset::ALL.len();
+            if dir > 0 && app.settings_ui.theme_idx + 1 < n {
+                app.settings_ui.theme_idx += 1;
+                app.settings_preview_theme();
+            } else if dir < 0 && app.settings_ui.theme_idx > 0 {
+                app.settings_ui.theme_idx -= 1;
+                app.settings_preview_theme();
+            }
+        }
         ScrollTarget::Help => {
             // Wheel scrolls vertically; Shift+Wheel pans horizontally. The
             // renderer clamps both axes once it knows the viewport size.

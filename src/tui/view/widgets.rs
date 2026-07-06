@@ -117,6 +117,8 @@ pub enum ScrollTarget {
     Help,
     /// The command-palette command list (wheel moves the highlight).
     Palette,
+    /// The settings theme-preset list (wheel moves + previews the preset).
+    SettingsTheme,
 }
 
 /// Clears the frame-local registries (scroll regions, the active modal rect,

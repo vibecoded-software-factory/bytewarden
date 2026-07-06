@@ -263,6 +263,11 @@ fn draw_theme_panel(frame: &mut Frame, app: &App, area: Rect) {
         register_hit(row_rect(body, (i - start) as u16), SettingsHit::Theme(i));
     }
 
+    // Wheel scrolls (and previews) the preset list.
+    crate::tui::view::widgets::register_scroll(
+        body,
+        crate::tui::view::widgets::ScrollTarget::SettingsTheme,
+    );
     // Scroll cue on the panel's right border when the presets overflow.
     draw_scrollbar(frame, area, total, idx, t);
 }
