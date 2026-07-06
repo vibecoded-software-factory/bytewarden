@@ -4,14 +4,16 @@
 
 use ratatui::{
     Frame,
-    layout::{Constraint, Layout},
+    layout::{Constraint, Layout, Rect},
     style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Clear, List, ListItem, ListState, Paragraph},
 };
 
 use crate::tui::app::App;
-use crate::tui::view::widgets::{center_rect, cursor_line, key_style, rounded_block};
+use crate::tui::view::widgets::{
+    center_rect, cursor_line, draw_scrollbar, key_style, rounded_block,
+};
 
 /// Draws the command palette over its origin screen.
 pub fn draw(frame: &mut Frame, app: &App) {
@@ -43,7 +45,18 @@ pub fn draw(frame: &mut Frame, app: &App) {
     frame.render_widget(Paragraph::new(Line::from(ql)), rows[0]);
 
     // Command list — label left, keybinding right-aligned in `key_style`.
-    let width = rows[2].width as usize;
+    // Reserve a one-column gutter for the scrollbar when the matches
+    // overflow the panel, so the track never clips a keybinding.
+    let list_overflow = state.filtered.len() > rows[2].height as usize;
+    let list_area = if list_overflow {
+        Rect {
+            width: rows[2].width.saturating_sub(1),
+            ..rows[2]
+        }
+    } else {
+        rows[2]
+    };
+    let width = list_area.width as usize;
     let items: Vec<ListItem> = state
         .filtered
         .iter()
@@ -79,9 +92,12 @@ pub fn draw(frame: &mut Frame, app: &App) {
                         .add_modifier(Modifier::BOLD),
                 )
                 .highlight_symbol("▶ "),
-            rows[2],
+            list_area,
             &mut ls,
         );
+        if list_overflow {
+            draw_scrollbar(frame, rows[2], state.filtered.len(), state.selected, t);
+        }
     }
 
     frame.render_widget(
