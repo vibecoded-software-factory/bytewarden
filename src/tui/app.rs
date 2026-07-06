@@ -953,6 +953,55 @@ mod tests {
     }
 
     #[test]
+    fn clicking_a_settings_sidebar_section_selects_it() {
+        use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
+
+        let (mut app, _req_rx, _resp_tx) = fresh_app();
+        app.open_settings();
+        assert_eq!(
+            app.settings_ui.section, 0,
+            "settings open on the first section"
+        );
+        let mut term = Terminal::new(TestBackend::new(90, 24)).unwrap();
+        term.draw(|f| crate::tui::view::draw(f, &mut app)).unwrap();
+        // Find the "Security" sidebar row (the panel title is "Theme" on section
+        // 0, so "Security" only appears as a sidebar entry).
+        let buf = term.backend().buffer();
+        let mut text = String::new();
+        for y in 0..buf.area().height {
+            for x in 0..buf.area().width {
+                if let Some(c) = buf.cell((x, y)) {
+                    text.push_str(c.symbol());
+                }
+            }
+            text.push('\n');
+        }
+        let (col, row) = text
+            .lines()
+            .enumerate()
+            .find_map(|(y, line)| {
+                line.find("Security")
+                    .map(|b| (line[..b].chars().count() as u16, y as u16))
+            })
+            .expect("the Security section row is rendered");
+        crate::tui::input::mouse::handle(
+            &mut app,
+            MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Left),
+                column: col,
+                row,
+                modifiers: KeyModifiers::NONE,
+            },
+        );
+        assert_eq!(
+            app.settings_ui.section, 1,
+            "clicking the Security sidebar row selected it"
+        );
+    }
+
+    #[test]
     fn submit_dispatches_toast_and_request() {
         let (mut app, req_rx, _resp_tx) = fresh_app();
         assert!(app.submit(InFlight::Sync, "Syncing…", WorkerRequest::Sync));

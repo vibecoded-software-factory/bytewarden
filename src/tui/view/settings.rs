@@ -15,7 +15,49 @@ use crate::tui::settings_overlay::{SettingsFocus, SettingsSection};
 use crate::tui::theme;
 use crate::tui::view::widgets::draw_scrollbar;
 
+/// A clickable target inside the settings overlay — a sidebar section, a panel
+/// row, or a theme preset, each keyed by its index.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SettingsHit {
+    Section(usize),
+    Row(usize),
+    Theme(usize),
+}
+
+thread_local! {
+    /// Frame-local hit map for the settings overlay — one `(rect, target)` per
+    /// clickable row, recorded as `&App` draws (so no `mouse_areas` write).
+    static SETTINGS_HITS: std::cell::RefCell<Vec<(Rect, SettingsHit)>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
+fn register_hit(rect: Rect, hit: SettingsHit) {
+    if rect.width > 0 && rect.height > 0 {
+        SETTINGS_HITS.with(|h| h.borrow_mut().push((rect, hit)));
+    }
+}
+
+/// The settings target under `(column, row)`, if any — consumed by the mouse
+/// layer to select / activate a sidebar section, panel row or theme preset.
+pub fn settings_hit_at(column: u16, row: u16) -> Option<SettingsHit> {
+    SETTINGS_HITS.with(|h| {
+        h.borrow()
+            .iter()
+            .rev()
+            .find(|(r, _)| {
+                column >= r.x && column < r.x + r.width && row >= r.y && row < r.y + r.height
+            })
+            .map(|(_, t)| *t)
+    })
+}
+
+/// A 1-row rect at `area.y + line` spanning the area's width — for a row hit.
+fn row_rect(area: Rect, line: u16) -> Rect {
+    Rect::new(area.x, area.y + line, area.width, 1)
+}
+
 pub fn draw_popup(frame: &mut Frame, area: Rect, app: &App) {
+    SETTINGS_HITS.with(|h| h.borrow_mut().clear());
     let t = &app.theme;
     let accent = Style::default().fg(t.accent).add_modifier(Modifier::BOLD);
 
@@ -114,6 +156,10 @@ fn draw_sidebar(frame: &mut Frame, app: &App, area: Rect) {
         })
         .collect();
     frame.render_widget(Paragraph::new(lines), body);
+    // Each section is one clickable row.
+    for i in 0..SettingsSection::ALL.len() {
+        register_hit(row_rect(body, i as u16), SettingsHit::Section(i));
+    }
 }
 
 fn draw_panel(frame: &mut Frame, app: &App, area: Rect) {
@@ -170,6 +216,10 @@ fn draw_rows_panel(frame: &mut Frame, app: &App, area: Rect, section: SettingsSe
         })
         .collect();
     frame.render_widget(Paragraph::new(lines), body);
+    // Each value row is clickable (no wrapping — one line per row).
+    for i in 0..rows.len() {
+        register_hit(row_rect(body, i as u16), SettingsHit::Row(i));
+    }
 }
 
 fn draw_theme_panel(frame: &mut Frame, app: &App, area: Rect) {
@@ -208,6 +258,10 @@ fn draw_theme_panel(frame: &mut Frame, app: &App, area: Rect) {
         })
         .collect();
     frame.render_widget(Paragraph::new(lines), body);
+    // Each visible preset is clickable — preset `i` renders at line `i - start`.
+    for i in start..end {
+        register_hit(row_rect(body, (i - start) as u16), SettingsHit::Theme(i));
+    }
 
     // Scroll cue on the panel's right border when the presets overflow.
     draw_scrollbar(frame, area, total, idx, t);

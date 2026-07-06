@@ -37,6 +37,7 @@ pub fn handle(app: &mut App, mouse: MouseEvent) {
                 Screen::Login => mouse_login(app, col, row),
                 Screen::Vault => mouse_vault(app, col, row),
                 Screen::Detail => mouse_detail(app, col, row),
+                Screen::Settings => crate::tui::input::settings::mouse(app, col, row),
                 _ => {}
             }
         }
