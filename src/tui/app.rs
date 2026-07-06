@@ -26,6 +26,7 @@ use crate::domain::folder::Folder;
 use crate::domain::item::Item;
 use crate::ports::{ClipboardPort, SettingsPort};
 use crate::tui::action::{ActionState, CmdEntry};
+use crate::tui::auto_lock::AutoLock;
 use crate::tui::cmd_log::CmdLog;
 use crate::tui::generator::GeneratorState;
 use crate::tui::item_forms::{CreateForm, EditForm};
@@ -134,9 +135,9 @@ pub struct App {
     pub list_items_timeout_secs: u64,
 
     // ── Auto-lock ─────────────────────────────────────────────────────────
-    pub auto_lock: bool,
-    pub lock_after_secs: u64,
-    pub last_activity: Instant,
+    /// The inactivity auto-lock timer. See
+    /// [`crate::tui::auto_lock::AutoLock`].
+    pub auto_lock: AutoLock,
 
     // ── Clipboard auto-clear ──────────────────────────────────────────────
     /// Seconds after which a copied secret is wiped from the system
@@ -299,9 +300,7 @@ impl App {
             request_started: None,
             worker_dead: false,
             list_items_timeout_secs: cfg.list_items_timeout_secs,
-            auto_lock: cfg.auto_lock,
-            lock_after_secs: cfg.lock_after_secs,
-            last_activity: Instant::now(),
+            auto_lock: AutoLock::new(cfg.auto_lock, cfg.lock_after_secs),
             clipboard_clear_secs: cfg.clipboard_clear_secs,
             mouse_areas: MouseAreas::default(),
             last_click: None,
@@ -436,13 +435,6 @@ impl App {
             ));
             self.push_cmd("worker watchdog", false, "abandoned in-flight request");
         }
-    }
-
-    // ── Activity / navigation ─────────────────────────────────────────────
-
-    /// Records "user is active right now" — resets the auto-lock timer.
-    pub fn reset_activity(&mut self) {
-        self.last_activity = Instant::now();
     }
 
     /// Opens the Settings overlay over the current screen. Stashes the

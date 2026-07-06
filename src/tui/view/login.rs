@@ -320,11 +320,11 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         t.inactive,
         f[idx_save],
     );
-    let lock_label = format!("Auto-lock after {} min", app.lock_after_secs / 60);
+    let lock_label = format!("Auto-lock after {} min", app.auto_lock.after_secs / 60);
     render_checkbox(
         frame,
         &lock_label,
-        app.auto_lock,
+        app.auto_lock.enabled,
         app.login.active_field == LoginField::AutoLock,
         t.accent,
         t.inactive,

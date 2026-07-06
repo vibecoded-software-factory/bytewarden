@@ -90,8 +90,8 @@ fn mouse_login(app: &mut App, col: u16, row: u16) {
             app.toggle_save_email();
         } else if row < 19 {
             app.login.active_field = LoginField::AutoLock;
-            app.auto_lock = !app.auto_lock;
-            app.settings.write_auto_lock(app.auto_lock);
+            app.auto_lock.enabled = !app.auto_lock.enabled;
+            app.settings.write_auto_lock(app.auto_lock.enabled);
         } else {
             app.login.active_field = LoginField::KeepSession;
             app.toggle_keep_session();
@@ -101,8 +101,8 @@ fn mouse_login(app: &mut App, col: u16, row: u16) {
         app.toggle_save_email();
     } else if row < 15 {
         app.login.active_field = LoginField::AutoLock;
-        app.auto_lock = !app.auto_lock;
-        app.settings.write_auto_lock(app.auto_lock);
+        app.auto_lock.enabled = !app.auto_lock.enabled;
+        app.settings.write_auto_lock(app.auto_lock.enabled);
     } else {
         app.login.active_field = LoginField::KeepSession;
         app.toggle_keep_session();
