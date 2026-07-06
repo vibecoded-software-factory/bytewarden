@@ -6,7 +6,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent,
 use crate::domain::filter::{ITEM_FILTERS, ItemFilter};
 use crate::tui::app::App;
 use crate::tui::screens::{Focus, LoginField, Screen};
-use crate::tui::view::widgets::ScrollTarget;
+use crate::tui::view::widgets::{ClickAction, ScrollTarget};
 
 /// Dispatches a mouse event.
 pub fn handle(app: &mut App, mouse: MouseEvent) {
@@ -25,6 +25,12 @@ pub fn handle(app: &mut App, mouse: MouseEvent) {
                     app,
                     KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE),
                 );
+                return;
+            }
+            // Clickable command-bar chrome (the F1/F10 anchor) — the mouse twin
+            // of the function keys.
+            if let Some(action) = crate::tui::view::widgets::button_at(col, row) {
+                apply_click_action(app, action);
                 return;
             }
             match app.screen {
@@ -49,6 +55,19 @@ pub fn handle(app: &mut App, mouse: MouseEvent) {
             mouse.modifiers.contains(KeyModifiers::SHIFT),
         ),
         _ => {}
+    }
+}
+
+/// Dispatches a click on a registered chrome button — the mouse twin of its
+/// key (mirrors the global `F1` / `F10` handling in the key router).
+fn apply_click_action(app: &mut App, action: ClickAction) {
+    match action {
+        ClickAction::OpenHelp => {
+            app.help_from = Some(app.screen.clone());
+            app.help_scroll = (0, 0);
+            app.screen = Screen::Help;
+        }
+        ClickAction::OpenSettings => app.open_settings(),
     }
 }
 

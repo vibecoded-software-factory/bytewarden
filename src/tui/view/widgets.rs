@@ -24,6 +24,24 @@ thread_local! {
     /// settings / help), if one is drawn. The mouse layer uses it for
     /// click-outside-to-dismiss — one generic close path for every overlay.
     static MODAL_RECT: std::cell::RefCell<Option<Rect>> = const { std::cell::RefCell::new(None) };
+
+    /// Frame-local **clickable-button registry**: chrome that looks like a
+    /// button (the `F1`/`F10` command-bar anchor, …) records its rect + a
+    /// [`ClickAction`] here as it draws, so the mouse layer dispatches a click
+    /// on it generically — the same pattern as the scroll registry.
+    static BUTTONS: std::cell::RefCell<Vec<(Rect, ClickAction)>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// A semantic action a rendered "button" triggers on click — the mouse twin of
+/// its key. Registered by the widget that draws the button ([`register_button`])
+/// and dispatched by the input layer.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ClickAction {
+    /// Open the help overlay (the `F1 help` anchor).
+    OpenHelp,
+    /// Open the settings overlay (the `F10 settings` anchor).
+    OpenSettings,
 }
 
 /// What the mouse wheel moves when it's over a registered region. The widget /
@@ -45,11 +63,34 @@ pub enum ScrollTarget {
     Help,
 }
 
-/// Clears the frame-local registries (scroll regions + the active modal rect).
-/// Called once per frame before drawing, alongside the `MouseAreas` reset.
+/// Clears the frame-local registries (scroll regions, the active modal rect,
+/// the button rects). Called once per frame before drawing, alongside the
+/// `MouseAreas` reset.
 pub fn reset_scroll_regions() {
     SCROLL_REGIONS.with(|s| s.borrow_mut().clear());
     MODAL_RECT.with(|m| *m.borrow_mut() = None);
+    BUTTONS.with(|b| b.borrow_mut().clear());
+}
+
+/// Records a clickable button for this frame (rect + the action it triggers).
+pub fn register_button(rect: Rect, action: ClickAction) {
+    if rect.width > 0 && rect.height > 0 {
+        BUTTONS.with(|b| b.borrow_mut().push((rect, action)));
+    }
+}
+
+/// The action of the clickable button under `(column, row)`, if any — the
+/// last-registered (top-most) match.
+pub fn button_at(column: u16, row: u16) -> Option<ClickAction> {
+    BUTTONS.with(|b| {
+        b.borrow()
+            .iter()
+            .rev()
+            .find(|(r, _)| {
+                column >= r.x && column < r.x + r.width && row >= r.y && row < r.y + r.height
+            })
+            .map(|(_, a)| *a)
+    })
 }
 
 /// Records the active centered-overlay rect for this frame. Every overlay drawer
@@ -311,6 +352,24 @@ fn render_cmd_bar_inner(
             ),
             inner,
         );
+        // The anchor is clickable — the mouse twin of the function keys. It's
+        // right-aligned in `inner`; split it into its two labels by char width
+        // (the `·` separator is multi-byte, so count chars, not bytes).
+        let anchor_len = suffix.chars().count() as u16;
+        if inner.width >= anchor_len {
+            let ax = inner.x + inner.width - anchor_len;
+            let help_w = "F1 help".chars().count() as u16;
+            let sep_w = " · ".chars().count() as u16;
+            let set_w = "F10 settings".chars().count() as u16;
+            register_button(
+                Rect::new(ax, inner.y, help_w, 1),
+                crate::tui::view::widgets::ClickAction::OpenHelp,
+            );
+            register_button(
+                Rect::new(ax + help_w + sep_w, inner.y, set_w, 1),
+                crate::tui::view::widgets::ClickAction::OpenSettings,
+            );
+        }
     }
 }
 
