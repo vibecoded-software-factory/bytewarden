@@ -6,6 +6,20 @@ use crate::tui::app::App;
 use crate::tui::flows::send::{adjust_days, cancel, commit, focus_step};
 use crate::tui::send::SendFocus;
 
+/// Click: focus the field under the pointer.
+pub fn mouse(app: &mut App, col: u16, row: u16) {
+    let Some(idx) = crate::tui::view::widgets::field_hit_at(col, row) else {
+        return;
+    };
+    if let Some(s) = app.send_create.as_mut() {
+        s.focus = match idx {
+            0 => SendFocus::Name,
+            1 => SendFocus::Days,
+            _ => SendFocus::Content,
+        };
+    }
+}
+
 /// Dispatches a single key event on the send-create popup.
 pub fn handle(app: &mut App, key: KeyEvent) {
     match key.code {

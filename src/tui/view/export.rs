@@ -10,7 +10,7 @@ use ratatui::{
 
 use crate::tui::app::App;
 use crate::tui::export::{ExportFocus, ExportFormat};
-use crate::tui::view::widgets::{center_rect, editor_line, rounded_block};
+use crate::tui::view::widgets::{center_rect, editor_line, register_field_hit, rounded_block};
 
 /// Renders the export popup.
 pub fn draw_popup(frame: &mut Frame, area: Rect, app: &App) {
@@ -40,6 +40,13 @@ pub fn draw_popup(frame: &mut Frame, area: Rect, app: &App) {
         ratatui::layout::Constraint::Length(1), // security note
     ])
     .split(inner);
+
+    // Clickable field regions: Format (label + value) and Path (label +
+    // input). The mouse handler maps 0 → Format, 1 → Path.
+    register_field_hit(chunks[1], 0);
+    register_field_hit(chunks[2], 0);
+    register_field_hit(chunks[3], 1);
+    register_field_hit(chunks[4], 1);
 
     // ── Format ────────────────────────────────────────────────────────────
     frame.render_widget(

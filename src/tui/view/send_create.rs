@@ -10,7 +10,7 @@ use ratatui::{
 
 use crate::tui::app::App;
 use crate::tui::send::SendFocus;
-use crate::tui::view::widgets::{center_rect, editor_line, rounded_block};
+use crate::tui::view::widgets::{center_rect, editor_line, register_field_hit, rounded_block};
 
 /// Renders the send-create popup.
 pub fn draw_popup(frame: &mut Frame, area: Rect, app: &App) {
@@ -42,6 +42,15 @@ pub fn draw_popup(frame: &mut Frame, area: Rect, app: &App) {
         ratatui::layout::Constraint::Length(1), // warning
     ])
     .split(inner);
+
+    // Clickable field regions (label + input each): 0 → Name, 1 → Days,
+    // 2 → Content.
+    register_field_hit(chunks[1], 0);
+    register_field_hit(chunks[2], 0);
+    register_field_hit(chunks[3], 1);
+    register_field_hit(chunks[4], 1);
+    register_field_hit(chunks[5], 2);
+    register_field_hit(chunks[6], 2);
 
     // Name
     frame.render_widget(

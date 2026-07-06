@@ -10,7 +10,7 @@ use ratatui::{
 
 use crate::tui::app::App;
 use crate::tui::import::ImportFocus;
-use crate::tui::view::widgets::{center_rect, editor_line, rounded_block};
+use crate::tui::view::widgets::{center_rect, editor_line, register_field_hit, rounded_block};
 
 const FORMAT_HINT_FOCUSED: &str = "  (← → to cycle)";
 const FORMAT_HINT_BLURRED: &str = "  (Tab to focus, ← → to cycle)";
@@ -43,6 +43,13 @@ pub fn draw_popup(frame: &mut Frame, area: Rect, app: &App) {
         ratatui::layout::Constraint::Length(1),
     ])
     .split(inner);
+
+    // Clickable field regions: Format (label + dropdown) and Path (label
+    // + input). The mouse handler maps 0 → Format, 1 → Path.
+    register_field_hit(chunks[1], 0);
+    register_field_hit(chunks[2], 0);
+    register_field_hit(chunks[3], 1);
+    register_field_hit(chunks[4], 1);
 
     // Format field — read-only dropdown, cycled with ← → when
     // focused.
