@@ -40,7 +40,7 @@ pub struct PaletteState {
 
 /// Wrapper: open the selected item's detail straight in edit mode.
 fn edit_selected(app: &mut App) {
-    if app.selected_item().is_some() {
+    if app.vault.selected_item().is_some() {
         app.go_to_detail();
         super::items::enter_edit_mode(app);
     }
@@ -69,7 +69,7 @@ pub fn palette_commands(app: &App) -> Vec<PaletteCommand> {
         cmd("Log out", "Alt+O", super::auth::open_confirm_logout),
     ];
     // Item verbs — only meaningful with a selected, non-trashed item.
-    if app.selected_item().is_some() && !app.is_trash_view() {
+    if app.vault.selected_item().is_some() && !app.vault.is_trash_view() {
         v.extend([
             cmd(
                 "Copy password",

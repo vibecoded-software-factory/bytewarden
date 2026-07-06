@@ -49,7 +49,7 @@ pub fn copy_raw(app: &mut App, text: String, msg: &str) {
 
 /// Copies the selected item's username (no secret → no reprompt).
 pub fn copy_username_to_clipboard(app: &mut App) {
-    let Some(item) = app.selected_item() else {
+    let Some(item) = app.vault.selected_item() else {
         return;
     };
     let name = item.name.clone();
@@ -69,13 +69,13 @@ pub fn copy_username_to_clipboard(app: &mut App) {
 /// function once verification succeeds (verified for this single action,
 /// not cached).
 pub fn copy_password_to_clipboard(app: &mut App) {
-    if app.selected_item().is_none() {
+    if app.vault.selected_item().is_none() {
         return;
     }
     if super::reprompt::maybe_open(app, ProtectedAction::CopyPassword) {
         return;
     }
-    let Some(item) = app.selected_item() else {
+    let Some(item) = app.vault.selected_item() else {
         return;
     };
     let name = item.name.clone();
@@ -235,7 +235,7 @@ fn detail_copy_targets(item: &Item) -> Vec<CopyTarget> {
 /// field (password / TOTP / hidden custom), the request is deferred
 /// behind the reverify popup. Non-secret rows are not gated.
 pub fn copy_selected_field(app: &mut App) {
-    let item = match app.selected_item() {
+    let item = match app.vault.selected_item() {
         Some(i) => i.clone(),
         None => return,
     };

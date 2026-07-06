@@ -23,7 +23,7 @@ use crate::tui::view::widgets::{
 /// Renders the detail screen.
 pub fn draw(frame: &mut Frame, app: &mut App) {
     let area = frame.area();
-    let item = match app.selected_item() {
+    let item = match app.vault.selected_item() {
         Some(i) => i.clone(),
         None => return,
     };
@@ -85,7 +85,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         render_cmd_bar_with_help(frame, area, chunks[2], full, short, t.dim, t);
     } else {
         render_read_only(frame, app, &item, chunks[1]);
-        let (full, short) = if app.is_trash_view() {
+        let (full, short) = if app.vault.is_trash_view() {
             ("j/k field · Esc back · Alt+R restore", "j/k  Esc  Alt+R")
         } else {
             (

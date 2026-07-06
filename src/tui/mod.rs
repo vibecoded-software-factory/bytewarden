@@ -33,6 +33,7 @@ pub mod send;
 pub mod session_file;
 pub mod settings_overlay;
 pub mod theme;
+pub mod vault;
 pub mod view;
 pub mod worker;
 

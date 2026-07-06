@@ -89,8 +89,8 @@ pub fn handle_resume_items(app: &mut App, r: Result<Vec<Item>, BwError>) {
     match r {
         Ok(items) => {
             let count = items.len();
-            app.items = items;
-            app.sort_items();
+            app.vault.items = items;
+            app.vault.sort_items();
             app.push_cmd("bw list items", true, &format!("{count} items loaded"));
             // Chained step — keep the "Resuming session…" toast.
             if app.begin(InFlight::ResumeSessionData) {
@@ -130,8 +130,8 @@ fn apply_parallel_session_data(app: &mut App, data: ParallelSessionData) {
             let mut sorted = folders;
             sorted.sort_by_key(|f| f.name.to_lowercase());
             app.folders = sorted;
-            app.folder_selected = crate::tui::folders::row_for_filter(
-                &app.active_folder,
+            app.vault.folder_selected = crate::tui::folders::row_for_filter(
+                &app.vault.active_folder,
                 &app.folders,
                 &app.collections,
             );
@@ -376,8 +376,8 @@ pub fn handle_post_login_items(app: &mut App, r: Result<Vec<Item>, BwError>) {
     match r {
         Ok(items) => {
             let count = items.len();
-            app.items = items;
-            app.sort_items();
+            app.vault.items = items;
+            app.vault.sort_items();
             app.push_cmd("bw list items", true, &format!("{count} items loaded"));
             // Chained step — keep the "Loading vault…" toast.
             if app.begin(InFlight::PostLoginSessionData) {
@@ -471,11 +471,11 @@ pub fn lock_vault(app: &mut App) {
     session_file::clear();
     app.session_marker = None;
     app.screen = Screen::Login;
-    app.items.clear();
-    app.trashed_items.clear();
+    app.vault.items.clear();
+    app.vault.trashed_items.clear();
     app.collections.clear();
     app.organizations.clear();
-    app.rebuild_caches();
+    app.vault.rebuild_caches();
     app.login.password_input.clear();
     app.login.active_field = LoginField::Password;
     app.push_cmd("bw lock", true, "vault locked");
@@ -540,20 +540,20 @@ pub fn handle_logout(app: &mut App, r: Result<(), BwError>) {
             app.push_cmd("bw logout", true, "account removed from local CLI");
             app.authenticated = false;
             app.session_marker = None;
-            app.items.clear();
-            app.trashed_items.clear();
+            app.vault.items.clear();
+            app.vault.trashed_items.clear();
             app.folders.clear();
             app.collections.clear();
             app.organizations.clear();
-            app.rebuild_caches();
+            app.vault.rebuild_caches();
             app.login.password_input.clear();
             app.login.otp_input.clear();
             app.login.otp_required = false;
             app.login.two_factor_required = false;
             app.login.email_input.clear();
-            app.search_query.clear();
-            app.selected_index = 0;
-            app.scroll_offset = 0;
+            app.vault.search_query.clear();
+            app.vault.selected_index = 0;
+            app.vault.scroll_offset = 0;
             // Wipe the command log: it can carry item names, folder ids,
             // export/import paths and the user's e-mail.
             app.cmd_log.clear();

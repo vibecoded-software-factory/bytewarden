@@ -54,7 +54,10 @@ pub fn open(app: &mut App) {
         let Some(field) = app.edit.fields.get(app.edit.field_idx) else {
             return;
         };
-        let org = app.selected_item().and_then(|i| i.organization_id.clone());
+        let org = app
+            .vault
+            .selected_item()
+            .and_then(|i| i.organization_id.clone());
         (
             app.edit.field_idx,
             field.is_collections(),
@@ -121,7 +124,7 @@ pub fn open_for_move(app: &mut App) {
     if !matches!(app.screen, Screen::Detail) || app.edit.active {
         return;
     }
-    let Some(item) = app.selected_item() else {
+    let Some(item) = app.vault.selected_item() else {
         return;
     };
     if item.organization_id.is_some() {
@@ -195,7 +198,7 @@ pub fn cancel(app: &mut App) {
 ///   via the regular Enter-to-save flow.
 /// * `MoveToOrg`: call `bw move` directly — the move is the
 ///   commit. On success the in-memory item is dropped from
-///   `app.items` (it now belongs to the org and would re-appear
+///   `app.vault.items` (it now belongs to the org and would re-appear
 ///   from the next sync); a silent refresh re-fetches the vault
 ///   so the new state is visible immediately.
 pub fn commit(app: &mut App) {

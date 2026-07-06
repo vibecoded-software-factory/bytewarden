@@ -31,8 +31,8 @@ pub fn handle_reload(app: &mut App, r: Result<Vec<Folder>, BwError>) {
         Ok(folders) => {
             let count = folders.len();
             app.folders = sorted(folders);
-            app.folder_selected =
-                row_for_filter(&app.active_folder, &app.folders, &app.collections);
+            app.vault.folder_selected =
+                row_for_filter(&app.vault.active_folder, &app.folders, &app.collections);
             app.push_cmd("bw list folders", true, &format!("{count} folders loaded"));
         }
         Err(e) => app.cmd_err("bw list folders", &e, "Load folders failed"),
@@ -53,25 +53,26 @@ pub fn move_down(app: &mut App) {
     if n == 0 {
         return;
     }
-    if app.folder_selected + 1 < n {
-        app.folder_selected += 1;
+    if app.vault.folder_selected + 1 < n {
+        app.vault.folder_selected += 1;
     }
 }
 
 /// Moves the highlight up by one (clamped at 0).
 pub fn move_up(app: &mut App) {
-    if app.folder_selected > 0 {
-        app.folder_selected -= 1;
+    if app.vault.folder_selected > 0 {
+        app.vault.folder_selected -= 1;
     }
 }
 
 /// Activates the highlighted folder filter and resets the item-list
 /// selection / scroll so the user lands at the top of the new view.
 pub fn apply_filter(app: &mut App) {
-    app.active_folder = filter_for_row(app.folder_selected, &app.folders, &app.collections);
-    app.selected_index = 0;
-    app.scroll_offset = 0;
-    app.rebuild_filtered_cache();
+    app.vault.active_folder =
+        filter_for_row(app.vault.folder_selected, &app.folders, &app.collections);
+    app.vault.selected_index = 0;
+    app.vault.scroll_offset = 0;
+    app.vault.rebuild_filtered_cache();
 }
 
 // ── Lookup helpers ────────────────────────────────────────────────────────
@@ -79,10 +80,10 @@ pub fn apply_filter(app: &mut App) {
 /// Returns the folder currently highlighted in the sidebar, or `None`
 /// when the highlight is on a meta-row ("All folders" / "(No folder)").
 pub fn focused_folder(app: &App) -> Option<&Folder> {
-    if app.folder_selected < 2 {
+    if app.vault.folder_selected < 2 {
         None
     } else {
-        app.folders.get(app.folder_selected - 2)
+        app.folders.get(app.vault.folder_selected - 2)
     }
 }
 
@@ -280,11 +281,11 @@ pub fn confirm_delete(app: &mut App) {
     };
     let id = folder.id.clone();
     let name = folder.name.clone();
-    if matches!(&app.active_folder, super::super::folders::FolderFilter::Folder(fid) if fid == &id)
+    if matches!(&app.vault.active_folder, super::super::folders::FolderFilter::Folder(fid) if fid == &id)
     {
-        app.active_folder = super::super::folders::FolderFilter::All;
-        app.folder_selected = 0;
-        app.rebuild_filtered_cache();
+        app.vault.active_folder = super::super::folders::FolderFilter::All;
+        app.vault.folder_selected = 0;
+        app.vault.rebuild_filtered_cache();
     }
     app.screen = crate::tui::screens::Screen::Vault;
     app.submit(

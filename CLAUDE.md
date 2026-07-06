@@ -85,8 +85,11 @@ main ──► tui ──► flows ──► ports ◄── adapters
     writes (temp file + `rename`), 0700/0600 perms.
   - `bw_generator.rs` — the password/passphrase generator (`bw generate`).
 - `src/tui/` — the driving adapter:
-  - `app.rs` — the mutable `App` state container + the invalidation methods
-    (see *State & invalidation contracts*).
+  - `app.rs` — the mutable `App` state container. Per-screen state lives in
+    sub-structs (`vault::Vault` for the item list + its invalidation
+    contract, `login_form`, `item_forms`, `settings_overlay`, the generator
+    and the popup states); `App` keeps navigation, session reference data,
+    worker plumbing and the injected ports.
   - `worker.rs` — worker thread(s) + `WorkerRequest`/`WorkerResponse`/
     `InFlight`; `run_caught` panic isolation per call.
   - `flows/` — per-feature `request_*`/`handle_*` pairs (`auth`, `vault`,
@@ -183,11 +186,14 @@ feedback strip renders `Display`.
 
 ## State & invalidation contracts (the footgun list)
 
-`App` caches derived state; each cache has **exactly one** rebuild path.
-**Mutating the input without calling the rebuild is a bug**, and calling a
-rebuild with the wrong cursor semantics is a UX regression. Selection always
-indexes the **filtered** cache, never the raw vec, and is re-anchored by
-**id**, never by index, after a wholesale reload.
+The **`Vault`** sub-struct (`tui/vault.rs`, reached as `app.vault`) caches
+derived state; each cache has **exactly one** rebuild path, and the rebuild
+methods live on `Vault` beside the fields they protect (so the contract is
+local, not spread across the app). **Mutating the input without calling the
+rebuild is a bug**, and calling a rebuild with the wrong cursor semantics is a
+UX regression. Selection always indexes the **filtered** cache, never the raw
+vec, and is re-anchored by **id**, never by index, after a wholesale reload.
+All calls below are methods on `app.vault`.
 
 | Input mutated | Must call | Notes |
 |---|---|---|

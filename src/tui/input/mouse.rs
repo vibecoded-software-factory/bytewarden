@@ -118,12 +118,12 @@ fn mouse_vault(app: &mut App, col: u16, row: u16) {
     if focus == Focus::List
         && let Some(row_idx) = app.mouse_areas.list_row(row)
     {
-        let visible_idx = app.scroll_offset + row_idx;
-        if visible_idx < app.filtered_items().len() {
-            if app.selected_index == visible_idx {
+        let visible_idx = app.vault.scroll_offset + row_idx;
+        if visible_idx < app.vault.filtered_items().len() {
+            if app.vault.selected_index == visible_idx {
                 app.go_to_detail();
             } else {
-                app.selected_index = visible_idx;
+                app.vault.selected_index = visible_idx;
             }
         }
     }
@@ -142,12 +142,12 @@ fn mouse_vault(app: &mut App, col: u16, row: u16) {
             row_idx
         };
         if filter_idx < ITEM_FILTERS.len() {
-            app.filter_selected = filter_idx;
-            app.active_filter = ITEM_FILTERS[filter_idx].clone();
-            app.selected_index = 0;
-            app.scroll_offset = 0;
-            app.rebuild_filtered_cache();
-            if app.active_filter == ItemFilter::Trash {
+            app.vault.filter_selected = filter_idx;
+            app.vault.active_filter = ITEM_FILTERS[filter_idx].clone();
+            app.vault.selected_index = 0;
+            app.vault.scroll_offset = 0;
+            app.vault.rebuild_filtered_cache();
+            if app.vault.active_filter == ItemFilter::Trash {
                 crate::tui::flows::vault::request_load_trash(app);
             }
         }
@@ -202,9 +202,9 @@ fn mouse_scroll(app: &mut App, col: u16, row: u16, dir: i8, shift: bool) {
         Screen::Vault => match app.mouse_areas.focus_for(col, row) {
             Some(Focus::Items) => {
                 if dir > 0 {
-                    app.filter_move_down()
+                    app.vault.filter_move_down()
                 } else {
-                    app.filter_move_up()
+                    app.vault.filter_move_up()
                 }
             }
             Some(Focus::CmdLog) => {
@@ -216,9 +216,9 @@ fn mouse_scroll(app: &mut App, col: u16, row: u16, dir: i8, shift: bool) {
             }
             _ => {
                 if dir > 0 {
-                    app.move_down()
+                    app.vault.move_down()
                 } else {
-                    app.move_up()
+                    app.vault.move_up()
                 }
             }
         },
