@@ -26,10 +26,10 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     ])
     .split(area);
 
-    let title = if app.create_choosing_type {
+    let title = if app.create.choosing_type {
         "New Item — choose type"
     } else {
-        app.create_type.label()
+        app.create.item_type.label()
     };
     frame.render_widget(
         Paragraph::new(Line::from(vec![
@@ -50,7 +50,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         chunks[0],
     );
 
-    if app.create_choosing_type {
+    if app.create.choosing_type {
         let areas = Layout::vertical(
             (0..CREATE_ITEM_TYPES.len())
                 .map(|_| Constraint::Length(3))
@@ -61,7 +61,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
             if i >= areas.len() {
                 break;
             }
-            let sel = i == app.create_type_idx;
+            let sel = i == app.create.type_idx;
             let col = if sel { t.accent } else { t.inactive };
             let prefix = if sel { "▶ " } else { "  " };
             frame.render_widget(
@@ -86,12 +86,12 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
             frame.render_widget(Paragraph::new(line), form_parts[0]);
         }
 
-        let fas = field_areas(app.create_fields.len(), form_parts[1]);
-        for (i, field) in app.create_fields.iter().enumerate() {
+        let fas = field_areas(app.create.fields.len(), form_parts[1]);
+        for (i, field) in app.create.fields.iter().enumerate() {
             if i >= fas.len() {
                 break;
             }
-            let sel = i == app.create_field_idx;
+            let sel = i == app.create.field_idx;
             let bcol = if sel { t.accent } else { t.inactive };
             let hint = if field.is_organization() && sel {
                 "  (← → to cycle)"
@@ -122,7 +122,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         }
     }
 
-    let (hf, hs) = if app.create_choosing_type {
+    let (hf, hs) = if app.create.choosing_type {
         ("j/k type · Enter pick · Esc cancel", "j/k  Enter  Esc")
     } else {
         (

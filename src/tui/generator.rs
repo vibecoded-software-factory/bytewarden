@@ -39,10 +39,10 @@ pub enum GeneratorFocus {
 /// `flows::generator::use_generated`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReturnTarget {
-    /// Write back into `app.edit_fields[idx]` and return to the detail
+    /// Write back into `app.edit.fields[idx]` and return to the detail
     /// screen with `edit_mode = true`.
     EditField(usize),
-    /// Write back into `app.create_fields[idx]` and return to the
+    /// Write back into `app.create.fields[idx]` and return to the
     /// create screen.
     CreateField(usize),
 }

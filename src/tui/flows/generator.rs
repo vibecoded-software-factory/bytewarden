@@ -114,15 +114,15 @@ pub fn use_result(app: &mut App) {
     let value = app.generator.result.clone();
     match target {
         ReturnTarget::EditField(idx) => {
-            if let Some(field) = app.edit_fields.get_mut(idx) {
+            if let Some(field) = app.edit.fields.get_mut(idx) {
                 field.value = value;
                 field.cursor = field.value.chars().count();
             }
             app.screen = Screen::Detail;
-            app.edit_mode = true;
+            app.edit.active = true;
         }
         ReturnTarget::CreateField(idx) => {
-            if let Some(field) = app.create_fields.get_mut(idx) {
+            if let Some(field) = app.create.fields.get_mut(idx) {
                 field.value = value;
                 field.cursor = field.value.chars().count();
             }
@@ -138,7 +138,7 @@ pub fn cancel(app: &mut App) {
     match app.generator.return_target {
         Some(ReturnTarget::EditField(_)) => {
             app.screen = Screen::Detail;
-            app.edit_mode = true;
+            app.edit.active = true;
         }
         Some(ReturnTarget::CreateField(_)) => {
             app.screen = Screen::Create;

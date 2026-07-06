@@ -165,14 +165,14 @@ fn screen_label(screen: &Screen, app: &App) -> &'static str {
             Focus::CmdLog => "Vault — Command log",
         },
         Screen::Detail => {
-            if app.edit_mode {
+            if app.edit.active {
                 "Detail (edit)"
             } else {
                 "Detail (read)"
             }
         }
         Screen::Create => {
-            if app.create_choosing_type {
+            if app.create.choosing_type {
                 "Create item — pick type"
             } else {
                 "Create item — fields"

@@ -38,7 +38,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
 
     // Header line — name, type, mode tag, action state.
     let (action_text, action_style) = action_text_style(app);
-    let mode_tag = if app.edit_mode {
+    let mode_tag = if app.edit.active {
         Span::styled(
             "  [EDIT]",
             Style::default().fg(t.accent).add_modifier(Modifier::BOLD),
@@ -74,7 +74,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
 
     app.mouse_areas.detail = Some(chunks[1]);
 
-    if app.edit_mode {
+    if app.edit.active {
         render_edit_form(frame, app, chunks[1]);
         // Edit mode hints stay short and load-bearing; the per-row
         // structural shortcuts (Alt+N add field, Alt+R rename, Alt+T
@@ -130,13 +130,13 @@ fn render_read_only(frame: &mut Frame, app: &App, item: &Item, area: ratatui::la
 
 fn render_edit_form(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     let t = &app.theme;
-    let ef = &app.edit_fields;
+    let ef = &app.edit.fields;
     let fas = field_areas(ef.len(), area);
     for (i, field) in ef.iter().enumerate() {
         if i >= fas.len() {
             break;
         }
-        let sel = i == app.edit_field_idx;
+        let sel = i == app.edit.field_idx;
         let bcol = if sel { t.accent } else { t.inactive };
         // Compose the hint: type tag for custom rows + reveal/hide/read-only.
         let custom_tag = match field.custom_type() {

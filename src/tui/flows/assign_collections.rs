@@ -16,11 +16,11 @@ use crate::tui::worker::{InFlight, WorkerRequest};
 /// Opens the popup for the focused "Collections" row.
 ///
 /// Supports two callers:
-/// * **Edit mode** (`app.edit_mode == true`): drives
-///   `app.edit_fields[edit_field_idx]`. The org id comes from the
+/// * **Edit mode** (`app.edit.active == true`): drives
+///   `app.edit.fields[edit_field_idx]`. The org id comes from the
 ///   underlying item.
 /// * **Create form** (`app.screen == Screen::Create`): drives
-///   `app.create_fields[create_field_idx]`. The org id comes from
+///   `app.create.fields[create_field_idx]`. The org id comes from
 ///   the sibling `Organization` row in the same form.
 ///
 /// No-op + error toast when the focused row isn't a Collections row,
@@ -28,34 +28,35 @@ use crate::tui::worker::{InFlight, WorkerRequest};
 /// collections at all.
 pub fn open(app: &mut App) {
     let in_create = matches!(app.screen, Screen::Create);
-    let in_edit = app.edit_mode && matches!(app.screen, Screen::Detail);
+    let in_edit = app.edit.active && matches!(app.screen, Screen::Detail);
     if !in_create && !in_edit {
         return;
     }
 
     let (target_idx, focused_field_is_collections, current_ids, org_id) = if in_create {
-        let Some(field) = app.create_fields.get(app.create_field_idx) else {
+        let Some(field) = app.create.fields.get(app.create.field_idx) else {
             return;
         };
         // Resolve org id from the sibling Organization row.
         let org = app
-            .create_fields
+            .create
+            .fields
             .iter()
             .find(|f| f.is_organization())
             .and_then(|f| f.organization_id.clone());
         (
-            app.create_field_idx,
+            app.create.field_idx,
             field.is_collections(),
             field.collection_ids.clone(),
             org,
         )
     } else {
-        let Some(field) = app.edit_fields.get(app.edit_field_idx) else {
+        let Some(field) = app.edit.fields.get(app.edit.field_idx) else {
             return;
         };
         let org = app.selected_item().and_then(|i| i.organization_id.clone());
         (
-            app.edit_field_idx,
+            app.edit.field_idx,
             field.is_collections(),
             field.collection_ids.clone(),
             org,
@@ -117,7 +118,7 @@ pub fn open(app: &mut App) {
 ///   not yet implemented (see audit roadmap).
 /// * That org must have at least one visible collection.
 pub fn open_for_move(app: &mut App) {
-    if !matches!(app.screen, Screen::Detail) || app.edit_mode {
+    if !matches!(app.screen, Screen::Detail) || app.edit.active {
         return;
     }
     let Some(item) = app.selected_item() else {
@@ -221,8 +222,8 @@ pub fn commit(app: &mut App) {
     match purpose {
         AssignCollectionsPurpose::UpdateField => {
             let target_vec = match origin {
-                Screen::Create => &mut app.create_fields,
-                _ => &mut app.edit_fields,
+                Screen::Create => &mut app.create.fields,
+                _ => &mut app.edit.fields,
             };
             if let Some(field) = target_vec.get_mut(target_idx) {
                 field.collection_ids = ids;

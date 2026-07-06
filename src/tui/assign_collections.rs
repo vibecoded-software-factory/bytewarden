@@ -48,8 +48,8 @@ pub struct AssignCollectionsState {
     /// Cursor index into `available`.
     pub cursor: usize,
     /// Index of the form row whose `collection_ids` we'll rewrite
-    /// on commit. Points into `app.edit_fields` when origin =
-    /// `Screen::Detail` (edit mode) or `app.create_fields` when
+    /// on commit. Points into `app.edit.fields` when origin =
+    /// `Screen::Detail` (edit mode) or `app.create.fields` when
     /// origin = `Screen::Create`. Unused for the `MoveToOrg`
     /// purpose.
     pub edit_field_idx: usize,
