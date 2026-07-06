@@ -6,6 +6,16 @@ use crate::tui::app::App;
 use crate::tui::flows::palette;
 use crate::tui::input::common::route_line_editor;
 
+/// Runs the command row under the pointer, if any.
+pub fn mouse(app: &mut App, col: u16, row: u16) {
+    if let Some(fi) = crate::tui::view::palette::palette_row_at(col, row) {
+        if let Some(state) = app.palette.as_mut() {
+            state.selected = fi;
+        }
+        palette::run_selected(app);
+    }
+}
+
 /// Dispatches a single key event on the command palette.
 pub fn handle(app: &mut App, key: KeyEvent) {
     match key.code {

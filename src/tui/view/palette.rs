@@ -12,11 +12,35 @@ use ratatui::{
 
 use crate::tui::app::App;
 use crate::tui::view::widgets::{
-    center_rect, cursor_line, draw_scrollbar, key_style, rounded_block,
+    ScrollTarget, center_rect, cursor_line, draw_scrollbar, key_style, register_scroll,
+    rounded_block,
 };
+
+thread_local! {
+    /// Frame-local hit map — one `(rect, filtered-index)` per visible
+    /// command row, recorded from the real rows so a click runs exactly
+    /// the row under the pointer (no offset arithmetic that can drift).
+    static PALETTE_HITS: std::cell::RefCell<Vec<(Rect, usize)>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// The index into `state.filtered` under `(column, row)`, if a command
+/// row is there — consumed by the mouse layer to run that command.
+pub fn palette_row_at(column: u16, row: u16) -> Option<usize> {
+    PALETTE_HITS.with(|h| {
+        h.borrow()
+            .iter()
+            .rev()
+            .find(|(r, _)| {
+                column >= r.x && column < r.x + r.width && row >= r.y && row < r.y + r.height
+            })
+            .map(|(_, i)| *i)
+    })
+}
 
 /// Draws the command palette over its origin screen.
 pub fn draw(frame: &mut Frame, app: &App) {
+    PALETTE_HITS.with(|h| h.borrow_mut().clear());
     let Some(state) = app.palette.as_ref() else {
         return;
     };
@@ -95,6 +119,31 @@ pub fn draw(frame: &mut Frame, app: &App) {
             list_area,
             &mut ls,
         );
+        // Record each visible row's rect → its `filtered` index, using the
+        // list's actual post-render offset so a click always maps to the
+        // row under the pointer. The whole panel width (incl. the symbol
+        // gutter) is clickable, not just the label.
+        let off = ls.offset();
+        PALETTE_HITS.with(|h| {
+            let mut hits = h.borrow_mut();
+            for i in 0..list_area.height as usize {
+                let fi = off + i;
+                if fi >= state.filtered.len() {
+                    break;
+                }
+                hits.push((
+                    Rect {
+                        x: list_area.x,
+                        y: list_area.y + i as u16,
+                        width: list_area.width,
+                        height: 1,
+                    },
+                    fi,
+                ));
+            }
+        });
+        // Wheel scrolls the command list (moves the highlight).
+        register_scroll(rows[2], ScrollTarget::Palette);
         if list_overflow {
             draw_scrollbar(frame, rows[2], state.filtered.len(), state.selected, t);
         }

@@ -61,6 +61,8 @@ pub enum ScrollTarget {
     Detail,
     /// The help overlay (2-D scroll; `Shift`+wheel pans horizontally).
     Help,
+    /// The command-palette command list (wheel moves the highlight).
+    Palette,
 }
 
 /// Clears the frame-local registries (scroll regions, the active modal rect,
