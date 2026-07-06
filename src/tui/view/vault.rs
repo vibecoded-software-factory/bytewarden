@@ -384,8 +384,11 @@ fn render_filters(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
 fn render_search(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     let t = &app.theme;
     let sf = app.focus == Focus::Search;
+    // Leading magnifying-glass affordance, always in accent.
+    let icon = || Span::styled("⌕ ", Style::default().fg(t.accent));
     let line = if sf {
         Line::from(vec![
+            icon(),
             Span::styled(
                 app.vault.search_query.as_str(),
                 Style::default().fg(t.foreground),
@@ -393,15 +396,15 @@ fn render_search(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
             Span::styled("█", Style::default().fg(t.accent)),
         ])
     } else if !app.vault.search_query.is_empty() {
-        Line::from(Span::styled(
-            app.vault.search_query.as_str(),
-            Style::default().fg(t.dim),
-        ))
+        Line::from(vec![
+            icon(),
+            Span::styled(app.vault.search_query.as_str(), Style::default().fg(t.dim)),
+        ])
     } else {
-        Line::from(Span::styled(
-            "type to filter…",
-            Style::default().fg(t.placeholder),
-        ))
+        Line::from(vec![
+            icon(),
+            Span::styled("type to filter…", Style::default().fg(t.placeholder)),
+        ])
     };
     frame.render_widget(
         Paragraph::new(line).block(
