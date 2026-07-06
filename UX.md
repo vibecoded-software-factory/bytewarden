@@ -202,6 +202,12 @@ hand-roll a `Block` with a different border type: a new panel is rounded via
   the error + a retry key). A bare dim line is not an acceptable empty state.
 - `widgets::draw_scrollbar` — one dim right-border scrollbar on **every**
   overflowing region (list, picker list, command log, help).
+- **Scroll registry** — every scrollable surface records its rect + a
+  `widgets::ScrollTarget` as it draws (`register_scroll`, cleared each frame by
+  `reset_scroll_regions`); `input::mouse` dispatches the wheel purely by pointer
+  position (`scroll_target_at` → one `apply_scroll` table), so there is **no
+  per-screen `match`** in the input layer. Adding a scrollable list is one
+  `register_scroll` call at its draw site; the wheel handler never changes.
 - `widgets::center_rect` / `MODAL_WIDTH_PCT` / `MODAL_HEIGHT` — the standard
   centered-modal geometry every list/picker/settings overlay imitates so they
   line up; `help_line`, `unread`/`favorite_star` emphasis, `key_style`,

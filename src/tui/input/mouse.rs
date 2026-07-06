@@ -6,6 +6,7 @@ use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use crate::domain::filter::{ITEM_FILTERS, ItemFilter};
 use crate::tui::app::App;
 use crate::tui::screens::{Focus, LoginField, Screen};
+use crate::tui::view::widgets::ScrollTarget;
 
 /// Dispatches a mouse event.
 pub fn handle(app: &mut App, mouse: MouseEvent) {
@@ -180,49 +181,42 @@ fn mouse_detail(app: &mut App, col: u16, row: u16) {
     }
 }
 
+/// One generic wheel path: scroll whatever registered region sits under the
+/// pointer. The view layer records those regions each frame, so there is no
+/// per-screen `match` here — a new scrollable list is one `register_scroll`
+/// call at its draw site.
 fn mouse_scroll(app: &mut App, col: u16, row: u16, dir: i8, shift: bool) {
-    if app.screen == Screen::Help {
-        // Wheel scrolls vertically; Shift+Wheel scrolls horizontally.
-        // Renderer clamps both axes once it knows the viewport size.
-        if shift {
-            if dir > 0 {
-                app.help_scroll.1 = app.help_scroll.1.saturating_add(2);
-            } else {
-                app.help_scroll.1 = app.help_scroll.1.saturating_sub(2);
-            }
-        } else if dir > 0 {
-            app.help_scroll.0 = app.help_scroll.0.saturating_add(1);
-        } else {
-            app.help_scroll.0 = app.help_scroll.0.saturating_sub(1);
-        }
-        return;
+    if let Some(target) = crate::tui::view::widgets::scroll_target_at(col, row) {
+        apply_scroll(app, target, dir, shift);
     }
+}
 
-    match app.screen {
-        Screen::Vault => match app.mouse_areas.focus_for(col, row) {
-            Some(Focus::Items) => {
-                if dir > 0 {
-                    app.vault.filter_move_down()
-                } else {
-                    app.vault.filter_move_up()
-                }
+/// The single table mapping a [`ScrollTarget`] to the state its wheel moves —
+/// the only place that knows how each surface scrolls.
+fn apply_scroll(app: &mut App, target: ScrollTarget, dir: i8, shift: bool) {
+    match target {
+        ScrollTarget::Vault => {
+            if dir > 0 {
+                app.vault.move_down()
+            } else {
+                app.vault.move_up()
             }
-            Some(Focus::CmdLog) => {
-                if dir > 0 {
-                    app.cmd_log.scroll_up(1)
-                } else {
-                    app.cmd_log.scroll_down(1)
-                }
+        }
+        ScrollTarget::Filters => {
+            if dir > 0 {
+                app.vault.filter_move_down()
+            } else {
+                app.vault.filter_move_up()
             }
-            _ => {
-                if dir > 0 {
-                    app.vault.move_down()
-                } else {
-                    app.vault.move_up()
-                }
+        }
+        ScrollTarget::CmdLog => {
+            if dir > 0 {
+                app.cmd_log.scroll_up(1)
+            } else {
+                app.cmd_log.scroll_down(1)
             }
-        },
-        Screen::Detail => {
+        }
+        ScrollTarget::Detail => {
             let total = app.detail_field_count();
             if dir > 0 {
                 if app.detail_field + 1 < total {
@@ -234,6 +228,20 @@ fn mouse_scroll(app: &mut App, col: u16, row: u16, dir: i8, shift: bool) {
                 app.detail_field -= 1;
             }
         }
-        _ => {}
+        ScrollTarget::Help => {
+            // Wheel scrolls vertically; Shift+Wheel pans horizontally. The
+            // renderer clamps both axes once it knows the viewport size.
+            if shift {
+                if dir > 0 {
+                    app.help_scroll.1 = app.help_scroll.1.saturating_add(2);
+                } else {
+                    app.help_scroll.1 = app.help_scroll.1.saturating_sub(2);
+                }
+            } else if dir > 0 {
+                app.help_scroll.0 = app.help_scroll.0.saturating_add(1);
+            } else {
+                app.help_scroll.0 = app.help_scroll.0.saturating_sub(1);
+            }
+        }
     }
 }

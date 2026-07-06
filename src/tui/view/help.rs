@@ -33,6 +33,10 @@ pub fn draw_popup(frame: &mut Frame, area: Rect, app: &mut App) {
 
     let popup = center_rect_pct(64, 80, area);
     frame.render_widget(Clear, popup);
+    crate::tui::view::widgets::register_scroll(
+        popup,
+        crate::tui::view::widgets::ScrollTarget::Help,
+    );
 
     // Inner viewport excludes the double border (1 row/col on each side).
     let inner = Rect {

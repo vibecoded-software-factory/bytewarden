@@ -12,6 +12,62 @@ use ratatui::{
 
 use crate::tui::theme::Theme;
 
+thread_local! {
+    /// Frame-local **scroll registry**: every scrollable surface records its
+    /// viewport rect + logical [`ScrollTarget`] here as it draws, so the mouse
+    /// wheel dispatches by pointer position — one generic path, no per-screen
+    /// `match` in the input layer. Cleared each frame by [`reset_scroll_regions`].
+    static SCROLL_REGIONS: std::cell::RefCell<Vec<(Rect, ScrollTarget)>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// What the mouse wheel moves when it's over a registered region. The widget /
+/// view that draws a scrollable surface tags it with one of these; the input
+/// layer owns the single table that maps a tag to the state it scrolls. Adding
+/// a new scrollable list is one `register_scroll` call — the wheel handler
+/// never changes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ScrollTarget {
+    /// The vault item list.
+    Vault,
+    /// The item-filter sidebar.
+    Filters,
+    /// The command-log panel.
+    CmdLog,
+    /// The item detail's field list.
+    Detail,
+    /// The help overlay (2-D scroll; `Shift`+wheel pans horizontally).
+    Help,
+}
+
+/// Clears the scroll registry. Called once per frame before drawing, alongside
+/// the `MouseAreas` reset.
+pub fn reset_scroll_regions() {
+    SCROLL_REGIONS.with(|s| s.borrow_mut().clear());
+}
+
+/// Records a scrollable region for this frame. Overlays draw after the base
+/// screen, so later registrations win on overlap (a modal captures the wheel).
+pub fn register_scroll(rect: Rect, target: ScrollTarget) {
+    if rect.width > 0 && rect.height > 0 {
+        SCROLL_REGIONS.with(|s| s.borrow_mut().push((rect, target)));
+    }
+}
+
+/// The scroll target under `(column, row)`, if any — the last-registered
+/// (top-most) region that contains the point.
+pub fn scroll_target_at(column: u16, row: u16) -> Option<ScrollTarget> {
+    SCROLL_REGIONS.with(|s| {
+        s.borrow()
+            .iter()
+            .rev()
+            .find(|(r, _)| {
+                column >= r.x && column < r.x + r.width && row >= r.y && row < r.y + r.height
+            })
+            .map(|(_, t)| *t)
+    })
+}
+
 /// Responsive command-log height (rows, borders included): 6 when the
 /// terminal is roomy, shrinking to 3 at the floor so the body keeps its
 /// rows. **Monotonic** — a taller terminal never shrinks the log (and so
@@ -386,7 +442,31 @@ pub fn help_line<'a>(key: &'a str, desc: &'a str, t: &Theme) -> Line<'a> {
 
 #[cfg(test)]
 mod tests {
-    use super::cmdlog_height;
+    use super::{
+        ScrollTarget, cmdlog_height, register_scroll, reset_scroll_regions, scroll_target_at,
+    };
+    use ratatui::layout::Rect;
+
+    #[test]
+    fn scroll_registry_dispatches_by_position_top_most_wins() {
+        reset_scroll_regions();
+        // A base region, then a smaller overlapping one registered later (as an
+        // overlay would draw over the base).
+        register_scroll(Rect::new(0, 0, 10, 5), ScrollTarget::Vault);
+        register_scroll(Rect::new(2, 1, 4, 2), ScrollTarget::Help);
+        // Only the base covers this point.
+        assert_eq!(scroll_target_at(0, 0), Some(ScrollTarget::Vault));
+        // Overlap → the later (top-most) registration wins.
+        assert_eq!(scroll_target_at(3, 1), Some(ScrollTarget::Help));
+        // Outside every region.
+        assert_eq!(scroll_target_at(50, 50), None);
+        // Empty rects are never registered.
+        register_scroll(Rect::new(0, 0, 0, 5), ScrollTarget::CmdLog);
+        assert_eq!(scroll_target_at(0, 0), Some(ScrollTarget::Vault));
+        // Reset clears the registry.
+        reset_scroll_regions();
+        assert_eq!(scroll_target_at(0, 0), None);
+    }
 
     #[test]
     fn cmdlog_height_is_bounded_and_monotonic() {
