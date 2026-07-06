@@ -65,6 +65,17 @@ impl MouseAreas {
         }
         Some((row - r.y - 1) as usize)
     }
+
+    /// Translates a click row into the visible row index inside the
+    /// Folders sidebar (0 = "All folders", 1 = "(No folder)", 2 = the
+    /// grouping separator, 3+ = named folders / collections).
+    pub fn folders_row(&self, row: u16) -> Option<usize> {
+        let r = self.folders?;
+        if row < r.y + 1 || row >= r.y + r.height.saturating_sub(1) {
+            return None;
+        }
+        Some((row - r.y - 1) as usize)
+    }
 }
 
 /// Returns `true` if `(col, row)` lies inside `r`.
