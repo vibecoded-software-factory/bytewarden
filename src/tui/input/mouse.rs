@@ -42,6 +42,7 @@ pub fn handle(app: &mut App, mouse: MouseEvent) {
                 Screen::AssignCollections => {
                     crate::tui::input::assign_collections::mouse(app, col, row)
                 }
+                Screen::CommandPalette => crate::tui::input::palette::mouse(app, col, row),
                 _ => {}
             }
         }
@@ -249,6 +250,13 @@ fn apply_scroll(app: &mut App, target: ScrollTarget, dir: i8, shift: bool) {
             } else if app.detail_field > 0 {
                 app.show_password = false;
                 app.detail_field -= 1;
+            }
+        }
+        ScrollTarget::Palette => {
+            if dir > 0 {
+                crate::tui::flows::palette::move_selection(app, 1)
+            } else {
+                crate::tui::flows::palette::move_selection(app, -1)
             }
         }
         ScrollTarget::Help => {
