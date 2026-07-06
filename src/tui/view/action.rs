@@ -11,10 +11,11 @@ use crate::tui::app::App;
 /// Four-frame Braille spinner — a single spinning dot.
 const SPINNER: [&str; 4] = ["⠋", "⠙", "⠸", "⠴"];
 
-/// Returns the spinner glyph for the given tick. Rotates every 3 ticks
-/// for a calmer animation than 1-tick rotation.
+/// Returns the spinner glyph for the given tick — one frame per tick
+/// (~80 ms at the busy poll rate), so the dot spins at a brisk, modern
+/// pace.
 pub fn spinner_frame(tick: u8) -> &'static str {
-    SPINNER[(tick / 3) as usize % SPINNER.len()]
+    SPINNER[tick as usize % SPINNER.len()]
 }
 
 /// Builds a `Line` showing the current action state (spinner / ✓ / ✕).
