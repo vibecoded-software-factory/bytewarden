@@ -227,6 +227,12 @@ hand-roll a `Block` with a different border type: a new panel is rounded via
   focus it (a second click cycles/toggles its value), or a theme preset to
   preview it (a second click applies + saves) — the mouse twin of `↑/↓`,
   `←/→` and `Enter`.
+- **Clickable form fields** — a form with a bespoke layout records each field's
+  exact rect as it draws (same frame-local pattern; e.g.
+  `view::login::login_field_at`, unioning a field's label row with its input
+  box). The **Login** form focuses whatever field the pointer is over and
+  toggles the checkbox rows (Save email / Auto-lock / Keep session) — read from
+  the real layout rects, so the hit-testing can never drift from the renderer.
 - `widgets::center_rect` / `MODAL_WIDTH_PCT` / `MODAL_HEIGHT` — the standard
   centered-modal geometry every list/picker/settings overlay imitates so they
   line up; `help_line`, `unread`/`favorite_star` emphasis, `key_style`,
