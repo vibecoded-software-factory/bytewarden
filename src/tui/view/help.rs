@@ -306,6 +306,11 @@ fn vault_sections(out: &mut Vec<Line<'static>>, focus: &Focus, t: &Theme) {
         "Memberships: organisations + collections",
         t,
     ));
+    out.push(help_line(
+        "Right-click",
+        "Item action menu (open/copy/edit/favorite/delete)",
+        t,
+    ));
     out.push(blank());
     out.push(section("List indicators (per item row)", t));
     out.push(help_line("★", "Favorite (toggle with Alt+F)", t));

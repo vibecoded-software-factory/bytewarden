@@ -233,6 +233,17 @@ hand-roll a `Block` with a different border type: a new panel is rounded via
   box). The **Login** form focuses whatever field the pointer is over and
   toggles the checkbox rows (Save email / Auto-lock / Keep session) — read from
   the real layout rects, so the hit-testing can never drift from the renderer.
+- **Right-click action menu** — right-clicking a vault row opens
+  `Screen::ItemActions`, a compact centered menu of that item's secondary
+  actions (open · copy username · copy password · edit · toggle favorite ·
+  delete; in the trash: open · restore · delete). The mouse layer seats the list
+  cursor on the clicked row first, so every action runs against it through the
+  ordinary `selected_item` path. Each action **delegates to the existing flow**
+  (`flows::item_actions`), so the secret-exposing ones keep their reprompt gate —
+  the menu can't bypass the master-password re-check. The menu itself is
+  keyboard-navigable (`↑/↓` · `Enter` · `Esc`) and its rows are clickable
+  (`view::item_actions::item_action_at`); one left-click runs an action. It
+  closes on `Esc` or a click outside through the shared synthetic-`Esc` dismiss.
 - `widgets::center_rect` / `MODAL_WIDTH_PCT` / `MODAL_HEIGHT` — the standard
   centered-modal geometry every list/picker/settings overlay imitates so they
   line up; `help_line`, `unread`/`favorite_star` emphasis, `key_style`,

@@ -228,6 +228,10 @@ pub struct App {
     /// outside the palette.
     pub palette: Option<crate::tui::flows::palette::PaletteState>,
 
+    /// State for the per-item action menu opened by right-clicking a
+    /// vault row (`Screen::ItemActions`). `None` when the menu is closed.
+    pub item_actions: Option<crate::tui::item_actions::ItemActionsState>,
+
     /// Transient flag set by [`crate::tui::flows::reprompt::run_protected_action`]
     /// just before re-entering the protected flow. Consumed by the
     /// reprompt guards in `flows::copy` so the deferred action runs
@@ -329,6 +333,7 @@ impl App {
             send_create: None,
             memberships: None,
             assign_collections: None,
+            item_actions: None,
             reprompt: None,
             palette: None,
             reprompt_verified: false,
@@ -1226,6 +1231,106 @@ mod tests {
 
     fn lowered(items: &[Item]) -> Vec<LoweredItem> {
         items.iter().map(LoweredItem::from_item).collect()
+    }
+
+    #[test]
+    fn item_actions_reflect_the_item_and_view() {
+        use crate::tui::item_actions::{ItemAction, actions_for};
+
+        // A login with both username and password offers both copies.
+        let mut full = login_item("a", "Acct", "user@example.com");
+        full.login.as_mut().unwrap().password = Some("pw".into());
+        let acts = actions_for(&full, false);
+        assert!(acts.contains(&ItemAction::CopyUsername));
+        assert!(acts.contains(&ItemAction::CopyPassword));
+        assert!(acts.contains(&ItemAction::Edit));
+        assert!(acts.contains(&ItemAction::ToggleFavorite));
+        assert!(acts.contains(&ItemAction::Delete));
+
+        // A note (no login) offers no copy actions.
+        let note = item("n", "Note", 2, None);
+        let note_acts = actions_for(&note, false);
+        assert!(!note_acts.contains(&ItemAction::CopyUsername));
+        assert!(!note_acts.contains(&ItemAction::CopyPassword));
+
+        // A login whose password is empty hides the password copy.
+        let user_only = login_item("u", "UserOnly", "u@x");
+        assert!(!actions_for(&user_only, false).contains(&ItemAction::CopyPassword));
+
+        // The trash view is restore-or-purge only.
+        assert_eq!(
+            actions_for(&full, true),
+            vec![ItemAction::Open, ItemAction::Restore, ItemAction::Delete]
+        );
+    }
+
+    #[test]
+    fn right_clicking_a_vault_row_opens_its_action_menu() {
+        use crate::tui::screens::Screen;
+        use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
+
+        let (mut app, _req_rx, _resp_tx) = fresh_app();
+        app.vault.items = vec![login_item("a", "Acct", "user@example.com")];
+        app.vault.rebuild_caches();
+        app.vault.selected_index = 0;
+        app.screen = Screen::Vault;
+        let mut term = Terminal::new(TestBackend::new(90, 30)).unwrap();
+        term.draw(|f| crate::tui::view::draw(f, &mut app)).unwrap();
+        // Right-click the item's row in the list panel (its name is unique).
+        let buf = term.backend().buffer();
+        let mut text = String::new();
+        for y in 0..buf.area().height {
+            for x in 0..buf.area().width {
+                if let Some(c) = buf.cell((x, y)) {
+                    text.push_str(c.symbol());
+                }
+            }
+            text.push('\n');
+        }
+        let (col, row) = text
+            .lines()
+            .enumerate()
+            .find_map(|(y, line)| {
+                line.find("Acct")
+                    .map(|b| (line[..b].chars().count() as u16, y as u16))
+            })
+            .expect("the item row is rendered");
+        crate::tui::input::mouse::handle(
+            &mut app,
+            MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Right),
+                column: col,
+                row,
+                modifiers: KeyModifiers::NONE,
+            },
+        );
+        assert_eq!(
+            app.screen,
+            Screen::ItemActions,
+            "right-click opened the menu"
+        );
+        assert!(app.item_actions.is_some(), "menu state is populated");
+    }
+
+    #[test]
+    fn running_open_from_the_action_menu_goes_to_detail() {
+        use crate::tui::flows::item_actions;
+        use crate::tui::screens::Screen;
+
+        let (mut app, _req_rx, _resp_tx) = fresh_app();
+        app.vault.items = vec![login_item("a", "Acct", "user@example.com")];
+        app.vault.rebuild_caches();
+        app.vault.selected_index = 0;
+        app.screen = Screen::Vault;
+        item_actions::open(&mut app);
+        assert_eq!(app.screen, Screen::ItemActions);
+        // Cursor starts on "Open" (index 0); running it closes the menu and
+        // navigates to the detail view.
+        item_actions::run_selected(&mut app);
+        assert_eq!(app.screen, Screen::Detail, "Open navigated to detail");
+        assert!(app.item_actions.is_none(), "menu state was cleared");
     }
 
     #[test]

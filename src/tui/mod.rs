@@ -26,6 +26,7 @@ pub mod folders;
 pub mod generator;
 pub mod import;
 pub mod input;
+pub mod item_actions;
 pub mod item_forms;
 pub mod login_form;
 pub mod mouse_areas;

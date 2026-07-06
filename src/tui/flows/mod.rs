@@ -20,6 +20,7 @@ pub mod export;
 pub mod folders;
 pub mod generator;
 pub mod import;
+pub mod item_actions;
 pub mod item_json;
 pub mod items;
 pub mod memberships;
