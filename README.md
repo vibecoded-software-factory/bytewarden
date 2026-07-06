@@ -408,7 +408,7 @@ Toggling **Keep session** on the login screen makes the unlocked `bw` session ke
 
 ```
 ┌─[0]-Status──────────┐  ┌─[/]-Search──────────────────────────────┐
-│                     │  │ ⌕ type to filter…                        │
+│                     │  │ 󰍉 type to filter…                        │
 │                     │  └──────────────────────────────────────────┘
 │                     │  ┌─[3]-Vault──────────── 12 of 87 ──────────┐
 └─────────────────────┘  │ ★    [Login]    GitHub                   │

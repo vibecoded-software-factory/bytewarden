@@ -385,7 +385,7 @@ fn render_search(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     let t = &app.theme;
     let sf = app.focus == Focus::Search;
     // Leading magnifying-glass affordance, always in accent.
-    let icon = || Span::styled("⌕ ", Style::default().fg(t.accent));
+    let icon = || Span::styled("󰍉 ", Style::default().fg(t.accent));
     let line = if sf {
         Line::from(vec![
             icon(),
