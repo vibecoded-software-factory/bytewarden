@@ -298,7 +298,8 @@ from the Vault or Detail; `↑↓` / `Ctrl+J`/`Ctrl+K` pick, `Enter` restores th
 origin screen and runs the highlighted command — the *very same* `flows::*` the
 keybinding would call (`PaletteCommand.run: fn(&mut App)`), so it can never
 diverge. `Esc` / `Ctrl+P` cancel. Centered modal (`center_rect`, `Clear`,
-rounded accent block).
+rounded accent block); when the matches overflow the panel a `draw_scrollbar`
+rides a reserved right-column gutter (so the track never clips a keybinding).
 
 It is the **fifth** keybinding-sync surface: footer hints · `F1` help · README
 tables · this file · **`flows::palette::palette_commands`** — keep all five in
