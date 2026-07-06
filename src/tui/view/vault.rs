@@ -409,9 +409,16 @@ fn render_search(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
 /// [`item_type_label`] except "Secure Note" is shortened to "Note" so
 /// the type column stays narrow; the detail screen still shows the full
 /// name.
+/// Compact type tags for the list column. The long names ("Secure
+/// Note", "Identity", "SSH Key") are abbreviated so the fixed type
+/// column stays as narrow as `[Login]` instead of widening every row to
+/// fit the longest label. The detail screen shows the full type via
+/// [`item_type_label`].
 fn list_type_label(item_type: u8) -> &'static str {
     match item_type {
-        2 => "Note",
+        2 => "Note",  // Secure Note
+        4 => "Ident", // Identity
+        5 => "SSH",   // SSH Key
         other => item_type_label(other),
     }
 }
@@ -507,7 +514,7 @@ fn render_list(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
             rows,
             [Constraint::Length(ind_w + type_w), Constraint::Min(0)],
         )
-        .column_spacing(2)
+        .column_spacing(1)
         .block(titled_block("─[3]-Vault", &indicator, lf, t))
         .row_highlight_style(
             Style::default()

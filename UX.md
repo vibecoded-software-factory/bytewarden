@@ -101,16 +101,19 @@ bytewarden has **two list flavors**; reuse the matching one, never a one-off.
 1. **The vault item list** renders through **`widgets::list_table`** — a
    Ratatui `Table` with an indicators+type cell and the name. It owns the
    bordered focus-styled block, the dim+bold header, the `▶ ` selection
-   symbol, `selected_bg` + bold row highlight, `column_spacing(2)`, persisted
-   scroll, and the automatic `draw_scrollbar` on overflow. Conventions:
+   symbol, `selected_bg` + bold row highlight, a tight `column_spacing(1)`,
+   persisted scroll, and the automatic `draw_scrollbar` on overflow.
+   Conventions:
    - **Reserve indicator columns per *view*, not per row.** Scan the visible
      (filtered) rows once; only reserve width for `★` (favorite), `🔒`
      (reprompt) or `👥` (org) if at least one visible row carries it. A
      personal-only / no-favorites view collapses the dead gutter so names
      start earlier.
-   - **Size the type column to the widest visible `[label]`**, clamped 6–14
-     (not a fixed pad). "Secure Note" is shortened to `[Note]` in the list;
-     the detail screen shows the full type.
+   - **Size the type column to the widest `[label]`**, clamped 6–14 (not a
+     fixed pad). The long names are abbreviated in the list so one rare long
+     row can't pad every other: "Secure Note" → `[Note]`, "Identity" →
+     `[Ident]`, "SSH Key" → `[SSH]`, so the column stays as narrow as
+     `[Login]`. The detail screen shows the full type.
    - Type tag is colored per item type (`theme.item_login/card/identity/note/
      ssh`); selection (the `TableState`) indexes the **filtered** list.
    - **Only the final column may be `Constraint::Min`.** A stretching `Min` on
