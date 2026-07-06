@@ -38,7 +38,13 @@ pub fn cmdlog_height(total: u16) -> u16 {
 /// - Rendered over the full block rect it paints the rounded corners; we
 ///   inset the track by one row top and bottom so it sits *between* the
 ///   borders instead of overrunning them.
-pub fn draw_scrollbar(frame: &mut Frame, area: Rect, content_len: usize, selected: usize, t: &Theme) {
+pub fn draw_scrollbar(
+    frame: &mut Frame,
+    area: Rect,
+    content_len: usize,
+    selected: usize,
+    t: &Theme,
+) {
     let viewport = area.height.saturating_sub(2) as usize; // inside the borders
     if viewport == 0 || content_len <= viewport {
         return;

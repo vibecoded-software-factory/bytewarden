@@ -24,7 +24,7 @@ pub fn draw_popup(frame: &mut Frame, area: Rect, app: &App) {
     let outer = Block::default()
         .title(" Create Send ")
         .borders(Borders::ALL)
-        .border_type(BorderType::Double)
+        .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(t.accent));
     let inner = outer.inner(popup);
     frame.render_widget(outer, popup);

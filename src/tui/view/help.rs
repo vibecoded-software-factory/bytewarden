@@ -70,7 +70,7 @@ pub fn draw_popup(frame: &mut Frame, area: Rect, app: &mut App) {
             Style::default().fg(t.accent).add_modifier(Modifier::BOLD),
         ))
         .borders(Borders::ALL)
-        .border_type(BorderType::Double)
+        .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(t.accent));
     frame.render_widget(outer, popup);
 
