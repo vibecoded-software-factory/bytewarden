@@ -4,7 +4,7 @@
 //! configuration. The actual `bw generate` call is fired *only* when
 //! the user explicitly presses Enter.
 
-use crossterm::event::{KeyCode, KeyEvent};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use crate::ports::GeneratorMode;
 use crate::tui::app::App;
@@ -16,6 +16,31 @@ use crate::tui::generator::{
     PASSWORD_LENGTH_MIN,
 };
 use crate::tui::input::is_alt;
+
+/// Click: focus the control under the pointer. The boolean toggles and
+/// the Mode switch also flip on click (dispatching `Space`, which their
+/// key handler already treats as a toggle); the steppers (Length /
+/// Words / Separator) and the Result box just take focus.
+pub fn mouse(app: &mut App, col: u16, row: u16) {
+    let Some(f) = crate::tui::view::generator::gen_hit_at(col, row) else {
+        return;
+    };
+    app.generator.focus = f;
+    let toggles = matches!(
+        f,
+        GeneratorFocus::Mode
+            | GeneratorFocus::Uppercase
+            | GeneratorFocus::Lowercase
+            | GeneratorFocus::Numbers
+            | GeneratorFocus::Special
+            | GeneratorFocus::Ambiguous
+            | GeneratorFocus::Capitalize
+            | GeneratorFocus::IncludeNumber
+    );
+    if toggles {
+        handle(app, KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE));
+    }
+}
 
 /// Dispatches a single key event on the generator screen.
 pub fn handle(app: &mut App, key: KeyEvent) {
