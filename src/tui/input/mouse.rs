@@ -84,6 +84,9 @@ fn apply_click_action(app: &mut App, action: ClickAction) {
             app.screen = Screen::Help;
         }
         ClickAction::OpenSettings => app.open_settings(),
+        // The mouse twin of the advertised key — route it through the
+        // active screen's handler so the click reuses the exact key logic.
+        ClickAction::Key(k) => crate::tui::input::dispatch_screen_key(app, k),
     }
 }
 

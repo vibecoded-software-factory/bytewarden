@@ -1,5 +1,6 @@
 //! Confirm-delete popup renderer.
 
+use crossterm::event::KeyCode;
 use ratatui::{
     Frame,
     layout::Rect,
@@ -9,7 +10,7 @@ use ratatui::{
 };
 
 use crate::tui::app::App;
-use crate::tui::view::widgets::center_rect;
+use crate::tui::view::widgets::{center_rect, register_action_row};
 
 /// Renders the confirm-delete popup over the vault screen.
 pub fn draw_popup(frame: &mut Frame, area: Rect, app: &App) {
@@ -91,6 +92,18 @@ pub fn draw_popup(frame: &mut Frame, area: Rect, app: &App) {
             Line::from(""),
         ]
     };
+
+    // Make the action rows clickable (mouse twins of their keys). The
+    // rows sit at fixed offsets inside the bordered popup: Enter at row
+    // 5, then D (only in the vault view) at 6 and Esc last.
+    if app.vault.is_trash_view() {
+        register_action_row(popup, 5, KeyCode::Enter); // Delete permanently
+        register_action_row(popup, 6, KeyCode::Esc); // Cancel
+    } else {
+        register_action_row(popup, 5, KeyCode::Enter); // Move to trash
+        register_action_row(popup, 6, KeyCode::Char('D')); // Delete permanently
+        register_action_row(popup, 7, KeyCode::Esc); // Cancel
+    }
 
     frame.render_widget(
         Paragraph::new(lines).block(

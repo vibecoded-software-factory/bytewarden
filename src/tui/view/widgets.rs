@@ -41,6 +41,27 @@ thread_local! {
         const { std::cell::RefCell::new(Vec::new()) };
 }
 
+/// Registers row `line_idx` of a bordered centered popup (`Borders::ALL`,
+/// so the inner area is inset one cell) as a clickable twin of `code` —
+/// the mouse handler dispatches that key through the active screen. Used
+/// by the confirm dialogs to make their `Enter …` / `Esc …` action rows
+/// clickable without a per-popup mouse handler.
+pub fn register_action_row(popup: Rect, line_idx: u16, code: crossterm::event::KeyCode) {
+    let rect = Rect {
+        x: popup.x + 1,
+        y: popup.y + 1 + line_idx,
+        width: popup.width.saturating_sub(2),
+        height: 1,
+    };
+    register_button(
+        rect,
+        ClickAction::Key(crossterm::event::KeyEvent::new(
+            code,
+            crossterm::event::KeyModifiers::NONE,
+        )),
+    );
+}
+
 /// Records a clickable form-field rect → its index (see [`FIELD_HITS`]).
 pub fn register_field_hit(rect: Rect, idx: usize) {
     if rect.width > 0 && rect.height > 0 {
@@ -70,6 +91,11 @@ pub enum ClickAction {
     OpenHelp,
     /// Open the settings overlay (the `F10 settings` anchor).
     OpenSettings,
+    /// Dispatch this key event through the active screen's handler — the
+    /// mouse twin of pressing that key. Lets a rendered action row / button
+    /// (e.g. a confirm dialog's "Enter Move to trash") reuse the exact key
+    /// logic it advertises, no per-popup mouse handler needed.
+    Key(crossterm::event::KeyEvent),
 }
 
 /// What the mouse wheel moves when it's over a registered region. The widget /

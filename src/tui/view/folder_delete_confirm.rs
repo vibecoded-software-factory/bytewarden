@@ -10,7 +10,8 @@ use ratatui::{
 
 use crate::tui::app::App;
 use crate::tui::flows::folders::focused_folder;
-use crate::tui::view::widgets::center_rect;
+use crate::tui::view::widgets::{center_rect, register_action_row};
+use crossterm::event::KeyCode;
 
 /// Renders the confirm-delete-folder popup.
 pub fn draw_popup(frame: &mut Frame, area: Rect, app: &App) {
@@ -55,6 +56,8 @@ pub fn draw_popup(frame: &mut Frame, area: Rect, app: &App) {
         Line::from(""),
     ];
 
+    register_action_row(popup, 6, KeyCode::Enter);
+    register_action_row(popup, 7, KeyCode::Esc);
     frame.render_widget(
         Paragraph::new(lines).block(
             Block::default()
