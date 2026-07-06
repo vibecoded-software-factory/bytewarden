@@ -120,10 +120,11 @@ bytewarden has **two list flavors**; reuse the matching one, never a one-off.
      a non-final column shoves trailing columns to the far right (the
      recurring "gap" bug).
 2. **Sidebar lists** (folders, item-type filters) are Ratatui `List`s with a
-   `▶ ` highlight symbol, a `muted` separator row injected before the last
-   group, and a `ListState` whose visual index skips the separator. Per-row
-   counts come from precomputed maps (`App::rebuild_sidebar_counts`) — never
-   scan `items` per frame.
+   `▶ ` highlight symbol, a **`muted` dotted-rule separator row** (`┈`, via
+   `separator_row`) injected before the last group — an explicit divider, not
+   a blank gap — and a `ListState` whose visual index skips the separator.
+   Per-row counts come from precomputed maps (`App::rebuild_sidebar_counts`) —
+   never scan `items` per frame.
 
 Row indicators (item list): `★` favorite, `🔒` reprompt-protected, `👥`
 belongs to an organisation.

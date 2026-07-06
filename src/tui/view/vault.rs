@@ -39,19 +39,15 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     .split(area);
     let body = Layout::horizontal([Constraint::Percentage(26), Constraint::Percentage(74)])
         .split(outer[0]);
-    // Both sidebar list panels hug their content (no box stretches to
-    // fill), top-aligned; whatever's left below them is a background
-    // gutter. The Folders box adds a one-row grouping gap only when there
-    // are named folders/collections to separate from the two pseudo-rows.
-    let has_named = !app.folders.is_empty() || !app.collections.is_empty();
-    let folder_rows = 2 + has_named as usize + app.folders.len() + app.collections.len();
-    let folders_h = (folder_rows as u16 + 2).clamp(4, 14);
-    // All item-type filters + the one-row separator before Trash + borders.
-    let items_h = ITEM_FILTERS.len() as u16 + 1 + 2;
+    // Folders is sized to its content (small box at the top); the Items
+    // filter fills the rest of the column, its border reaching the bottom
+    // with the list top-aligned, so there's no dead gutter below the
+    // sidebar.
+    let folder_rows = 3 + app.folders.len() + app.collections.len();
+    let folders_h = (folder_rows as u16 + 2).clamp(5, 14);
     let sidebar = Layout::vertical([
         Constraint::Length(3),
         Constraint::Length(folders_h),
-        Constraint::Length(items_h),
         Constraint::Min(0),
     ])
     .split(body[0]);
@@ -210,13 +206,9 @@ fn render_vaults(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         t,
     ));
 
-    // Blank spacer before the named folder/collection rows — a clean
-    // grouping gap instead of a heavy rule. Skipped when there are none,
-    // so an empty vault doesn't show a trailing blank row.
-    let has_named = !app.folders.is_empty() || !app.collections.is_empty();
-    if has_named {
-        rows.push(ListItem::new(Line::from("")));
-    }
+    // Muted rule before the named folder/collection rows — an explicit
+    // group divider rather than a blank gap.
+    rows.push(separator_row(area.width, t));
 
     // One row per folder (alphabetised at load time). Per-folder
     // count comes from the precomputed map — see
@@ -263,9 +255,8 @@ fn render_vaults(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     }
 
     // The visual selection index has to skip the separator row at
-    // position 2 (present only when there are named rows) so it lines up
-    // with the underlying logical index.
-    let display_sel = if has_named && app.vault.folder_selected >= 2 {
+    // position 2 so it lines up with the underlying logical index.
+    let display_sel = if app.vault.folder_selected >= 2 {
         app.vault.folder_selected + 1
     } else {
         app.vault.folder_selected
@@ -284,6 +275,19 @@ fn render_vaults(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         area,
         &mut state,
     );
+}
+
+/// A muted dotted rule spanning the panel, used as a group divider in
+/// the sidebar lists (before the named folders, before Trash) — an
+/// explicit separator instead of a blank gap. `width` is the panel's
+/// outer width; the rule insets by the 2-cell highlight-symbol gutter
+/// every row reserves so it lines up with the row content.
+fn separator_row<'a>(width: u16, t: &crate::tui::theme::Theme) -> ListItem<'a> {
+    let w = (width as usize).saturating_sub(4);
+    ListItem::new(Line::from(Span::styled(
+        "┈".repeat(w),
+        Style::default().fg(t.muted),
+    )))
 }
 
 fn folder_row<'a>(
@@ -348,8 +352,8 @@ fn render_filters(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     let mut filter_items_with_sep: Vec<ListItem> = Vec::with_capacity(filter_items.len() + 1);
     for (i, item) in filter_items.into_iter().enumerate() {
         if i == ITEM_FILTERS.len() - 1 {
-            // Blank spacer before the Trash entry — clean gap, no rule.
-            filter_items_with_sep.push(ListItem::new(Line::from("")));
+            // Muted rule before the Trash entry — an explicit divider.
+            filter_items_with_sep.push(separator_row(area.width, t));
         }
         filter_items_with_sep.push(item);
     }
