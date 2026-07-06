@@ -237,9 +237,15 @@ hand-roll a `Block` with a different border type: a new panel is rounded via
   centered-modal geometry every list/picker/settings overlay imitates so they
   line up; `help_line`, `unread`/`favorite_star` emphasis, `key_style`,
   `Theme::emphasis()` / `Theme::danger_title()` — one definition each.
-- Field cards (detail / edit / create) → `widgets::field_areas` +
-  `render_field_card`: a label row + a 3-row bordered value box, one card per
-  `EditField`.
+- Field cards (detail / edit / create) → `widgets::field_areas` /
+  `field_areas_windowed` + `render_field_card`: a label row + a 3-row bordered
+  value box, one card per `EditField`. `field_areas_windowed` windows the cards
+  around the selected one so a field past the fold scrolls into view (the same
+  windowing the preset picker uses); the Detail screen registers each visible
+  card's rect (`view::detail::detail_field_at`) so a click focuses the card the
+  pointer is over — a repeat click on the focused read-only card reveals it
+  (through the same reprompt gate as F2), an edit-mode click focuses the field
+  (reveal stays on the gated F2).
 
 ## Overlays & confirmations
 
