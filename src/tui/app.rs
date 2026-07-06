@@ -29,6 +29,7 @@ use crate::tui::item_forms::{CreateForm, EditForm};
 use crate::tui::login_form::LoginForm;
 use crate::tui::mouse_areas::MouseAreas;
 use crate::tui::screens::{Focus, LoginField, Screen};
+use crate::tui::settings_overlay::{SettingsFocus, SettingsOverlay};
 use crate::tui::theme::{self, Theme};
 use crate::tui::worker::{InFlight, WorkerRequest, WorkerResponse};
 
@@ -49,35 +50,6 @@ pub(crate) fn redact_cmd(cmd: &str, marker: Option<&str>) -> String {
     match marker {
         Some(key) if !key.is_empty() => cmd.replace(key, "***"),
         _ => cmd.to_string(),
-    }
-}
-
-/// Which pane of the Settings overlay currently holds focus.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SettingsFocus {
-    /// The left-hand list of sections.
-    Sidebar,
-    /// The right-hand panel showing the active section's options.
-    Panel,
-}
-
-/// A section of the Settings overlay. Sectioned so the preferences
-/// surface can grow (Security, Clipboard…) without changing the layout.
-/// Today only [`SettingsSection::Theme`] exists.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SettingsSection {
-    Theme,
-}
-
-impl SettingsSection {
-    /// Every section, in sidebar order.
-    pub const ALL: [SettingsSection; 1] = [SettingsSection::Theme];
-
-    /// The sidebar label.
-    pub fn label(self) -> &'static str {
-        match self {
-            SettingsSection::Theme => "Theme",
-        }
     }
 }
 
@@ -306,19 +278,9 @@ pub struct App {
     pub theme: Theme,
 
     // ── Settings overlay (F9) ─────────────────────────────────────────────
-    /// Which pane of the Settings overlay holds focus.
-    pub settings_focus: SettingsFocus,
-    /// Highlighted section in the sidebar (index into
-    /// [`SettingsSection::ALL`]).
-    pub settings_section: usize,
-    /// Highlighted preset in the Theme panel (index into
-    /// [`theme::Preset::ALL`]). Previews live as it moves.
-    pub settings_theme_idx: usize,
-    /// Theme active when the Settings overlay opened — restored if the
-    /// user cancels (`Esc`/`F9`) instead of confirming.
-    pub theme_before_settings: Theme,
-    /// Screen the Settings overlay was opened from (returned to on close).
-    pub settings_from: Screen,
+    /// The Settings overlay's transient state. See
+    /// [`crate::tui::settings_overlay::SettingsOverlay`].
+    pub settings_ui: SettingsOverlay,
 
     // ── Worker channels ───────────────────────────────────────────────────
     /// Send a [`WorkerRequest`] to the thread that owns the vault +
@@ -416,11 +378,13 @@ impl App {
             help_from: None,
             help_scroll: (0, 0),
             theme: theme.clone(),
-            settings_focus: SettingsFocus::Sidebar,
-            settings_section: 0,
-            settings_theme_idx,
-            theme_before_settings: theme,
-            settings_from: Screen::Vault,
+            settings_ui: SettingsOverlay {
+                focus: SettingsFocus::Sidebar,
+                section: 0,
+                theme_idx: settings_theme_idx,
+                theme_before: theme,
+                from: Screen::Vault,
+            },
             worker_tx,
             worker_rx,
             session_marker: None,
@@ -539,17 +503,17 @@ impl App {
     /// originating screen and the active theme (so `Esc`/`F9` can restore
     /// it), and starts focus on the section sidebar.
     pub fn open_settings(&mut self) {
-        self.settings_from = self.screen.clone();
-        self.theme_before_settings = self.theme.clone();
-        self.settings_focus = SettingsFocus::Sidebar;
-        self.settings_section = 0;
+        self.settings_ui.from = self.screen.clone();
+        self.settings_ui.theme_before = self.theme.clone();
+        self.settings_ui.focus = SettingsFocus::Sidebar;
+        self.settings_ui.section = 0;
         self.screen = Screen::Settings;
     }
 
     /// Applies the highlighted preset to [`Self::theme`] as a live
     /// preview — no persistence. Called whenever the picker moves.
     pub fn settings_preview_theme(&mut self) {
-        if let Some(&p) = theme::Preset::ALL.get(self.settings_theme_idx) {
+        if let Some(&p) = theme::Preset::ALL.get(self.settings_ui.theme_idx) {
             self.theme = theme::adapt(
                 Theme::from_palette(&p.palette()),
                 theme::ColorCaps::detect(),
@@ -560,7 +524,7 @@ impl App {
     /// Confirms the highlighted preset: applies it, persists
     /// `name = "<preset>"` to `config.toml`, and closes the overlay.
     pub fn settings_confirm_theme(&mut self) {
-        if let Some(&p) = theme::Preset::ALL.get(self.settings_theme_idx) {
+        if let Some(&p) = theme::Preset::ALL.get(self.settings_ui.theme_idx) {
             self.theme = theme::adapt(
                 Theme::from_palette(&p.palette()),
                 theme::ColorCaps::detect(),
@@ -569,14 +533,14 @@ impl App {
             self.push_cmd("theme", true, &format!("saved {}", p.name()));
             self.set_action(ActionState::Done(format!("Theme: {}", p.label())));
         }
-        self.screen = self.settings_from.clone();
+        self.screen = self.settings_ui.from.clone();
     }
 
     /// Cancels the Settings overlay: restores the theme that was active
     /// when it opened (dropping any live preview) and closes it.
     pub fn settings_cancel(&mut self) {
-        self.theme = self.theme_before_settings.clone();
-        self.screen = self.settings_from.clone();
+        self.theme = self.settings_ui.theme_before.clone();
+        self.screen = self.settings_ui.from.clone();
     }
 
     pub fn go_to_vault(&mut self) {

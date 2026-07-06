@@ -9,7 +9,8 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph};
 
-use crate::tui::app::{App, SettingsFocus, SettingsSection};
+use crate::tui::app::App;
+use crate::tui::settings_overlay::{SettingsFocus, SettingsSection};
 use crate::tui::theme;
 
 pub fn draw_popup(frame: &mut Frame, area: Rect, app: &App) {
@@ -48,7 +49,7 @@ pub fn draw_popup(frame: &mut Frame, area: Rect, app: &App) {
     draw_sidebar(frame, app, cols[0]);
     draw_panel(frame, app, cols[1]);
 
-    let hint = match app.settings_focus {
+    let hint = match app.settings_ui.focus {
         SettingsFocus::Sidebar => "↑/↓ section · →/Enter open · Esc close",
         SettingsFocus::Panel => "↑/↓ preview · Enter apply+save · ←/Tab back · Esc cancel",
     };
@@ -75,7 +76,7 @@ fn focus_block(app: &App, title: &str, focused: bool) -> Block<'static> {
 
 fn draw_sidebar(frame: &mut Frame, app: &App, area: Rect) {
     let t = &app.theme;
-    let focused = app.settings_focus == SettingsFocus::Sidebar;
+    let focused = app.settings_ui.focus == SettingsFocus::Sidebar;
     let block = focus_block(app, "Sections", focused);
     let body = block.inner(area);
     frame.render_widget(block, area);
@@ -84,7 +85,7 @@ fn draw_sidebar(frame: &mut Frame, app: &App, area: Rect) {
         .iter()
         .enumerate()
         .map(|(i, s)| {
-            let selected = i == app.settings_section;
+            let selected = i == app.settings_ui.section;
             let marker = if selected { "▶ " } else { "  " };
             let style = if selected && focused {
                 Style::default().fg(t.accent).add_modifier(Modifier::BOLD)
@@ -100,14 +101,14 @@ fn draw_sidebar(frame: &mut Frame, app: &App, area: Rect) {
 }
 
 fn draw_panel(frame: &mut Frame, app: &App, area: Rect) {
-    match SettingsSection::ALL[app.settings_section] {
+    match SettingsSection::ALL[app.settings_ui.section] {
         SettingsSection::Theme => draw_theme_panel(frame, app, area),
     }
 }
 
 fn draw_theme_panel(frame: &mut Frame, app: &App, area: Rect) {
     let t = &app.theme;
-    let focused = app.settings_focus == SettingsFocus::Panel;
+    let focused = app.settings_ui.focus == SettingsFocus::Panel;
     let block = focus_block(app, "Theme", focused);
     let body = block.inner(area);
     frame.render_widget(block, area);
@@ -117,7 +118,7 @@ fn draw_theme_panel(frame: &mut Frame, app: &App, area: Rect) {
         Style::default().fg(t.dim),
     ))];
     for (i, p) in theme::Preset::ALL.iter().enumerate() {
-        let selected = i == app.settings_theme_idx;
+        let selected = i == app.settings_ui.theme_idx;
         let marker = if selected { "▶ " } else { "  " };
         let style = if selected {
             Style::default().fg(t.accent).add_modifier(Modifier::BOLD)
