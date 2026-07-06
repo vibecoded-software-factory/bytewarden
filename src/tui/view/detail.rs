@@ -73,6 +73,10 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     );
 
     app.mouse_areas.detail = Some(chunks[1]);
+    crate::tui::view::widgets::register_scroll(
+        chunks[1],
+        crate::tui::view::widgets::ScrollTarget::Detail,
+    );
 
     if app.edit.active {
         render_edit_form(frame, app, chunks[1]);

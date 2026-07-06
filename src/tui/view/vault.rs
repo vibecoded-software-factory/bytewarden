@@ -68,6 +68,13 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     app.mouse_areas.list = Some(main[1]);
     app.mouse_areas.cmdlog = Some(outer[1]);
 
+    // Wheel targets (position-aware): the item list, the filter sidebar and the
+    // command log each scroll their own state.
+    use crate::tui::view::widgets::{ScrollTarget, register_scroll};
+    register_scroll(main[1], ScrollTarget::Vault);
+    register_scroll(sidebar[2], ScrollTarget::Filters);
+    register_scroll(outer[1], ScrollTarget::CmdLog);
+
     let _ = t; // some helpers re-borrow theme; suppress unused-warning in slim builds
 }
 

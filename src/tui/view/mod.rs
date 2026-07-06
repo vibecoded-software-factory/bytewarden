@@ -95,6 +95,9 @@ fn draw_too_small(frame: &mut Frame, theme: &Theme) {
 
 /// Top-level frame router — invoked once per terminal redraw.
 pub fn draw(frame: &mut Frame, app: &mut App) {
+    // Clear the scroll registry each frame; every scrollable surface
+    // re-registers its region as it draws, so the wheel dispatches by position.
+    crate::tui::view::widgets::reset_scroll_regions();
     if is_terminal_too_small(frame.area().width, frame.area().height) {
         draw_too_small(frame, &app.theme);
         return;
