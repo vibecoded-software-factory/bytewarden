@@ -17,6 +17,7 @@ use crate::domain::{
 use crate::ports::{BwError, ParallelSessionData, VaultPort};
 use serde_json::json;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use zeroize::Zeroizing;
 
 use codec::base64_encode;
@@ -171,7 +172,13 @@ pub struct BwCliAdapter {
     /// at boot via [`Self::with_list_items_timeout`]; falls back to
     /// [`DEFAULT_LIST_ITEMS_TIMEOUT`] when the constructor is used
     /// without an explicit override (tests, defaults).
-    list_items_timeout: u64,
+    ///
+    /// Shared behind an [`Arc<AtomicU64>`] so the render thread (which
+    /// holds a clone of the same handle — see
+    /// [`Self::list_items_timeout_handle`]) can retune it live from the
+    /// Settings overlay: the worker reads the current value on the next
+    /// list, no restart needed.
+    list_items_timeout: Arc<AtomicU64>,
 }
 
 impl BwCliAdapter {
@@ -210,7 +217,7 @@ impl BwCliAdapter {
             .map(Arc::new);
         Self {
             session_key,
-            list_items_timeout: DEFAULT_LIST_ITEMS_TIMEOUT,
+            list_items_timeout: Arc::new(AtomicU64::new(DEFAULT_LIST_ITEMS_TIMEOUT)),
         }
     }
 
@@ -220,11 +227,20 @@ impl BwCliAdapter {
     /// `0` is treated as "use the default" — never disable the
     /// timeout, since an unbounded wait would let a wedged child hang
     /// the TUI forever.
-    pub fn with_list_items_timeout(mut self, secs: u64) -> Self {
+    pub fn with_list_items_timeout(self, secs: u64) -> Self {
         if secs > 0 {
-            self.list_items_timeout = secs;
+            self.list_items_timeout.store(secs, Ordering::Relaxed);
         }
         self
+    }
+
+    /// A clone of the shared list-items-timeout handle, for the render
+    /// thread to retune the budget live (the Settings overlay writes to
+    /// it; the worker's adapter reads it on the next list). Cloning the
+    /// [`Arc`] shares the same [`AtomicU64`] — no round-trip through the
+    /// worker channel.
+    pub fn list_items_timeout_handle(&self) -> Arc<AtomicU64> {
+        Arc::clone(&self.list_items_timeout)
     }
 
     /// Returns the current session key or a "Vault is locked" error,
@@ -469,7 +485,7 @@ impl VaultPort for BwCliAdapter {
         // out of `argv` and `ps aux`. Same hygiene as the master-
         // password path.
         let session = self.session()?.to_string();
-        let timeout = self.list_items_timeout;
+        let timeout = self.list_items_timeout.load(Ordering::Relaxed);
         let out = bw_run_with_session_timeout(&["list", "items"], &session, timeout)?;
         if out.status.success() {
             parse_list_tolerant::<Item>(&stdout_str(&out), "items")
@@ -482,7 +498,7 @@ impl VaultPort for BwCliAdapter {
         // Same decrypt cost as `list_items` — see that method for the
         // timeout rationale.
         let session = self.session()?.to_string();
-        let timeout = self.list_items_timeout;
+        let timeout = self.list_items_timeout.load(Ordering::Relaxed);
         let out = bw_run_with_session_timeout(&["list", "items", "--trash"], &session, timeout)?;
         if out.status.success() {
             parse_list_tolerant::<Item>(&stdout_str(&out), "trash")
@@ -1056,7 +1072,7 @@ mod tests {
     fn lock_clears_cached_session_key() {
         let mut a = BwCliAdapter {
             session_key: Some(Arc::new(Zeroizing::new("test-key-DO-NOT-USE".into()))),
-            list_items_timeout: DEFAULT_LIST_ITEMS_TIMEOUT,
+            list_items_timeout: Arc::new(AtomicU64::new(DEFAULT_LIST_ITEMS_TIMEOUT)),
         };
         assert!(a.session_key().is_some());
         a.lock();
@@ -1074,7 +1090,7 @@ mod tests {
         fn assert_is_arc_zeroizing(_: &Option<Arc<Zeroizing<String>>>) {}
         let a = BwCliAdapter {
             session_key: None,
-            list_items_timeout: DEFAULT_LIST_ITEMS_TIMEOUT,
+            list_items_timeout: Arc::new(AtomicU64::new(DEFAULT_LIST_ITEMS_TIMEOUT)),
         };
         assert_is_arc_zeroizing(&a.session_key);
     }
@@ -1090,7 +1106,7 @@ mod tests {
     fn clone_shares_session_key_allocation() {
         let a = BwCliAdapter {
             session_key: Some(Arc::new(Zeroizing::new("shared-key".into()))),
-            list_items_timeout: DEFAULT_LIST_ITEMS_TIMEOUT,
+            list_items_timeout: Arc::new(AtomicU64::new(DEFAULT_LIST_ITEMS_TIMEOUT)),
         };
         let b = a.clone();
         let arc_a = a.session_key.as_ref().unwrap();
@@ -1102,7 +1118,7 @@ mod tests {
     #[test]
     fn with_list_items_timeout_overrides_default() {
         let a = BwCliAdapter::new_with(None).with_list_items_timeout(42);
-        assert_eq!(a.list_items_timeout, 42);
+        assert_eq!(a.list_items_timeout.load(Ordering::Relaxed), 42);
     }
 
     #[test]
@@ -1110,7 +1126,20 @@ mod tests {
         // Zero would mean "kill bw immediately" — the guard keeps the
         // existing default instead of disabling the safety net.
         let a = BwCliAdapter::new_with(None).with_list_items_timeout(0);
-        assert_eq!(a.list_items_timeout, DEFAULT_LIST_ITEMS_TIMEOUT);
+        assert_eq!(
+            a.list_items_timeout.load(Ordering::Relaxed),
+            DEFAULT_LIST_ITEMS_TIMEOUT
+        );
+    }
+
+    #[test]
+    fn list_items_timeout_handle_shares_the_atomic() {
+        let a = BwCliAdapter::new_with(None);
+        let handle = a.list_items_timeout_handle();
+        // A live retune through the shared handle is visible to the
+        // adapter (which reads it on the next list) — no restart needed.
+        handle.store(240, Ordering::Relaxed);
+        assert_eq!(a.list_items_timeout.load(Ordering::Relaxed), 240);
     }
 
     #[test]

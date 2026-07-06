@@ -71,6 +71,7 @@ pub fn run(
     clipboard: Box<dyn ClipboardPort>,
     settings: Box<dyn SettingsPort>,
     generator: Box<dyn PasswordGeneratorPort + Send>,
+    list_items_timeout: std::sync::Arc<std::sync::atomic::AtomicU64>,
 ) -> Result<()> {
     ratatui::run(|terminal| {
         // Move the vault + generator ports onto the worker thread so the
@@ -78,7 +79,13 @@ pub fn run(
         let mut worker = worker::WorkerHandle::spawn(vault, generator);
         let worker_tx = worker.tx();
         let worker_rx = worker.take_rx();
-        let mut app = App::new(worker_tx, worker_rx, clipboard, settings);
+        let mut app = App::new(
+            worker_tx,
+            worker_rx,
+            clipboard,
+            settings,
+            list_items_timeout.clone(),
+        );
 
         execute!(std::io::stdout(), EnableMouseCapture)?;
 
