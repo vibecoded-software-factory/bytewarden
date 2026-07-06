@@ -5,7 +5,10 @@ use ratatui::{
     layout::{Constraint, Layout},
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Cell, List, ListItem, ListState, Paragraph, Row, Table, TableState},
+    widgets::{
+        Block, BorderType, Borders, Cell, List, ListItem, ListState, Paragraph, Row, Table,
+        TableState,
+    },
 };
 
 use crate::domain::filter::{ITEM_FILTERS, ItemFilter};
@@ -161,6 +164,7 @@ fn render_status(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         Paragraph::new(status_line).block(
             Block::default()
                 .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
                 .title(Span::styled("─[0]-Status", title_style))
                 .border_style(Style::default().fg(focus_color(sf, t.accent, t.inactive))),
         ),
@@ -390,6 +394,7 @@ fn render_search(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         Paragraph::new(line).block(
             Block::default()
                 .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
                 .title(Span::styled(
                     "─[/]-Search",
                     Style::default().fg(focus_color(sf, t.accent, t.inactive)),
@@ -537,6 +542,7 @@ fn render_cmd_log(frame: &mut Frame, app: &App, area: ratatui::layout::Rect, cmd
     let title = format!("─[4]-Command Log{scroll_tag}");
     let block = Block::default()
         .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
         .title(Span::styled(title, Style::default().fg(color)))
         .border_style(Style::default().fg(color));
     let inner = block.inner(area);
