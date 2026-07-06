@@ -39,6 +39,9 @@ pub fn handle(app: &mut App, mouse: MouseEvent) {
                 Screen::Detail => mouse_detail(app, col, row),
                 Screen::Settings => crate::tui::input::settings::mouse(app, col, row),
                 Screen::ItemActions => crate::tui::input::item_actions::mouse(app, col, row),
+                Screen::AssignCollections => {
+                    crate::tui::input::assign_collections::mouse(app, col, row)
+                }
                 _ => {}
             }
         }

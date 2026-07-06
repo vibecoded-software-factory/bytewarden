@@ -5,6 +5,21 @@ use crossterm::event::{KeyCode, KeyEvent};
 use crate::tui::app::App;
 use crate::tui::flows::assign_collections::{cancel as cancel_popup, commit as commit_popup};
 
+/// A click on a collection row toggles it — the mouse twin of moving the
+/// cursor there and pressing Space.
+pub fn mouse(app: &mut App, col: u16, row: u16) {
+    let Some(idx) = crate::tui::view::assign_collections::collection_row_at(col, row) else {
+        return;
+    };
+    if let Some(state) = app.assign_collections.as_mut() {
+        state.error = false;
+        if idx < state.available.len() {
+            state.cursor = idx;
+            state.toggle_cursor();
+        }
+    }
+}
+
 /// Dispatches a single key event on the assign-collections popup.
 pub fn handle(app: &mut App, key: KeyEvent) {
     match key.code {
