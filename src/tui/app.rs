@@ -876,6 +876,35 @@ mod tests {
     }
 
     #[test]
+    fn clicking_outside_an_overlay_dismisses_it() {
+        use crate::tui::screens::Screen;
+        use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
+
+        let (mut app, _req_rx, _resp_tx) = fresh_app();
+        app.screen = Screen::ConfirmLogout;
+        // Draw so the confirm popup registers its centered-modal rect.
+        let mut term = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        term.draw(|f| crate::tui::view::draw(f, &mut app)).unwrap();
+        // Click the top-left corner — well outside the centered popup.
+        crate::tui::input::mouse::handle(
+            &mut app,
+            MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Left),
+                column: 0,
+                row: 0,
+                modifiers: KeyModifiers::NONE,
+            },
+        );
+        assert_ne!(
+            app.screen,
+            Screen::ConfirmLogout,
+            "a click outside the overlay dismissed it"
+        );
+    }
+
+    #[test]
     fn submit_dispatches_toast_and_request() {
         let (mut app, req_rx, _resp_tx) = fresh_app();
         assert!(app.submit(InFlight::Sync, "Syncing…", WorkerRequest::Sync));

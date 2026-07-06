@@ -25,6 +25,7 @@ pub fn draw_popup(frame: &mut Frame, area: Rect, app: &App) {
     };
     let t = &app.theme;
     let popup = center_rect(60, 11, area);
+    crate::tui::view::widgets::register_modal(popup);
     frame.render_widget(Clear, popup);
 
     let outer = Block::default()

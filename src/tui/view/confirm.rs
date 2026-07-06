@@ -20,6 +20,7 @@ pub fn draw_popup(frame: &mut Frame, area: Rect, app: &App) {
         .map(|i| i.name.as_str())
         .unwrap_or("this item");
     let popup = center_rect(50, 10, area);
+    crate::tui::view::widgets::register_modal(popup);
     frame.render_widget(Clear, popup);
 
     // In trash view, Enter = permanent delete (the item is already

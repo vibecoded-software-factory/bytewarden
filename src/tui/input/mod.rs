@@ -168,34 +168,41 @@ pub fn handle_events(app: &mut App, ev: Event) {
             if busy_blocks(app.is_busy(), &key) {
                 return;
             }
-            match app.screen.clone() {
-                Screen::Splash => {}
-                Screen::Login => login::handle(app, key),
-                Screen::Vault => vault::handle(app, key),
-                Screen::Detail => detail::handle(app, key),
-                Screen::Help => handle_help(app, key),
-                Screen::Settings => settings::handle(app, key),
-                Screen::Create => create::handle(app, key),
-                Screen::ConfirmDelete => confirm::handle(app, key),
-                Screen::ConfirmLogout => logout_confirm::handle(app, key),
-                Screen::Generator => generator::handle(app, key),
-                Screen::RenameField => rename_field::handle(app, key),
-                Screen::FolderName => folder_name::handle(app, key),
-                Screen::ConfirmDeleteFolder => folder_delete_confirm::handle(app, key),
-                Screen::Export => export::handle(app, key),
-                Screen::Import => import::handle(app, key),
-                Screen::AttachmentUpload => attachment_upload::handle(app, key),
-                Screen::AttachmentDownload => attachment_download::handle(app, key),
-                Screen::ConfirmDeleteAttachment => confirm_delete_attachment::handle(app, key),
-                Screen::SendCreate => send_create::handle(app, key),
-                Screen::Memberships => memberships::handle(app, key),
-                Screen::RepromptUnlock => reprompt::handle(app, key),
-                Screen::AssignCollections => assign_collections::handle(app, key),
-                Screen::CommandPalette => palette::handle(app, key),
-            }
+            dispatch_screen_key(app, key);
         }
         Event::Mouse(mouse) => mouse::handle(app, mouse),
         _ => {}
+    }
+}
+
+/// Routes a key to the active screen's handler. Extracted from
+/// [`handle_events`] so the mouse layer can synthesize an `Esc` to dismiss the
+/// active overlay (click-outside-to-close) through the same per-screen logic.
+pub(crate) fn dispatch_screen_key(app: &mut App, key: KeyEvent) {
+    match app.screen.clone() {
+        Screen::Splash => {}
+        Screen::Login => login::handle(app, key),
+        Screen::Vault => vault::handle(app, key),
+        Screen::Detail => detail::handle(app, key),
+        Screen::Help => handle_help(app, key),
+        Screen::Settings => settings::handle(app, key),
+        Screen::Create => create::handle(app, key),
+        Screen::ConfirmDelete => confirm::handle(app, key),
+        Screen::ConfirmLogout => logout_confirm::handle(app, key),
+        Screen::Generator => generator::handle(app, key),
+        Screen::RenameField => rename_field::handle(app, key),
+        Screen::FolderName => folder_name::handle(app, key),
+        Screen::ConfirmDeleteFolder => folder_delete_confirm::handle(app, key),
+        Screen::Export => export::handle(app, key),
+        Screen::Import => import::handle(app, key),
+        Screen::AttachmentUpload => attachment_upload::handle(app, key),
+        Screen::AttachmentDownload => attachment_download::handle(app, key),
+        Screen::ConfirmDeleteAttachment => confirm_delete_attachment::handle(app, key),
+        Screen::SendCreate => send_create::handle(app, key),
+        Screen::Memberships => memberships::handle(app, key),
+        Screen::RepromptUnlock => reprompt::handle(app, key),
+        Screen::AssignCollections => assign_collections::handle(app, key),
+        Screen::CommandPalette => palette::handle(app, key),
     }
 }
 

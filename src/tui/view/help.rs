@@ -32,6 +32,8 @@ pub fn draw_popup(frame: &mut Frame, area: Rect, app: &mut App) {
     let lines = build_lines(&from, &app.focus, t);
 
     let popup = center_rect_pct(64, 80, area);
+
+    crate::tui::view::widgets::register_modal(popup);
     frame.render_widget(Clear, popup);
     crate::tui::view::widgets::register_scroll(
         popup,

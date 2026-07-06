@@ -20,6 +20,7 @@ pub fn draw(frame: &mut Frame, app: &App) {
     };
     let t = &app.theme;
     let area = center_rect(60, 20, frame.area());
+    crate::tui::view::widgets::register_modal(area);
     frame.render_widget(Clear, area);
 
     let title = format!(" Command palette · {} ", state.filtered.len());
