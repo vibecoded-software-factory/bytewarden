@@ -31,6 +31,7 @@ pub mod reprompt;
 pub mod screens;
 pub mod send;
 pub mod session_file;
+pub mod settings_overlay;
 pub mod theme;
 pub mod view;
 pub mod worker;

@@ -119,7 +119,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         Screen::Settings => {
             // Draw the originating screen underneath so the overlay feels
             // in context, then the Settings popup on top.
-            match app.settings_from.clone() {
+            match app.settings_ui.from.clone() {
                 Screen::Login => login::draw(frame, app),
                 Screen::Detail => detail::draw(frame, app),
                 Screen::Create => create::draw(frame, app),

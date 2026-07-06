@@ -7,11 +7,12 @@
 
 use crossterm::event::{KeyCode, KeyEvent};
 
-use crate::tui::app::{App, SettingsFocus, SettingsSection};
+use crate::tui::app::App;
+use crate::tui::settings_overlay::{SettingsFocus, SettingsSection};
 use crate::tui::theme;
 
 pub fn handle(app: &mut App, key: KeyEvent) {
-    match app.settings_focus {
+    match app.settings_ui.focus {
         SettingsFocus::Sidebar => handle_sidebar(app, key),
         SettingsFocus::Panel => handle_panel(app, key),
     }
@@ -21,21 +22,21 @@ fn handle_sidebar(app: &mut App, key: KeyEvent) {
     let len = SettingsSection::ALL.len();
     match key.code {
         KeyCode::Esc | KeyCode::F(9) => app.settings_cancel(),
-        KeyCode::Char('j') | KeyCode::Down if app.settings_section + 1 < len => {
-            app.settings_section += 1;
+        KeyCode::Char('j') | KeyCode::Down if app.settings_ui.section + 1 < len => {
+            app.settings_ui.section += 1;
         }
         KeyCode::Char('k') | KeyCode::Up => {
-            app.settings_section = app.settings_section.saturating_sub(1);
+            app.settings_ui.section = app.settings_ui.section.saturating_sub(1);
         }
         KeyCode::Enter | KeyCode::Char('l') | KeyCode::Right | KeyCode::Tab => {
-            app.settings_focus = SettingsFocus::Panel;
+            app.settings_ui.focus = SettingsFocus::Panel;
         }
         _ => {}
     }
 }
 
 fn handle_panel(app: &mut App, key: KeyEvent) {
-    match SettingsSection::ALL[app.settings_section] {
+    match SettingsSection::ALL[app.settings_ui.section] {
         SettingsSection::Theme => handle_theme_panel(app, key),
     }
 }
@@ -45,14 +46,14 @@ fn handle_theme_panel(app: &mut App, key: KeyEvent) {
     match key.code {
         KeyCode::Esc | KeyCode::F(9) => app.settings_cancel(),
         KeyCode::Char('h') | KeyCode::Left | KeyCode::Tab | KeyCode::BackTab => {
-            app.settings_focus = SettingsFocus::Sidebar;
+            app.settings_ui.focus = SettingsFocus::Sidebar;
         }
-        KeyCode::Char('j') | KeyCode::Down if app.settings_theme_idx + 1 < len => {
-            app.settings_theme_idx += 1;
+        KeyCode::Char('j') | KeyCode::Down if app.settings_ui.theme_idx + 1 < len => {
+            app.settings_ui.theme_idx += 1;
             app.settings_preview_theme();
         }
-        KeyCode::Char('k') | KeyCode::Up if app.settings_theme_idx > 0 => {
-            app.settings_theme_idx -= 1;
+        KeyCode::Char('k') | KeyCode::Up if app.settings_ui.theme_idx > 0 => {
+            app.settings_ui.theme_idx -= 1;
             app.settings_preview_theme();
         }
         KeyCode::Enter => app.settings_confirm_theme(),
