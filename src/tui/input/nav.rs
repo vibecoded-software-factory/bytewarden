@@ -1,6 +1,6 @@
 //! Shared navigation primitives used across screens.
 
-use crossterm::event::{KeyCode, KeyEvent};
+use crossterm::event::KeyEvent;
 
 use crate::tui::edit_field::EditField;
 
@@ -31,20 +31,16 @@ pub fn nav_clamp(idx: &mut usize, len: usize, dir: i8) {
     }
 }
 
-/// Cursor + typing keys forwarded to a single [`EditField`]. Used by
-/// both the create and edit forms.
+/// Cursor + typing keys forwarded to a single [`EditField`], through
+/// the one text-input router (`route_line_editor`) — so form fields
+/// inherit the readline word ops like every other input. Read-only
+/// rows ignore keys entirely. Used by both the create and edit forms.
 pub fn text_input(field: Option<&mut EditField>, key: KeyEvent) {
     let Some(f) = field else {
         return;
     };
-    match key.code {
-        KeyCode::Left => f.cursor_left(),
-        KeyCode::Right => f.cursor_right(),
-        KeyCode::Home => f.cursor_home(),
-        KeyCode::End => f.cursor_end(),
-        KeyCode::Backspace => f.delete_before(),
-        KeyCode::Delete => f.delete_at(),
-        KeyCode::Char(c) => f.insert(c),
-        _ => {}
+    if f.read_only {
+        return;
     }
+    let _ = crate::tui::input::common::route_line_editor(&mut f.editor, key);
 }

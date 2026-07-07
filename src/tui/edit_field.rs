@@ -2,17 +2,16 @@
 //!
 //! ## In-memory hygiene
 //!
-//! [`EditField::value`] is wrapped in [`zeroize::Zeroizing`] so the
-//! buffer is overwritten with zeroes when the field drops. This
-//! matters most for hidden fields (passwords, TOTP seeds, SSH
-//! private keys, card CVVs) but applies to every row uniformly —
-//! choosing per-row protection would clutter the API and break the
-//! straight-through `Deref` to `String` that the cursor logic relies
-//! on. Non-secret rows pay a few microseconds of zeroing on drop and
-//! the hidden ones are protected by default.
+//! [`EditField::editor`] is a [`LineEditor`] (`ZeroizeOnDrop`), so the
+//! buffer is overwritten with zeroes when the field drops and every
+//! `set`/`clear` scrubs the previous contents. This matters most for
+//! hidden fields (passwords, TOTP seeds, SSH private keys, card CVVs)
+//! but applies to every row uniformly. It is also the app-wide
+//! text-input model: cursor movement, editing and the readline word
+//! ops all come from `domain::LineEditor` via
+//! `input::common::route_line_editor` — never re-implemented here.
 
-use zeroize::Zeroizing;
-
+use crate::domain::LineEditor;
 use crate::domain::filter::CreateItemType;
 use crate::domain::item::{Item, item_type_label};
 
@@ -59,23 +58,18 @@ pub enum UriRole {
     Match,
 }
 
-/// One labelled text input with an internal cursor.
-///
-/// Cursor positions are character indices (not byte offsets), so the
-/// widget handles multi-byte characters correctly.
+/// One labelled text input.
 #[derive(Debug, Clone)]
 pub struct EditField {
     /// Display label (also used as a key when reading values back to
     /// build a JSON payload).
     pub label: String,
 
-    /// Current value of the field.
-    ///
-    /// Wrapped in [`Zeroizing`] so the buffer is overwritten on drop
-    /// — see the module doc for the rationale. The wrapper transparently
-    /// derefs to `&String`/`&mut String`, so all the cursor logic
-    /// below treats it as a plain `String`.
-    pub value: Zeroizing<String>,
+    /// The field's value + cursor — the one text-input model
+    /// (`domain::LineEditor`, `ZeroizeOnDrop`; see the module doc).
+    /// Keys route through `input::common::route_line_editor`; rendering
+    /// goes through `widgets::editor_spans` / `editor_spans_masked`.
+    pub editor: LineEditor,
 
     /// Whether this field is rendered masked unless [`Self::revealed`] is
     /// `true`.
@@ -84,9 +78,6 @@ pub struct EditField {
     /// `true` after the user pressed F2 to temporarily reveal a hidden
     /// field.
     pub revealed: bool,
-
-    /// Cursor position as a *character* index (not byte offset).
-    pub cursor: usize,
 
     /// `true` for fields that should not be modifiable (e.g. the item
     /// "Type" pseudo-field on the edit form).
@@ -112,19 +103,23 @@ pub struct EditField {
 }
 
 impl EditField {
-    /// Builds an editable built-in field.
+    /// Builds an editable built-in field (cursor at the end).
     pub fn new(label: &str, value: &str, hidden: bool) -> Self {
         Self {
             label: label.to_string(),
-            value: Zeroizing::new(value.to_string()),
+            editor: LineEditor::with_text(value),
             hidden,
             revealed: false,
-            cursor: value.chars().count(),
             read_only: false,
             kind: EditFieldKind::BuiltIn,
             collection_ids: Vec::new(),
             organization_id: None,
         }
+    }
+
+    /// The current value.
+    pub fn value(&self) -> &str {
+        self.editor.text()
     }
 
     /// Builds the cyclable "Organization" row for the create form.
@@ -240,62 +235,6 @@ impl EditField {
             // value immediately rather than carrying the stale flag.
             self.revealed = false;
         }
-    }
-
-    /// Inserts `c` at the cursor and advances the cursor by one.
-    pub fn insert(&mut self, c: char) {
-        if self.read_only {
-            return;
-        }
-        let byte = self.char_byte(self.cursor);
-        self.value.insert(byte, c);
-        self.cursor += 1;
-    }
-
-    /// Backspace — deletes the character before the cursor.
-    pub fn delete_before(&mut self) {
-        if self.read_only || self.cursor == 0 {
-            return;
-        }
-        let byte = self.char_byte(self.cursor - 1);
-        self.value.remove(byte);
-        self.cursor -= 1;
-    }
-
-    /// Delete — removes the character under the cursor.
-    pub fn delete_at(&mut self) {
-        if self.read_only || self.cursor >= self.value.chars().count() {
-            return;
-        }
-        let byte = self.char_byte(self.cursor);
-        self.value.remove(byte);
-    }
-
-    pub fn cursor_left(&mut self) {
-        if self.cursor > 0 {
-            self.cursor -= 1;
-        }
-    }
-    pub fn cursor_right(&mut self) {
-        if self.cursor < self.value.chars().count() {
-            self.cursor += 1;
-        }
-    }
-    pub fn cursor_home(&mut self) {
-        self.cursor = 0;
-    }
-    pub fn cursor_end(&mut self) {
-        self.cursor = self.value.chars().count();
-    }
-
-    /// Resolves a character index to its byte offset in the underlying
-    /// `String`.
-    fn char_byte(&self, char_idx: usize) -> usize {
-        self.value
-            .char_indices()
-            .nth(char_idx)
-            .map(|(b, _)| b)
-            .unwrap_or(self.value.len())
     }
 }
 
@@ -593,57 +532,10 @@ mod tests {
     #[test]
     fn new_initialises_cursor_at_end() {
         let f = EditField::new("Name", "abc", false);
-        assert_eq!(f.cursor, 3);
+        assert_eq!(f.editor.cursor(), 3);
+        assert_eq!(f.value(), "abc");
         assert!(!f.read_only);
         assert!(!f.hidden);
-    }
-
-    #[test]
-    fn read_only_does_not_accept_edits() {
-        let mut f = EditField::read_only("Type", "Login");
-        f.cursor = 0;
-        f.insert('x');
-        f.delete_at();
-        f.delete_before();
-        assert_eq!(f.value.as_str(), "Login");
-    }
-
-    #[test]
-    fn insert_advances_cursor_and_uses_byte_offset() {
-        let mut f = EditField::new("v", "ñé", false);
-        // Cursor sits at end (char count 2).
-        assert_eq!(f.cursor, 2);
-        f.cursor_home();
-        f.insert('Z');
-        assert_eq!(f.value.as_str(), "Zñé");
-        assert_eq!(f.cursor, 1);
-    }
-
-    #[test]
-    fn delete_before_and_at_respect_multibyte() {
-        let mut f = EditField::new("v", "ñé", false);
-        // Cursor at end. delete_before removes 'é'.
-        f.delete_before();
-        assert_eq!(f.value.as_str(), "ñ");
-        assert_eq!(f.cursor, 1);
-        // delete_at at end is a no-op.
-        f.delete_at();
-        assert_eq!(f.value.as_str(), "ñ");
-        // Move home and delete_at removes 'ñ'.
-        f.cursor_home();
-        f.delete_at();
-        assert_eq!(f.value.as_str(), "");
-    }
-
-    #[test]
-    fn cursor_movement_clamps_at_bounds() {
-        let mut f = EditField::new("v", "abc", false);
-        f.cursor_home();
-        f.cursor_left();
-        assert_eq!(f.cursor, 0);
-        f.cursor_end();
-        f.cursor_right();
-        assert_eq!(f.cursor, 3);
     }
 
     #[test]
@@ -860,7 +752,7 @@ mod tests {
         assert!(f.is_organization());
         assert!(f.read_only);
         assert_eq!(f.label, "Organization");
-        assert_eq!(f.value.as_str(), "Acme");
+        assert_eq!(f.value(), "Acme");
         assert_eq!(f.organization_id.as_deref(), Some("o1"));
         assert!(!f.is_collections());
         assert!(!f.is_custom());
@@ -871,7 +763,7 @@ mod tests {
     fn organization_personal_has_no_id() {
         let f = EditField::organization("Personal", None);
         assert!(f.is_organization());
-        assert_eq!(f.value.as_str(), "Personal");
+        assert_eq!(f.value(), "Personal");
         assert!(f.organization_id.is_none());
     }
 
@@ -892,7 +784,7 @@ mod tests {
             .iter()
             .find(|f| f.is_organization())
             .expect("organization row");
-        assert_eq!(org_row.value.as_str(), "Personal");
+        assert_eq!(org_row.value(), "Personal");
         assert!(org_row.organization_id.is_none());
         // Should be the last row.
         assert!(fields.last().is_some_and(|f| f.is_organization()));
@@ -904,7 +796,7 @@ mod tests {
         assert!(f.is_collections());
         assert!(f.read_only);
         assert_eq!(f.label, "Collections");
-        assert_eq!(f.value.as_str(), "Eng, Ops");
+        assert_eq!(f.value(), "Eng, Ops");
         assert_eq!(f.collection_ids, vec!["c1".to_string(), "c2".to_string()]);
         // Custom-type lookup must report `None` so existing
         // type-cycle / rename guards don't accidentally pick up
@@ -936,7 +828,7 @@ mod tests {
             .iter()
             .find(|f| f.is_collections())
             .expect("collections row present for org item");
-        assert_eq!(row.value.as_str(), "Engineering, Ops");
+        assert_eq!(row.value(), "Engineering, Ops");
         assert_eq!(row.collection_ids, vec!["c1".to_string(), "c2".to_string()]);
         assert!(row.read_only);
     }
@@ -969,7 +861,7 @@ mod tests {
             .iter()
             .find(|f| f.is_collections())
             .expect("collections row");
-        assert_eq!(row.value.as_str(), "Engineering");
+        assert_eq!(row.value(), "Engineering");
         assert_eq!(
             row.collection_ids,
             vec!["visible".to_string(), "hidden".to_string()]
@@ -989,7 +881,7 @@ mod tests {
             .iter()
             .find(|f| f.label == "Folder")
             .expect("folder row");
-        assert_eq!(folder_row.value.as_str(), "Work");
+        assert_eq!(folder_row.value(), "Work");
     }
 
     #[test]
@@ -1002,7 +894,7 @@ mod tests {
             .iter()
             .find(|f| f.label == "Folder")
             .expect("folder row");
-        assert_eq!(folder_row.value.as_str(), "");
+        assert_eq!(folder_row.value(), "");
     }
 
     #[test]

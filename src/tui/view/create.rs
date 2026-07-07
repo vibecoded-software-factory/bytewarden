@@ -12,7 +12,8 @@ use crate::domain::filter::CREATE_ITEM_TYPES;
 use crate::tui::app::App;
 use crate::tui::view::action::action_line;
 use crate::tui::view::widgets::{
-    cursor_line, field_areas, render_cmd_bar_with_help, render_field_card, rounded_block,
+    editor_spans, editor_spans_masked, field_areas, render_cmd_bar_with_help, render_field_card,
+    rounded_block,
 };
 
 thread_local! {
@@ -135,18 +136,22 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
             } else {
                 ""
             };
-            let display = if field.hidden && !field.revealed {
-                "●".repeat(field.value.chars().count())
-            } else if field.is_collections() && field.value.is_empty() {
-                "(none — Alt+L to pick)".to_string()
-            } else {
-                field.value.to_string()
-            };
             // Read-only rows don't accept text input — render them
             // without a cursor so the user isn't tempted to type.
             let vline = if sel && !field.read_only {
-                cursor_line(&display, field.cursor, t)
+                if field.hidden && !field.revealed {
+                    Line::from(editor_spans_masked(&field.editor, true, t))
+                } else {
+                    Line::from(editor_spans(&field.editor, true, t))
+                }
             } else {
+                let display = if field.hidden && !field.revealed {
+                    "●".repeat(field.editor.len_chars())
+                } else if field.is_collections() && field.value().is_empty() {
+                    "(none — Alt+L to pick)".to_string()
+                } else {
+                    field.value().to_string()
+                };
                 Line::from(Span::styled(display, Style::default().fg(t.inactive)))
             };
             render_field_card(frame, &field.label, hint, vline, bcol, fas[i], t);

@@ -256,8 +256,7 @@ pub fn commit(app: &mut App) {
             };
             if let Some(field) = target_vec.get_mut(target_idx) {
                 field.collection_ids = ids;
-                field.value = zeroize::Zeroizing::new(display);
-                field.cursor = field.value.chars().count();
+                field.editor.set(display);
             }
             app.set_action(ActionState::Done("Collections updated ✓".into()));
             app.screen = origin;

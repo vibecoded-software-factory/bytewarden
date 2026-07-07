@@ -73,8 +73,7 @@ pub fn cycle_create_org(app: &mut App, dir: i32) {
             .unwrap_or_else(|| "Personal".into()),
     };
     if let Some(f) = app.create.fields.get_mut(app.create.field_idx) {
-        f.value = zeroize::Zeroizing::new(new_display);
-        f.cursor = f.value.chars().count();
+        f.editor.set(new_display);
         f.organization_id = new_id.clone();
     }
     // Sync the sibling Collections row.
@@ -88,8 +87,7 @@ pub fn cycle_create_org(app: &mut App, dir: i32) {
         (Some(pos), Some(_)) => {
             // Switched org → reset the row (user must reselect).
             if let Some(f) = app.create.fields.get_mut(pos) {
-                f.value = zeroize::Zeroizing::new(String::new());
-                f.cursor = 0;
+                f.editor.clear();
                 f.collection_ids = Vec::new();
             }
         }
@@ -112,7 +110,7 @@ pub fn queue_create_item(app: &mut App) {
         .create
         .fields
         .first()
-        .map(|f| f.value.trim().to_string())
+        .map(|f| f.value().trim().to_string())
         .unwrap_or_default();
     if name.is_empty() {
         app.set_action(ActionState::Error("Name is required".into()));
@@ -944,8 +942,8 @@ pub fn handle_save_edit_fetch(app: &mut App, r: Result<Zeroizing<String>, BwErro
                 return f.clone();
             }
             let mut clone = f.clone();
-            clone.value = zeroize::Zeroizing::new(
-                crate::tui::flows::folders::id_by_name(&folders_snapshot, &f.value)
+            clone.editor.set(
+                crate::tui::flows::folders::id_by_name(&folders_snapshot, f.value())
                     .unwrap_or_default(),
             );
             clone
