@@ -153,13 +153,10 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         }
     }
 
-    let (hf, hs) = if app.create.choosing_type {
-        ("j/k type · Enter pick · Esc cancel", "j/k  Enter  Esc")
+    let hints: &[(&str, &str)] = if app.create.choosing_type {
+        &[("j/k", "type"), ("Enter", "pick"), ("Esc", "cancel")]
     } else {
-        (
-            "Tab/↑↓ field · Enter create · Esc cancel",
-            "Tab  Enter  Esc",
-        )
+        &[("Tab/↑↓", "field"), ("Enter", "create"), ("Esc", "cancel")]
     };
-    render_cmd_bar_with_help(frame, area, chunks[2], hf, hs, t.dim, t);
+    render_cmd_bar_with_help(frame, chunks[2], hints, t);
 }

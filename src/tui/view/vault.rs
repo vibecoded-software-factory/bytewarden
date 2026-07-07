@@ -63,7 +63,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     .split(body[0]);
     let main = Layout::vertical([Constraint::Length(3), Constraint::Min(0)]).split(body[1]);
 
-    render_hint_bar(frame, app, area, outer[2]);
+    render_hint_bar(frame, app, outer[2]);
     render_status(frame, app, sidebar[0]);
     render_vaults(frame, app, sidebar[1]);
     render_filters(frame, app, sidebar[2]);
@@ -88,12 +88,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     let _ = t; // some helpers re-borrow theme; suppress unused-warning in slim builds
 }
 
-fn render_hint_bar(
-    frame: &mut Frame,
-    app: &App,
-    area: ratatui::layout::Rect,
-    bar: ratatui::layout::Rect,
-) {
+fn render_hint_bar(frame: &mut Frame, app: &App, bar: ratatui::layout::Rect) {
     let t = &app.theme;
     // Per-focus hints — kept intentionally short. Anything not here
     // (Alt+S sync, Alt+G gen, Alt+E export, Alt+M import, Alt+W send,
@@ -140,14 +135,7 @@ fn render_hint_bar(
             }
         }
     };
-    // `key action` pairs joined with ` · ` — a compact footer that reads
-    // tighter than the old `key: action` joined with a spaced pipe.
-    let full = hints_pairs
-        .iter()
-        .map(|(k, v)| format!("{k} {v}"))
-        .collect::<Vec<_>>()
-        .join(" · ");
-    render_cmd_bar_with_help(frame, area, bar, &full, &full, t.dim, t);
+    render_cmd_bar_with_help(frame, bar, hints_pairs, t);
 }
 
 fn render_status(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {

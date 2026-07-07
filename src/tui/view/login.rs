@@ -423,11 +423,8 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     // ── Bottom hints bar ──────────────────────────────────────────────────
     render_cmd_bar_with_help(
         frame,
-        area,
         bar_chunk,
-        "Tab field · Enter login · F2 reveal pwd",
-        "Tab  Enter  F2",
-        t.dim,
+        &[("Tab", "field"), ("Enter", "login"), ("F2", "reveal pwd")],
         t,
     );
 }
