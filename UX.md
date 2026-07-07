@@ -507,8 +507,6 @@ identity comes from the bordered `─[N]-Name` block titles.
 
 The code has not caught up with this document yet on:
 
-- **Missing shared widgets** — `list_table` (lists/tables are still built
-  inline per screen with `List`/`Table`).
 - **The footer command bar** — `render_cmd_bar` still takes pre-built
   `full`/`short` hint strings; migrating the per-screen footers onto
   `legend_line`'s `(key, label)` pairs retires that duplication.

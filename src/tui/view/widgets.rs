@@ -195,6 +195,73 @@ pub fn scroll_target_at(column: u16, row: u16) -> Option<ScrollTarget> {
     })
 }
 
+/// Parameters for [`list_table`] — the one multi-column list renderer.
+pub struct ListTable<'a> {
+    /// The `─[N]-Name` border tag.
+    pub title: &'a str,
+    /// The dim bottom-right counter (`{selected} of {total}`).
+    pub counter: String,
+    pub focused: bool,
+    /// Optional dim+bold header row; `None` for headerless lists (the
+    /// vault list carries its meaning in the type tags, not a header).
+    pub headers: Option<&'a [&'a str]>,
+    /// Column constraints — **only the final column may be `Min`** (a
+    /// stretching `Min` on a non-final column shoves trailing columns to
+    /// the far right).
+    pub widths: Vec<Constraint>,
+    pub rows: Vec<ratatui::widgets::Row<'a>>,
+    /// Index into `rows`; `None` when the list is empty.
+    pub selected: Option<usize>,
+    /// The teaching empty-state body ([`empty_state_lines`]) shown when
+    /// `rows` is empty — every list must provide one.
+    pub empty: Vec<Line<'static>>,
+}
+
+/// **The** multi-column list renderer: the focus-styled [`titled_block`]
+/// (title tag + dim counter), tight `column_spacing(1)`, the `▶ `
+/// selection symbol with the `selected_bg` + bold row highlight, the
+/// automatic [`draw_scrollbar`] on overflow and the teaching empty state.
+/// Returns the table's **real post-render offset** so callers can map
+/// mouse clicks to rows even when auto-scroll moved the viewport.
+pub fn list_table(frame: &mut Frame, t: &Theme, area: Rect, lt: ListTable) -> usize {
+    let len = lt.rows.len();
+    let block = titled_block(lt.title, &lt.counter, lt.focused, t);
+    if len == 0 {
+        frame.render_widget(block, area);
+        frame.render_widget(
+            Paragraph::new(lt.empty),
+            area.inner(Margin {
+                horizontal: 2,
+                vertical: 1,
+            }),
+        );
+        return 0;
+    }
+    let mut table = ratatui::widgets::Table::new(lt.rows, lt.widths)
+        .column_spacing(1)
+        .block(block)
+        .row_highlight_style(
+            Style::default()
+                .bg(t.selected_bg)
+                .fg(t.foreground)
+                .add_modifier(Modifier::BOLD),
+        )
+        .highlight_symbol("▶ ");
+    if let Some(headers) = lt.headers {
+        table = table.header(
+            ratatui::widgets::Row::new(headers.iter().map(|h| h.to_string()))
+                .style(Style::default().fg(t.dim).add_modifier(Modifier::BOLD)),
+        );
+    }
+    let sel = lt.selected.map(|s| s.min(len - 1));
+    let mut state = ratatui::widgets::TableState::default().with_selected(sel);
+    frame.render_stateful_widget(table, area, &mut state);
+    // Scroll cue on the right border when the list overflows. Driven by
+    // the selection (which reaches both ends) rather than the top offset.
+    draw_scrollbar(frame, area, len, sel.unwrap_or(0), t);
+    state.offset()
+}
+
 /// Responsive command-log height (rows, borders included): 6 when the
 /// terminal is roomy, shrinking to 3 at the floor so the body keeps its
 /// rows. **Monotonic** — a taller terminal never shrinks the log (and so
