@@ -16,6 +16,30 @@ login / unlock → vault list (sidebar + search + list) → item detail →
 edit/create. Full CRUD over the five item types, folders, attachments, Sends,
 import/export, plus the generator, memberships and the HIBP breach check.
 
+## NEVER FAKE — forbidden (hard rule, above everything else)
+
+**Do not fake, pretend, or imply a result you have not verified.** This is
+banned, no exceptions:
+
+- Never say something is **done / complete / working / tested / 100% / at
+  parity** unless it is, and you have *just checked*. Present progress as
+  progress, never as completion. "I did a lot", "all green", "tests pass" is
+  not proof the task is finished — only the actual check is.
+- Any completeness claim about a checklist-shaped goal must come **with the
+  verification shown inline**: enumerate the full set, grep the code for
+  each, paste the diff. If the diff isn't empty, it is **not** done — say
+  exactly what's missing.
+- Never silently drop an item and call the whole thing done. If you judge an
+  item unnecessary or it needs a decision only the user can make, **say so
+  explicitly and ask** — cutting scope on your own and hiding it inside a
+  "done" is faking.
+- If you didn't run it, didn't check it, or aren't sure — **say that
+  plainly**. A truthful "I haven't verified X" always beats a confident false
+  "it works".
+
+The user must never be the one who discovers a claim was false. If you can't
+show the proof, you haven't earned the claim.
+
 ## Pre-flight checklist (hard rules, in order)
 
 1. **Feature touching Bitwarden?** Map it to a `bw` command up front and
