@@ -1,17 +1,16 @@
 //! Confirm-delete-folder popup renderer.
 
+use crossterm::event::KeyCode;
 use ratatui::{
     Frame,
     layout::Rect,
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, BorderType, Borders, Clear, Paragraph},
 };
 
 use crate::tui::app::App;
 use crate::tui::flows::folders::focused_folder;
-use crate::tui::view::widgets::{center_rect, register_action_row};
-use crossterm::event::KeyCode;
+use crate::tui::view::widgets::{ConfirmAction, ConfirmPopup, ConfirmTone, draw_confirm_popup};
 
 /// Renders the confirm-delete-folder popup.
 pub fn draw_popup(frame: &mut Frame, area: Rect, app: &App) {
@@ -19,53 +18,45 @@ pub fn draw_popup(frame: &mut Frame, area: Rect, app: &App) {
     let folder_name = focused_folder(app)
         .map(|f| f.name.as_str())
         .unwrap_or("this folder");
-    let popup = center_rect(50, 11, area);
-    crate::tui::view::widgets::register_modal(popup);
-    frame.render_widget(Clear, popup);
-
-    let lines = vec![
-        Line::from(""),
-        Line::from(vec![
-            Span::styled("  Delete folder: ", Style::default().fg(t.inactive)),
-            Span::styled(
-                folder_name,
-                Style::default().fg(t.accent).add_modifier(Modifier::BOLD),
-            ),
-        ]),
-        Line::from(""),
-        Line::from(Span::styled(
-            "  Items inside the folder are NOT deleted —",
-            Style::default().fg(t.dim),
-        )),
-        Line::from(Span::styled(
-            "  they move to the \"(No folder)\" bucket.",
-            Style::default().fg(t.dim),
-        )),
-        Line::from(""),
-        Line::from(vec![
-            Span::styled(
-                "  Enter",
-                Style::default().fg(t.error).add_modifier(Modifier::BOLD),
-            ),
-            Span::styled("  Delete folder", Style::default().fg(t.foreground)),
-        ]),
-        Line::from(vec![
-            Span::styled("  Esc  ", Style::default().fg(t.dim)),
-            Span::styled("  Cancel", Style::default().fg(t.dim)),
-        ]),
-        Line::from(""),
-    ];
-
-    register_action_row(popup, 6, KeyCode::Enter);
-    register_action_row(popup, 7, KeyCode::Esc);
-    frame.render_widget(
-        Paragraph::new(lines).block(
-            Block::default()
-                .title(" Confirm Delete Folder ")
-                .borders(Borders::ALL)
-                .border_type(BorderType::Rounded)
-                .border_style(Style::default().fg(t.error)),
-        ),
-        popup,
+    draw_confirm_popup(
+        frame,
+        area,
+        t,
+        ConfirmPopup {
+            title: " Confirm Delete Folder ",
+            width_pct: 50,
+            body: vec![
+                Line::from(vec![
+                    Span::styled("  Delete folder: ", Style::default().fg(t.inactive)),
+                    Span::styled(
+                        folder_name.to_string(),
+                        Style::default().fg(t.accent).add_modifier(Modifier::BOLD),
+                    ),
+                ]),
+                Line::from(""),
+                Line::from(Span::styled(
+                    "  Items inside the folder are NOT deleted —",
+                    Style::default().fg(t.dim),
+                )),
+                Line::from(Span::styled(
+                    "  they move to the \"(No folder)\" bucket.",
+                    Style::default().fg(t.dim),
+                )),
+            ],
+            actions: vec![
+                ConfirmAction {
+                    key: "Enter",
+                    code: KeyCode::Enter,
+                    label: "Delete folder",
+                    tone: ConfirmTone::Danger,
+                },
+                ConfirmAction {
+                    key: "Esc",
+                    code: KeyCode::Esc,
+                    label: "Cancel",
+                    tone: ConfirmTone::Cancel,
+                },
+            ],
+        },
     );
 }

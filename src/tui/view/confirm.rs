@@ -6,13 +6,15 @@ use ratatui::{
     layout::Rect,
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, BorderType, Borders, Clear, Paragraph},
 };
 
 use crate::tui::app::App;
-use crate::tui::view::widgets::{center_rect, register_action_row};
+use crate::tui::view::widgets::{ConfirmAction, ConfirmPopup, ConfirmTone, draw_confirm_popup};
 
 /// Renders the confirm-delete popup over the vault screen.
+///
+/// In trash view, Enter = permanent delete (the item is already
+/// trashed). In the regular vault, Enter = trash and D = permanent.
 pub fn draw_popup(frame: &mut Frame, area: Rect, app: &App) {
     let t = &app.theme;
     let name = app
@@ -20,99 +22,74 @@ pub fn draw_popup(frame: &mut Frame, area: Rect, app: &App) {
         .selected_item()
         .map(|i| i.name.as_str())
         .unwrap_or("this item");
-    let popup = center_rect(50, 10, area);
-    crate::tui::view::widgets::register_modal(popup);
-    frame.render_widget(Clear, popup);
-
-    // In trash view, Enter = permanent delete (the item is already
-    // trashed). In the regular vault, Enter = trash and D = permanent.
-    let lines = if app.vault.is_trash_view() {
-        vec![
-            Line::from(""),
-            Line::from(vec![
-                Span::styled("  Delete: ", Style::default().fg(t.inactive)),
-                Span::styled(
-                    name,
-                    Style::default().fg(t.accent).add_modifier(Modifier::BOLD),
-                ),
-            ]),
-            Line::from(""),
-            Line::from(Span::styled(
-                "  Already in trash — this will delete permanently.",
-                Style::default().fg(t.dim),
-            )),
-            Line::from(""),
-            Line::from(vec![
-                Span::styled(
-                    "  Enter",
-                    Style::default().fg(t.error).add_modifier(Modifier::BOLD),
-                ),
-                Span::styled("  Delete permanently", Style::default().fg(t.error)),
-            ]),
-            Line::from(vec![
-                Span::styled("  Esc  ", Style::default().fg(t.dim)),
-                Span::styled("  Cancel", Style::default().fg(t.dim)),
-            ]),
-            Line::from(""),
-        ]
-    } else {
-        vec![
-            Line::from(""),
-            Line::from(vec![
-                Span::styled("  Delete: ", Style::default().fg(t.inactive)),
-                Span::styled(
-                    name,
-                    Style::default().fg(t.accent).add_modifier(Modifier::BOLD),
-                ),
-            ]),
-            Line::from(""),
-            Line::from(Span::styled(
-                "  This action cannot be easily undone.",
-                Style::default().fg(t.dim),
-            )),
-            Line::from(""),
-            Line::from(vec![
-                Span::styled(
-                    "  Enter",
-                    Style::default().fg(t.accent).add_modifier(Modifier::BOLD),
-                ),
-                Span::styled("  Move to trash", Style::default().fg(t.foreground)),
-            ]),
-            Line::from(vec![
-                Span::styled(
-                    "  D    ",
-                    Style::default().fg(t.error).add_modifier(Modifier::BOLD),
-                ),
-                Span::styled("  Delete permanently", Style::default().fg(t.error)),
-            ]),
-            Line::from(vec![
-                Span::styled("  Esc  ", Style::default().fg(t.dim)),
-                Span::styled("  Cancel", Style::default().fg(t.dim)),
-            ]),
-            Line::from(""),
-        ]
-    };
-
-    // Make the action rows clickable (mouse twins of their keys). The
-    // rows sit at fixed offsets inside the bordered popup: Enter at row
-    // 5, then D (only in the vault view) at 6 and Esc last.
-    if app.vault.is_trash_view() {
-        register_action_row(popup, 5, KeyCode::Enter); // Delete permanently
-        register_action_row(popup, 6, KeyCode::Esc); // Cancel
-    } else {
-        register_action_row(popup, 5, KeyCode::Enter); // Move to trash
-        register_action_row(popup, 6, KeyCode::Char('D')); // Delete permanently
-        register_action_row(popup, 7, KeyCode::Esc); // Cancel
-    }
-
-    frame.render_widget(
-        Paragraph::new(lines).block(
-            Block::default()
-                .title(" Confirm Delete ")
-                .borders(Borders::ALL)
-                .border_type(BorderType::Rounded)
-                .border_style(Style::default().fg(t.error)),
+    let name_line = Line::from(vec![
+        Span::styled("  Delete: ", Style::default().fg(t.inactive)),
+        Span::styled(
+            name.to_string(),
+            Style::default().fg(t.accent).add_modifier(Modifier::BOLD),
         ),
-        popup,
-    );
+    ]);
+
+    let popup = if app.vault.is_trash_view() {
+        ConfirmPopup {
+            title: " Confirm Delete ",
+            width_pct: 50,
+            body: vec![
+                name_line,
+                Line::from(""),
+                Line::from(Span::styled(
+                    "  Already in trash — this will delete permanently.",
+                    Style::default().fg(t.dim),
+                )),
+            ],
+            actions: vec![
+                ConfirmAction {
+                    key: "Enter",
+                    code: KeyCode::Enter,
+                    label: "Delete permanently",
+                    tone: ConfirmTone::Danger,
+                },
+                ConfirmAction {
+                    key: "Esc",
+                    code: KeyCode::Esc,
+                    label: "Cancel",
+                    tone: ConfirmTone::Cancel,
+                },
+            ],
+        }
+    } else {
+        ConfirmPopup {
+            title: " Confirm Delete ",
+            width_pct: 50,
+            body: vec![
+                name_line,
+                Line::from(""),
+                Line::from(Span::styled(
+                    "  This action cannot be easily undone.",
+                    Style::default().fg(t.dim),
+                )),
+            ],
+            actions: vec![
+                ConfirmAction {
+                    key: "Enter",
+                    code: KeyCode::Enter,
+                    label: "Move to trash",
+                    tone: ConfirmTone::Primary,
+                },
+                ConfirmAction {
+                    key: "D",
+                    code: KeyCode::Char('D'),
+                    label: "Delete permanently",
+                    tone: ConfirmTone::Danger,
+                },
+                ConfirmAction {
+                    key: "Esc",
+                    code: KeyCode::Esc,
+                    label: "Cancel",
+                    tone: ConfirmTone::Cancel,
+                },
+            ],
+        }
+    };
+    draw_confirm_popup(frame, area, t, popup);
 }

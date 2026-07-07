@@ -182,11 +182,14 @@ hand-roll a `Block` with a different border type: a new panel is rounded via
   query row + a windowed list (multi-line items + non-selectable section
   headers supported) with the `▶` + `selected_bg` selection + a scrollbar +
   a width-fitted `legend_line` footer. A new picker overlay **must** use it.
-- `widgets::draw_confirm_popup(frame, area, theme, title, body, confirmed)` +
-  `input::common::run_confirm` — **the** navigable y/n overlay (built on the
-  picker skeleton). `←/→` (or `Tab`/`h`/`l`) move between confirm/cancel,
-  `Enter` activates the highlighted one, `y`/`n`/`Esc` are shortcuts.
-  **Default highlight = cancel** for destructive actions.
+- `widgets::draw_confirm_popup(frame, area, theme, ConfirmPopup { .. })` —
+  **the** confirm overlay: a centered, rounded, error-bordered popup with the
+  caller's body copy above one key-labelled `ConfirmAction` row per action
+  (`Primary` accent · `Danger` error · `Cancel` dim), each row registered
+  clickable (the mouse twin of its key) and the modal rect recorded for
+  click-outside dismiss. Multi-action confirms (trash vs permanent delete)
+  are extra `ConfirmAction` rows, never a bespoke popup. A new confirm is a
+  `ConfirmPopup` value — never a new popup file.
 - `widgets::draw_input_popup(...)` — the small centered single-input popup
   (folder name, rename field, attachment path, new-conversation-style boxes).
 - `widgets::legend_line(&[(key, label)], width, theme)` — **the** hint/legend
@@ -249,7 +252,7 @@ hand-roll a `Block` with a different border type: a new panel is rounded via
   closes on `Esc` or a click outside through the shared synthetic-`Esc` dismiss.
 - `widgets::center_rect` / `MODAL_WIDTH_PCT` / `MODAL_HEIGHT` — the standard
   centered-modal geometry every list/picker/settings overlay imitates so they
-  line up; `help_line`, `unread`/`favorite_star` emphasis, `key_style`,
+  line up; `help_line`, the `favorite_star` emphasis, `key_style`,
   `Theme::emphasis()` / `Theme::danger_title()` — one definition each.
 - Field cards (detail / edit / create) → `widgets::field_areas` /
   `field_areas_windowed` + `render_field_card`: a label row + a 3-row bordered
@@ -267,9 +270,9 @@ Popups are centered and **always drawn over their base screen** by
 `view::mod::draw`.
 
 - **Confirmations** (`ConfirmDelete`, `ConfirmLogout`, `ConfirmDeleteFolder`,
-  `ConfirmDeleteAttachment`) render through `draw_confirm_popup` /
-  `run_confirm` — one confirm look in the whole app, default = cancel, worded
-  so the consequence is clear. In a trash context the permanent-delete path is
+  `ConfirmDeleteAttachment`) render through `draw_confirm_popup` — one
+  confirm look in the whole app, `Esc` always the way out, worded so the
+  consequence is clear. In a trash context the permanent-delete path is
   an explicit second confirm/shortcut; the destructive item op stays a bare
   key (`x` / `Alt+D`) *because* it always passes through this confirm.
 - **Form popups** (Export, Import, SendCreate, FolderName, RenameField,
@@ -501,10 +504,8 @@ The code has not caught up with this document yet on:
 
 - **Missing shared widgets** — `list_table` (lists/tables are still built
   inline per screen with `List`/`Table`), `draw_picker_modal` (the palette
-  draws its own modal), `draw_confirm_popup` (the confirm popups are
-  near-identical per-file copies: `confirm.rs`, `logout_confirm.rs`,
-  `folder_delete_confirm.rs`, `confirm_delete_attachment.rs`),
-  `draw_input_popup` (input popups are hand-built per file).
+  draws its own modal), `draw_input_popup` (input popups are hand-built per
+  file).
 - **The footer command bar** — `render_cmd_bar` still takes pre-built
   `full`/`short` hint strings; migrating the per-screen footers onto
   `legend_line`'s `(key, label)` pairs retires that duplication.
