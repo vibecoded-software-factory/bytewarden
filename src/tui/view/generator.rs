@@ -76,21 +76,27 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
 
     // ── Footer hints ──────────────────────────────────────────────────────
     let has_target = app.generator.return_target.is_some();
-    let (full, short) = footer_hints(has_target);
-    render_cmd_bar(frame, area, chunks[2], full, short, t.dim, t);
+    render_cmd_bar(frame, chunks[2], footer_hints(has_target), t);
 }
 
-fn footer_hints(has_target: bool) -> (&'static str, &'static str) {
+fn footer_hints(has_target: bool) -> &'static [(&'static str, &'static str)] {
     if has_target {
-        (
-            "Tab/↑↓ field · ←→/Space change · Enter regenerate · Alt+U use · Alt+C copy · Esc cancel",
-            "Tab:field  Enter:regen  Alt+U:use  Alt+C:copy  Esc:back",
-        )
+        &[
+            ("Tab/↑↓", "field"),
+            ("←→/Space", "change"),
+            ("Enter", "regenerate"),
+            ("Alt+U", "use"),
+            ("Alt+C", "copy"),
+            ("Esc", "cancel"),
+        ]
     } else {
-        (
-            "Tab/↑↓ field · ←→/Space change · Enter regenerate · Alt+C copy · Esc back",
-            "Tab:field  Enter:regen  Alt+C:copy  Esc:back",
-        )
+        &[
+            ("Tab/↑↓", "field"),
+            ("←→/Space", "change"),
+            ("Enter", "regenerate"),
+            ("Alt+C", "copy"),
+            ("Esc", "back"),
+        ]
     }
 }
 

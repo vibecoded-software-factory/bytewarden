@@ -45,8 +45,8 @@ shared command log and hint bar.
 - **Right main** (~74 %): `─[/]-Search` (3 rows) · `─[3]-Vault` list (fills) ·
   the `─[4]-Command log`.
 - **Bottom**: the command log (responsive height) and the **per-focus hint
-  bar** (`widgets::render_cmd_bar_with_help`: short hints on the left,
-  **`F1 help` anchored right and never truncated**).
+  bar** (`widgets::render_cmd_bar_with_help`: `(key, label)` hints on the
+  left via `legend_line`, **`F1 help` anchored right and never truncated**).
 
 **Feedback lifetime.** Success toasts (`✓`) auto-clear after ~1.5 s; **error
 toasts are sticky** — they persist until the next keypress clears them
@@ -172,10 +172,12 @@ hand-roll a `Block` with a different border type: a new panel is rounded via
 - `widgets::editor_spans` / `editor_spans_masked` / `editor_lines` — the one
   text-input renderer over a `LineEditor` (masked `●` for secret fields —
   the login master password / OTP, detail hidden fields until reveal).
-- `widgets::render_cmd_bar_with_help` — the bottom per-focus hint bar (hints
-  left, `F1 help` anchored right); popups use the plain `render_cmd_bar`. The
-  command log + `─[0]-Status` feedback panel are rendered inline in
-  `view/vault.rs` (`render_cmd_log` / `render_status`).
+- `widgets::render_cmd_bar_with_help(frame, bar, &[(key, label)], theme)` —
+  the bottom per-focus hint bar: `(key, label)` pairs through `legend_line`
+  on the left, `F1 help · F10 settings` anchored right (clickable, never
+  truncated); popups use the plain `render_cmd_bar`. The command log +
+  `─[0]-Status` feedback panel are rendered inline in `view/vault.rs`
+  (`render_cmd_log` / `render_status`).
 - `widgets::draw_picker_modal(frame, theme, PickerModal { .. })` — **the**
   centered query/list overlay skeleton every picker renders through: `Clear`
   + rounded accent block + emphasized title (with its live count) + optional
@@ -507,9 +509,6 @@ identity comes from the bordered `─[N]-Name` block titles.
 
 The code has not caught up with this document yet on:
 
-- **The footer command bar** — `render_cmd_bar` still takes pre-built
-  `full`/`short` hint strings; migrating the per-screen footers onto
-  `legend_line`'s `(key, label)` pairs retires that duplication.
 - **Edit-field cards aren't `LineEditor`s yet** — `EditField`
   (`tui/edit_field.rs`) tracks its own string + char cursor, so the
   detail/create cards render through the raw `cursor_line` core instead of

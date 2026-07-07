@@ -765,72 +765,40 @@ pub fn titled_block(title: &str, bottom: &str, focused: bool, t: &Theme) -> Bloc
         .border_style(Style::default().fg(col))
 }
 
-/// Renders the bottom command-bar with graceful truncation.
-///
-/// `full` is shown when there is enough horizontal space, otherwise the
-/// `short` form is used; if `short` itself is too long it is truncated.
+/// Renders the bottom command-bar: `(key, label)` hint pairs on the
+/// left through [`legend_line`] (keys accent via [`key_style`], labels
+/// dim, fitted by whole segments — never a clipped key).
 ///
 /// This variant is used by popups (which have their own self-contained
 /// instructions and no F1-help affordance).
-pub fn render_cmd_bar(
-    frame: &mut Frame,
-    area: Rect,
-    bar: Rect,
-    full: &str,
-    short: &str,
-    col: Color,
-    t: &Theme,
-) {
-    render_cmd_bar_inner(frame, area, bar, full, short, col, t, None);
+pub fn render_cmd_bar(frame: &mut Frame, bar: Rect, hints: &[(&str, &str)], t: &Theme) {
+    render_cmd_bar_inner(frame, bar, hints, t, None);
 }
 
-/// Like [`render_cmd_bar`] but anchors `F1: help` at the right edge of
-/// the bar. The anchor survives any truncation: if neither the long
-/// nor the short hint string fits alongside the anchor, the hints are
-/// dropped entirely so the user always sees they can press F1.
+/// Like [`render_cmd_bar`] but anchors `F1 help · F10 settings` at the
+/// right edge of the bar. The anchor survives any truncation: hint
+/// segments are dropped whole before the anchor loses a cell, so the
+/// user can always discover the help / settings shortcuts.
 ///
 /// Use this for the main screens (Login, Vault, Detail, Create) where
 /// F1 is a meaningful global shortcut.
-pub fn render_cmd_bar_with_help(
-    frame: &mut Frame,
-    area: Rect,
-    bar: Rect,
-    full: &str,
-    short: &str,
-    col: Color,
-    t: &Theme,
-) {
-    render_cmd_bar_inner(
-        frame,
-        area,
-        bar,
-        full,
-        short,
-        col,
-        t,
-        Some("F1 help · F10 settings"),
-    );
+pub fn render_cmd_bar_with_help(frame: &mut Frame, bar: Rect, hints: &[(&str, &str)], t: &Theme) {
+    render_cmd_bar_inner(frame, bar, hints, t, Some("F1 help · F10 settings"));
 }
 
-/// Internal — picks the longest hint string that fits next to the
-/// optional always-visible `anchor`, then renders the bar.
-#[allow(clippy::too_many_arguments)]
+/// Internal — fits the hint legend next to the optional always-visible
+/// `anchor`, then renders the bar.
 fn render_cmd_bar_inner(
     frame: &mut Frame,
-    area: Rect,
     bar: Rect,
-    full: &str,
-    short: &str,
-    col: Color,
+    hints: &[(&str, &str)],
     t: &Theme,
     anchor: Option<&str>,
 ) {
-    let _ = area; // budget is computed from the footer rect itself
-    // A borderless bottom strip: a dim hint on the left and an
+    // A borderless bottom strip: the hint legend on the left and an
     // accent-bold affordance anchored to the right edge — no top rule
-    // above it. The anchor always wins the space contest so the user can
-    // always discover the help / settings shortcuts; the hint degrades
-    // full → short → truncated to fit whatever is left.
+    // above it. The anchor always wins the space contest; the legend
+    // fits by whole segments into whatever is left.
     let inner = bar;
     let suffix = anchor.unwrap_or("");
     let total = inner.width as usize;
@@ -842,26 +810,10 @@ fn render_cmd_bar_inner(
     };
     let hints_avail = total.saturating_sub(suffix_block + 1);
 
-    let hints: &str = if full.chars().count() <= hints_avail {
-        full
-    } else if short.chars().count() <= hints_avail {
-        short
-    } else if hints_avail == 0 {
-        ""
-    } else {
-        // Truncate `short` on a char boundary to avoid breaking UTF-8.
-        let mut idx = hints_avail.min(short.len());
-        while !short.is_char_boundary(idx) && idx > 0 {
-            idx -= 1;
-        }
-        &short[..idx]
-    };
-
-    if !hints.is_empty() {
-        frame.render_widget(
-            Paragraph::new(format!(" {hints}")).style(Style::default().fg(col)),
-            inner,
-        );
+    if hints_avail > 0 && !hints.is_empty() {
+        let mut line = legend_line(hints, hints_avail as u16, t);
+        line.spans.insert(0, Span::raw(" "));
+        frame.render_widget(Paragraph::new(line), inner);
     }
     if !suffix.is_empty() {
         frame.render_widget(

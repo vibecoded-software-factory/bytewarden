@@ -112,20 +112,26 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         // structural shortcuts (Alt+N add field, Alt+R rename, Alt+T
         // type cycle, Alt+U add URL, Alt+Del remove, F2 reveal) are
         // documented in F1.
-        let full = "Tab/↑↓ field · ←→ cursor · Enter save · Esc cancel";
-        let short = "Tab  Enter  Esc";
-        render_cmd_bar_with_help(frame, area, chunks[2], full, short, t.dim, t);
+        let hints: &[(&str, &str)] = &[
+            ("Tab/↑↓", "field"),
+            ("←→", "cursor"),
+            ("Enter", "save"),
+            ("Esc", "cancel"),
+        ];
+        render_cmd_bar_with_help(frame, chunks[2], hints, t);
     } else {
         render_read_only(frame, app, &item, chunks[1]);
-        let (full, short) = if app.vault.is_trash_view() {
-            ("j/k field · Esc back · Alt+R restore", "j/k  Esc  Alt+R")
+        let hints: &[(&str, &str)] = if app.vault.is_trash_view() {
+            &[("j/k", "field"), ("Esc", "back"), ("Alt+R", "restore")]
         } else {
-            (
-                "j/k field · Esc back · Alt+C copy · Alt+E edit",
-                "j/k  Esc  Alt+C  Alt+E",
-            )
+            &[
+                ("j/k", "field"),
+                ("Esc", "back"),
+                ("Alt+C", "copy"),
+                ("Alt+E", "edit"),
+            ]
         };
-        render_cmd_bar_with_help(frame, area, chunks[2], full, short, t.dim, t);
+        render_cmd_bar_with_help(frame, chunks[2], hints, t);
     }
 }
 
