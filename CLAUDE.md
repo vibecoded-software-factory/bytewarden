@@ -244,8 +244,9 @@ overlay / hint / empty-state / input **must** use these, never a one-off):
 - `list_table` — every multi-column list panel (never a stretching `Min` on a
   non-final column). `draw_picker_modal` — every centered query/list overlay.
   `draw_input_popup` — small single-input popups.
-- `draw_confirm_popup` + `input::common::run_confirm` — every y/n confirm
-  (navigable, **default = cancel** on destructive).
+- `draw_confirm_popup(frame, area, theme, ConfirmPopup { .. })` — every
+  confirm: body copy + key-labelled `ConfirmAction` rows (Primary / Danger /
+  Cancel tones), each clickable; a new confirm is a value, never a popup file.
 - `legend_line(&[(key, label)], width, theme)` — every hint/legend (keys in
   accent via `key_style`, fitted by whole segments, never a clipped key).
 - `editor_spans` / `editor_spans_masked` — the one
@@ -253,7 +254,7 @@ overlay / hint / empty-state / input **must** use these, never a one-off):
 - `empty_state_lines(head, hints, theme)` — every empty state **teaches**
   (names the 2-3 keys that would fill the panel); a bare dim line is not
   acceptable. `draw_scrollbar` — one scrollbar on every overflowing region.
-- `unread`/attention emphasis, `favorite_star`, `key_style`, `center_rect`,
+- `favorite_star` (the one attention emphasis), `key_style`, `center_rect`,
   `MODAL_*` — one definition each; `Theme::emphasis()` / `Theme::danger_title()`
   are the semantic styles.
 

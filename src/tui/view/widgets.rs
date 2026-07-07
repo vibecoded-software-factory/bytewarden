@@ -6,7 +6,8 @@ use ratatui::{
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{
-        Block, BorderType, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState,
+        Block, BorderType, Borders, Clear, Paragraph, Scrollbar, ScrollbarOrientation,
+        ScrollbarState,
     },
 };
 
@@ -329,6 +330,80 @@ pub fn empty_state_lines(head: &str, hints: &[&str], t: &Theme) -> Vec<Line<'sta
 /// everywhere.
 pub fn favorite_star(t: &Theme) -> Span<'static> {
     Span::styled("★ ", Style::default().fg(t.item_favorite))
+}
+
+/// The visual weight of a [`ConfirmAction`] row.
+pub enum ConfirmTone {
+    /// A recoverable primary action — accent key, foreground label.
+    Primary,
+    /// A destructive action — error key + label.
+    Danger,
+    /// The way out — dim key + label.
+    Cancel,
+}
+
+/// One key-driven action row of a confirm popup. `code` is the mouse
+/// twin: clicking the row synthesizes that key through the popup's own
+/// handler.
+pub struct ConfirmAction {
+    pub key: &'static str,
+    pub code: crossterm::event::KeyCode,
+    pub label: &'static str,
+    pub tone: ConfirmTone,
+}
+
+/// Content of the shared confirm popup: a title, body lines (blank
+/// separators included by the caller where the copy needs them) and the
+/// action rows.
+pub struct ConfirmPopup<'a> {
+    pub title: &'a str,
+    pub width_pct: u16,
+    pub body: Vec<Line<'static>>,
+    pub actions: Vec<ConfirmAction>,
+}
+
+/// **The** confirm-popup renderer: a centered, rounded, error-bordered
+/// overlay — body copy on top, one key-labelled action row per
+/// [`ConfirmAction`] beneath (each registered clickable via
+/// [`register_action_row`]), and the modal rect recorded for
+/// click-outside-to-dismiss. Every y/n-style confirmation draws through
+/// this; a new confirm is a [`ConfirmPopup`] value, never a bespoke
+/// popup file.
+pub fn draw_confirm_popup(frame: &mut Frame, area: Rect, t: &Theme, p: ConfirmPopup) {
+    let height = (p.body.len() + p.actions.len() + 5) as u16;
+    let popup = center_rect(p.width_pct, height, area);
+    register_modal(popup);
+    frame.render_widget(Clear, popup);
+
+    let mut lines = vec![Line::from("")];
+    lines.extend(p.body);
+    lines.push(Line::from(""));
+    let base_idx = lines.len() as u16;
+    for (i, a) in p.actions.iter().enumerate() {
+        let (kstyle, lstyle) = match a.tone {
+            ConfirmTone::Primary => (
+                Style::default().fg(t.accent).add_modifier(Modifier::BOLD),
+                Style::default().fg(t.foreground),
+            ),
+            ConfirmTone::Danger => (
+                Style::default().fg(t.error).add_modifier(Modifier::BOLD),
+                Style::default().fg(t.error),
+            ),
+            ConfirmTone::Cancel => (Style::default().fg(t.dim), Style::default().fg(t.dim)),
+        };
+        lines.push(Line::from(vec![
+            Span::styled(format!("  {:<5}", a.key), kstyle),
+            Span::styled(format!("  {}", a.label), lstyle),
+        ]));
+        register_action_row(popup, base_idx + i as u16, a.code);
+    }
+    lines.push(Line::from(""));
+
+    frame.render_widget(
+        Paragraph::new(lines)
+            .block(rounded_block(Style::default().fg(t.error)).title(p.title.to_string())),
+        popup,
+    );
 }
 
 /// Rounded-border [`Block`] with the supplied border style.
