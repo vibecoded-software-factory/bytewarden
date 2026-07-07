@@ -851,8 +851,7 @@ fn render_cmd_bar_inner(
 /// reverse-video block cursor on the character at `cursor` (a character
 /// index, not a byte offset) when `focused`; at end-of-text the cursor
 /// is a reversed space. Prefer [`editor_spans`] — this exists for the
-/// few inputs whose display string diverges from the editor content
-/// (the masked edit-field cards).
+/// one input not backed by a `LineEditor` (the vault search query).
 pub fn cursor_spans(text: &str, cursor: usize, focused: bool, t: &Theme) -> Vec<Span<'static>> {
     let base = Style::default().fg(t.foreground);
     if !focused {
@@ -872,13 +871,6 @@ pub fn cursor_spans(text: &str, cursor: usize, focused: bool, t: &Theme) -> Vec<
         Span::styled(under, cursor_style),
         Span::styled(after, base),
     ]
-}
-
-/// Like [`cursor_spans`] but always renders the cursor, as a `Line` —
-/// the edit-field-card renderer (those fields track their own display
-/// string + char cursor).
-pub fn cursor_line(display: &str, cursor: usize, t: &Theme) -> Line<'static> {
-    Line::from(cursor_spans(display, cursor, true, t))
 }
 
 /// Renders a [`LineEditor`]'s content as spans, drawing a reverse-video

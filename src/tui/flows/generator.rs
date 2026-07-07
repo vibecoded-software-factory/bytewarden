@@ -108,23 +108,21 @@ pub fn use_result(app: &mut App) {
         ));
         return;
     };
-    // `app.generator.result` is already a `Zeroizing<String>`, and
-    // `field.value` is too — clone the wrapper directly so the buffer
-    // stays scrubbed end-to-end.
+    // `app.generator.result` is a `Zeroizing<String>` and the field's
+    // `LineEditor` scrubs its previous buffer on `set`, so the value
+    // stays protected end-to-end.
     let value = app.generator.result.clone();
     match target {
         ReturnTarget::EditField(idx) => {
             if let Some(field) = app.edit.fields.get_mut(idx) {
-                field.value = value;
-                field.cursor = field.value.chars().count();
+                field.editor.set(value.as_str());
             }
             app.screen = Screen::Detail;
             app.edit.active = true;
         }
         ReturnTarget::CreateField(idx) => {
             if let Some(field) = app.create.fields.get_mut(idx) {
-                field.value = value;
-                field.cursor = field.value.chars().count();
+                field.editor.set(value.as_str());
             }
             app.screen = Screen::Create;
         }

@@ -332,7 +332,10 @@ Every text input is a `domain::LineEditor` (UTF-8-safe char-index cursor;
 readline word ops `Ctrl+W`/`Ctrl+U`/`Ctrl+←/→`/`Ctrl+A`/`Ctrl+E`
 wired once in `route_line_editor` so every input inherits them; `ZeroizeOnDrop`
 because any input can hold a secret). Detail / edit / create render one
-`EditField` per field card. Conventions: `Tab`/`↑↓` move between fields, reveal
+`EditField` per field card — each a labelled `LineEditor` plus its
+masking/kind metadata, routed through `route_line_editor` like every other
+input (so word ops work in form fields too). Conventions: `Tab`/`↑↓` move
+between fields, reveal
 a hidden field (with the reprompt gate on protected items), generate a password
 into the focused field, custom fields cycle type and rename via the input
 popup, URL rows add a slot. Empty inputs show a dim placeholder
@@ -507,13 +510,6 @@ identity comes from the bordered `─[N]-Name` block titles.
 
 ## Gaps vs this spec (known distance, shrink it — never grow it)
 
-The code has not caught up with this document yet on:
-
-- **Edit-field cards aren't `LineEditor`s yet** — `EditField`
-  (`tui/edit_field.rs`) tracks its own string + char cursor, so the
-  detail/create cards render through the raw `cursor_line` core instead of
-  `editor_spans`. Migrating `EditField` onto `domain::LineEditor` retires
-  that seam.
-
-When you touch an area listed here, close its gap in the same change (or a
-dedicated PR) and delete its bullet.
+**None right now.** When code is knowingly left short of this spec, add a
+bullet here naming the distance; whoever touches that area closes the gap in
+the same change (or a dedicated PR) and deletes the bullet.

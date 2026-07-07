@@ -17,7 +17,8 @@ use crate::tui::app::App;
 use crate::tui::detail_fields::build_detail_fields;
 use crate::tui::view::action::action_text_style;
 use crate::tui::view::widgets::{
-    cursor_line, field_areas_windowed, render_cmd_bar_with_help, render_field_card,
+    editor_spans, editor_spans_masked, field_areas_windowed, render_cmd_bar_with_help,
+    render_field_card,
 };
 
 thread_local! {
@@ -197,14 +198,18 @@ fn render_edit_form(frame: &mut Frame, app: &App, area: Rect) {
             ""
         };
         let combined_hint = format!("{custom_tag}{action_hint}");
-        let display = if field.hidden && !field.revealed {
-            "●".repeat(field.value.chars().count().max(8))
-        } else {
-            field.value.to_string()
-        };
         let vline = if sel && !field.read_only {
-            cursor_line(&display, field.cursor, t)
+            if field.hidden && !field.revealed {
+                Line::from(editor_spans_masked(&field.editor, true, t))
+            } else {
+                Line::from(editor_spans(&field.editor, true, t))
+            }
         } else {
+            let display = if field.hidden && !field.revealed {
+                "●".repeat(field.editor.len_chars().max(8))
+            } else {
+                field.value().to_string()
+            };
             Line::from(Span::styled(display, Style::default().fg(t.inactive)))
         };
         render_field_card(frame, &field.label, &combined_hint, vline, bcol, *area, t);

@@ -20,7 +20,7 @@ fn get<'a>(fields: &'a [EditField], label: &str) -> &'a str {
     fields
         .iter()
         .find(|f| f.label == label)
-        .map(|f| f.value.as_str())
+        .map(|f| f.value())
         .unwrap_or("")
 }
 
@@ -51,8 +51,8 @@ fn build_uris_array(fields: &[EditField]) -> Vec<Value> {
         if let EditFieldKind::Uri { index, role } = f.kind {
             let slot = by_slot.entry(index).or_insert((None, None));
             match role {
-                UriRole::Url => slot.0 = Some(f.value.as_str()),
-                UriRole::Match => slot.1 = Some(f.value.as_str()),
+                UriRole::Url => slot.0 = Some(f.value()),
+                UriRole::Match => slot.1 = Some(f.value()),
             }
         }
     }
@@ -166,12 +166,7 @@ pub fn patch_edit_payload(base_json: &str, fields: &[EditField]) -> String {
     let Ok(mut val) = serde_json::from_str::<Value>(base_json) else {
         return base_json.to_string();
     };
-    let lookup = |label: &str| {
-        fields
-            .iter()
-            .find(|f| f.label == label)
-            .map(|f| f.value.as_str())
-    };
+    let lookup = |label: &str| fields.iter().find(|f| f.label == label).map(|f| f.value());
 
     if let Some(v) = lookup("Name") {
         val["name"] = json!(v);
@@ -299,7 +294,7 @@ pub fn patch_edit_payload(base_json: &str, fields: &[EditField]) -> String {
                 // `value` lives in a `Zeroizing<String>` wrapper that
                 // doesn't implement `Serialize`; serialise the inner
                 // `&str` instead.
-                "value":    f.value.as_str(),
+                "value":    f.value(),
                 "type":     f.custom_type().unwrap_or(0),
                 "linkedId": Value::Null,
             })
@@ -359,8 +354,8 @@ mod tests {
         let json = build_create_payload(&CreateItemType::SshKey, &fields);
         let parsed: Value = serde_json::from_str(&json).expect("must parse");
         assert_eq!(parsed["type"], 5);
-        assert_eq!(parsed["sshKey"]["privateKey"], fields[1].value.as_str());
-        assert_eq!(parsed["sshKey"]["publicKey"], fields[2].value.as_str());
+        assert_eq!(parsed["sshKey"]["privateKey"], fields[1].value());
+        assert_eq!(parsed["sshKey"]["publicKey"], fields[2].value());
         // bw computes the fingerprint server-side — we never send it.
         assert!(parsed["sshKey"].get("keyFingerprint").is_none());
     }
