@@ -411,8 +411,12 @@ rows must **not** be `dim`. When in doubt, one tier brighter.
 `inactive`/`dim` are lifted out of the dark band toward text (blends, not the
 border tint), the starfield tiers fade from accent, and the item-type colors
 map to distinct hues (`item_note` stays teal so it never reads as the green
-`success`). Multiple presets ship (`Preset::ALL`, dark→light order; `Nord` is
-`Preset::DEFAULT`); `name = "<preset>"` in `[theme]` picks the base and
+`success`). **17 presets ship** (`Preset::ALL`, dark→light order; `nord` is
+`Preset::DEFAULT`): the full Catppuccin family
+(`-mocha`/`-frappe`/`-macchiato`/`-latte`), `dracula`, `nord`, `tokyonight`
+(+ `-storm`), `gruvbox-dark`, `rose-pine` (+ `-dawn`), `everforest`,
+`kanagawa`, `one-dark`, `solarized-dark`/`-light`, `monokai-pro`.
+`name = "<preset>"` in `[theme]` picks the base and
 per-key hex entries override it. The Settings picker (`F10`) applies live.
 Adding a preset = one `Palette` arm in `Preset::palette`.
 
@@ -490,3 +494,26 @@ identity comes from the bordered `─[N]-Name` block titles.
    to diverge, update the spec here first and apply it everywhere.
 4. **No decorative noise on working screens** — the figlet + starfield belong
    to splash/login only. Screen identity comes from the bordered block titles.
+
+## Gaps vs this spec (known distance, shrink it — never grow it)
+
+The code has not caught up with this document yet on:
+
+- **Missing shared widgets** — `list_table` (lists/tables are still built
+  inline per screen with `List`/`Table`), `draw_picker_modal` (the palette
+  draws its own modal), `draw_confirm_popup` (the confirm popups are
+  near-identical per-file copies: `confirm.rs`, `logout_confirm.rs`,
+  `folder_delete_confirm.rs`, `confirm_delete_attachment.rs`),
+  `draw_input_popup` (input popups are hand-built per file), `legend_line` /
+  `fit_segments` (footer hints are assembled inline), `empty_state_lines`,
+  `favorite_star` / the unread-style emphasis helpers.
+- **The text-input renderer** — the spec's `editor_spans` /
+  `editor_spans_masked` / `editor_lines` don't exist yet; the code uses
+  `editor_line` / `cursor_line` / `input_with_cursor` and masks secrets by
+  hand with `"●".repeat(n)` in `login.rs` / `reprompt.rs` / `detail.rs`.
+  Consolidate on the spec names.
+- **Theme presets** — 14 ship today; `tokyonight-storm`, `kanagawa` and
+  `monokai-pro` are missing from the 17 in the spec.
+
+When you touch an area listed here, close its gap in the same change (or a
+dedicated PR) and delete its bullet.
