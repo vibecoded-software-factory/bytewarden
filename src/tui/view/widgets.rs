@@ -40,6 +40,13 @@ thread_local! {
     /// [`reset_scroll_regions`].
     static FIELD_HITS: std::cell::RefCell<Vec<(Rect, usize)>> =
         const { std::cell::RefCell::new(Vec::new()) };
+
+    /// Frame-local hit map of the last-drawn picker modal: the list rect +
+    /// one `Option<item index>` per visible display line (None = a header /
+    /// continuation gap). Written by [`draw_picker_modal`], read by
+    /// [`picker_row_at`]; cleared each frame by [`reset_scroll_regions`].
+    static PICKER_HITS: std::cell::RefCell<(Rect, Vec<Option<usize>>)> =
+        const { std::cell::RefCell::new((Rect::ZERO, Vec::new())) };
 }
 
 /// Registers row `line_idx` of a bordered centered popup (`Borders::ALL`,
@@ -130,6 +137,7 @@ pub fn reset_scroll_regions() {
     MODAL_RECT.with(|m| *m.borrow_mut() = None);
     BUTTONS.with(|b| b.borrow_mut().clear());
     FIELD_HITS.with(|h| h.borrow_mut().clear());
+    PICKER_HITS.with(|h| *h.borrow_mut() = (Rect::ZERO, Vec::new()));
 }
 
 /// Records a clickable button for this frame (rect + the action it triggers).
@@ -494,6 +502,170 @@ pub fn draw_input_popup(frame: &mut Frame, area: Rect, t: &Theme, p: InputPopup)
             );
         }
     }
+}
+
+/// Standard centered-modal width (percent of the terminal) — every
+/// query/list overlay uses [`center_rect`]`(MODAL_WIDTH_PCT,
+/// MODAL_HEIGHT, …)` so the modals line up.
+pub const MODAL_WIDTH_PCT: u16 = 60;
+/// Standard centered-modal height (rows).
+pub const MODAL_HEIGHT: u16 = 20;
+
+/// A row of [`draw_picker_modal`]'s list: a selectable **item** (possibly
+/// multi-line) or a fixed, non-selectable section **header**.
+pub enum PickerRow {
+    Item(Vec<Line<'static>>),
+    Header(Line<'static>),
+}
+
+/// Parameters for [`draw_picker_modal`] — the **one** implementation of
+/// the centered picker skeleton (query + windowed list + selection +
+/// legend). Callers style their content spans; the widget owns geometry,
+/// cursor, shading, windowing and the footer grammar.
+pub struct PickerModal<'a> {
+    /// Block title (rendered in [`Theme::emphasis`]).
+    pub title: String,
+    /// Query editor + its placeholder; `None` = browse-only modal.
+    pub query: Option<(&'a crate::domain::LineEditor, &'a str)>,
+    pub rows: Vec<PickerRow>,
+    /// Index among the **Item** rows (headers aren't selectable).
+    pub selected: usize,
+    /// Body when `rows` is empty ([`empty_state_lines`] output).
+    pub empty: Vec<Line<'static>>,
+    /// Bottom legend, rendered through [`legend_line`].
+    pub legend: &'a [(&'a str, &'a str)],
+    /// What the wheel scrolls when the pointer is over this picker.
+    /// Registered by the skeleton itself, so every picker is
+    /// wheel-scrollable for free.
+    pub scroll_target: Option<ScrollTarget>,
+}
+
+/// Inner content width of the standard picker modal — for callers that
+/// right-align within their rows (the palette's keybinding column).
+pub fn modal_inner_width(frame: &Frame) -> usize {
+    center_rect(MODAL_WIDTH_PCT, MODAL_HEIGHT, frame.area())
+        .width
+        .saturating_sub(4) as usize // borders + the `▶ ` gutter
+}
+
+/// The selectable item under `(column, row)` in the last-drawn picker
+/// modal, if any.
+pub fn picker_row_at(column: u16, row: u16) -> Option<usize> {
+    PICKER_HITS.with(|h| {
+        let (rect, ref map) = *h.borrow();
+        if rect.width == 0
+            || column < rect.x
+            || column >= rect.x + rect.width
+            || row < rect.y
+            || row >= rect.y + rect.height
+        {
+            return None;
+        }
+        map.get((row - rect.y) as usize).copied().flatten()
+    })
+}
+
+/// Draws **the** standard centered picker modal: `Clear`, rounded accent
+/// block, emphasized title (carrying its live count), optional `󰍉` query
+/// row (+ spacer), a **windowed** list that keeps the whole selected item
+/// visible with the shared `▶` + `selected_bg` selection treatment, a
+/// [`draw_scrollbar`] cue on overflow, and a width-fitted [`legend_line`]
+/// footer. Every centered query/list overlay renders through this — a new
+/// picker is a [`PickerModal`] value, never a bespoke modal.
+pub fn draw_picker_modal(frame: &mut Frame, t: &Theme, m: PickerModal<'_>) {
+    let area = center_rect(MODAL_WIDTH_PCT, MODAL_HEIGHT, frame.area());
+    register_modal(area); // click outside dismisses it
+    frame.render_widget(Clear, area);
+
+    let block =
+        rounded_block(Style::default().fg(t.accent)).title(Span::styled(m.title, t.emphasis()));
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    if let Some(target) = m.scroll_target {
+        register_scroll(area, target);
+    }
+    let has_query = m.query.is_some();
+    let chunks = Layout::vertical([
+        Constraint::Length(if has_query { 1 } else { 0 }), // query
+        Constraint::Length(if has_query { 1 } else { 0 }), // spacer
+        Constraint::Min(1),                                // list
+        Constraint::Length(1),                             // legend
+    ])
+    .split(inner);
+
+    if let Some((editor, placeholder)) = m.query {
+        let mut spans = vec![Span::styled("󰍉 ", Style::default().fg(t.dim))];
+        if editor.is_empty() {
+            spans.push(Span::styled(
+                placeholder.to_string(),
+                Style::default().fg(t.placeholder),
+            ));
+        } else {
+            spans.extend(editor_spans(editor, true, t));
+        }
+        frame.render_widget(Paragraph::new(Line::from(spans)), chunks[0]);
+    }
+
+    let vh = chunks[2].height.max(1) as usize;
+    if m.rows.is_empty() {
+        frame.render_widget(Paragraph::new(m.empty), chunks[2]);
+        PICKER_HITS.with(|h| *h.borrow_mut() = (chunks[2], Vec::new()));
+    } else {
+        let mut display: Vec<Line<'static>> = Vec::new();
+        // Parallel to `display`: which selectable item each line belongs to.
+        let mut line_items: Vec<Option<usize>> = Vec::new();
+        let (mut sel_start, mut sel_len) = (0usize, 1usize);
+        let mut item_i = 0usize;
+        let mut item_count = 0usize;
+        for row in m.rows {
+            match row {
+                PickerRow::Header(l) => {
+                    display.push(l);
+                    line_items.push(None);
+                }
+                PickerRow::Item(ls) => {
+                    let selected = item_i == m.selected;
+                    if selected {
+                        sel_start = display.len();
+                        sel_len = ls.len().max(1);
+                    }
+                    for (li, l) in ls.into_iter().enumerate() {
+                        let prefix = if li == 0 && selected { "▶ " } else { "  " };
+                        let mut spans = vec![Span::styled(prefix.to_string(), t.emphasis())];
+                        spans.extend(l.spans);
+                        let mut l = Line::from(spans);
+                        if selected {
+                            for s in l.spans.iter_mut() {
+                                s.style = s.style.bg(t.selected_bg).add_modifier(Modifier::BOLD);
+                            }
+                        }
+                        display.push(l);
+                        line_items.push(Some(item_i));
+                    }
+                    item_i += 1;
+                    item_count += 1;
+                }
+            }
+        }
+        // Keep every line of the selected item inside the viewport.
+        let sel_end = sel_start + sel_len;
+        let scroll = sel_end.saturating_sub(vh);
+        let total_lines = display.len();
+        let visible: Vec<Line<'static>> = display.into_iter().skip(scroll).take(vh).collect();
+        let visible_items: Vec<Option<usize>> =
+            line_items.into_iter().skip(scroll).take(vh).collect();
+        frame.render_widget(Paragraph::new(visible), chunks[2]);
+        PICKER_HITS.with(|h| *h.borrow_mut() = (chunks[2], visible_items));
+        if total_lines > vh {
+            draw_scrollbar(frame, chunks[2], item_count, m.selected, t);
+        }
+    }
+
+    frame.render_widget(
+        Paragraph::new(legend_line(m.legend, chunks[3].width, t)),
+        chunks[3],
+    );
 }
 
 /// Rounded-border [`Block`] with the supplied border style.
