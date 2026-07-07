@@ -406,6 +406,96 @@ pub fn draw_confirm_popup(frame: &mut Frame, area: Rect, t: &Theme, p: ConfirmPo
     );
 }
 
+/// The footer row of an [`InputPopup`].
+pub enum InputFooter<'a> {
+    /// A key legend, rendered through [`legend_line`].
+    Legend(&'a [(&'a str, &'a str)]),
+    /// A dim italic explanatory note.
+    Note(&'a str),
+}
+
+/// Content of the shared single-input popup: optional context lines, a
+/// dim label row (label + parenthesised hint), the one `LineEditor` in
+/// its rounded box, and a footer.
+pub struct InputPopup<'a> {
+    pub title: &'a str,
+    pub width_pct: u16,
+    /// Context lines above the label (e.g. ` Item: <name>`).
+    pub context: Vec<Line<'static>>,
+    pub label: &'a str,
+    pub label_hint: &'a str,
+    pub editor: &'a crate::domain::LineEditor,
+    pub placeholder: &'a str,
+    pub footer: InputFooter<'a>,
+}
+
+/// **The** small centered single-input popup (folder name, rename
+/// field, attachment paths, …): centering, `Clear`, the modal-rect
+/// registration and the padding / label / input-box / footer layout are
+/// decided once here. A new single-input popup is an [`InputPopup`]
+/// value, never a bespoke popup file.
+pub fn draw_input_popup(frame: &mut Frame, area: Rect, t: &Theme, p: InputPopup) {
+    let height = (p.context.len() + 9) as u16;
+    let popup = center_rect(p.width_pct, height, area);
+    register_modal(popup);
+    frame.render_widget(Clear, popup);
+
+    let outer = rounded_block(Style::default().fg(t.accent)).title(p.title.to_string());
+    let inner = outer.inner(popup);
+    frame.render_widget(outer, popup);
+
+    let mut constraints = vec![Constraint::Length(1)]; // top padding
+    constraints.extend(std::iter::repeat_n(Constraint::Length(1), p.context.len()));
+    constraints.extend([
+        Constraint::Length(1), // label row
+        Constraint::Length(3), // input box
+        Constraint::Length(1), // footer
+    ]);
+    let chunks = Layout::vertical(constraints).split(inner);
+
+    for (i, line) in p.context.into_iter().enumerate() {
+        frame.render_widget(Paragraph::new(line), chunks[1 + i]);
+    }
+    let label_row = chunks[chunks.len() - 3];
+    let input_row = chunks[chunks.len() - 2];
+    let footer_row = chunks[chunks.len() - 1];
+
+    let mut label_spans = vec![Span::styled(
+        format!(" {}", p.label),
+        Style::default().fg(t.dim),
+    )];
+    if !p.label_hint.is_empty() {
+        label_spans.push(Span::styled(
+            format!("  ({})", p.label_hint),
+            Style::default().fg(t.dim),
+        ));
+    }
+    frame.render_widget(Paragraph::new(Line::from(label_spans)), label_row);
+
+    frame.render_widget(
+        Paragraph::new(editor_line_hinted(p.editor, p.placeholder, t))
+            .block(rounded_block(Style::default().fg(t.accent))),
+        input_row,
+    );
+
+    match p.footer {
+        InputFooter::Legend(items) => {
+            let mut line = legend_line(items, footer_row.width.saturating_sub(1), t);
+            line.spans.insert(0, Span::raw(" "));
+            frame.render_widget(Paragraph::new(line), footer_row);
+        }
+        InputFooter::Note(note) => {
+            frame.render_widget(
+                Paragraph::new(Line::from(Span::styled(
+                    format!(" {note}"),
+                    Style::default().fg(t.dim).add_modifier(Modifier::ITALIC),
+                ))),
+                footer_row,
+            );
+        }
+    }
+}
+
 /// Rounded-border [`Block`] with the supplied border style.
 pub fn rounded_block(border_style: Style) -> Block<'static> {
     Block::default()
