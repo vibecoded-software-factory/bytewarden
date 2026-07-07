@@ -5,10 +5,7 @@ use ratatui::{
     layout::{Constraint, Layout},
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{
-        Block, BorderType, Borders, Cell, List, ListItem, ListState, Paragraph, Row, Table,
-        TableState,
-    },
+    widgets::{Block, BorderType, Borders, Cell, List, ListItem, ListState, Paragraph, Row},
 };
 
 use crate::domain::filter::{ITEM_FILTERS, ItemFilter};
@@ -18,8 +15,8 @@ use crate::tui::app::App;
 use crate::tui::screens::Focus;
 use crate::tui::view::action::action_line;
 use crate::tui::view::widgets::{
-    self, cmdlog_height, draw_scrollbar, empty_state_lines, favorite_star, focus_border,
-    focus_color, render_cmd_bar_with_help, titled_block,
+    self, cmdlog_height, empty_state_lines, favorite_star, focus_border, focus_color,
+    render_cmd_bar_with_help, titled_block,
 };
 
 thread_local! {
@@ -540,59 +537,45 @@ fn render_list(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
 
     let flen = filtered.len();
     let sel = (flen > 0).then_some(app.vault.selected_index.min(flen.saturating_sub(1)));
-    let mut state = TableState::default().with_selected(sel);
     let indicator = if flen > 0 {
         format!("{} of {}", app.vault.selected_index + 1, flen)
     } else {
         "0 of 0".into()
     };
-    frame.render_stateful_widget(
-        Table::new(
-            rows,
-            [Constraint::Length(ind_w + type_w), Constraint::Min(0)],
+    // Empty states teach: name the keys that would fill the panel.
+    let empty = if !app.vault.search_query.is_empty() {
+        empty_state_lines("No items match", &["Esc clears the search"], t)
+    } else if app.vault.is_trash_view() {
+        empty_state_lines(
+            "Trash is empty",
+            &["deleted items land here (x on an item)"],
+            t,
         )
-        .column_spacing(1)
-        .block(titled_block("─[3]-Vault", &indicator, lf, t))
-        .row_highlight_style(
-            Style::default()
-                .bg(t.selected_bg)
-                .fg(t.foreground)
-                .add_modifier(Modifier::BOLD),
+    } else {
+        empty_state_lines(
+            "No items in this view",
+            &["Alt+N creates an item", "Alt+S syncs the vault"],
+            t,
         )
-        .highlight_symbol("▶ "),
+    };
+    let offset = widgets::list_table(
+        frame,
+        t,
         area,
-        &mut state,
+        widgets::ListTable {
+            title: "─[3]-Vault",
+            counter: indicator,
+            focused: lf,
+            headers: None,
+            widths: vec![Constraint::Length(ind_w + type_w), Constraint::Min(0)],
+            rows,
+            selected: sel,
+            empty,
+        },
     );
     // Capture the table's real post-render offset so a click maps to the
     // right item even when the auto-scroll has moved past `scroll_offset`.
-    VAULT_LIST_OFFSET.with(|o| o.set(state.offset()));
-    // Scroll cue on the right border when the list overflows. Driven by
-    // the selection (which reaches both ends) rather than the top offset.
-    draw_scrollbar(frame, area, flen, sel.unwrap_or(0), t);
-
-    // Empty states teach: name the keys that would fill the panel.
-    if flen == 0 {
-        let lines = if !app.vault.search_query.is_empty() {
-            empty_state_lines("No items match", &["Esc clears the search"], t)
-        } else if app.vault.is_trash_view() {
-            empty_state_lines(
-                "Trash is empty",
-                &["deleted items land here (x on an item)"],
-                t,
-            )
-        } else {
-            empty_state_lines(
-                "No items in this view",
-                &["Alt+N creates an item", "Alt+S syncs the vault"],
-                t,
-            )
-        };
-        let inner = area.inner(ratatui::layout::Margin {
-            horizontal: 2,
-            vertical: 1,
-        });
-        frame.render_widget(Paragraph::new(lines), inner);
-    }
+    VAULT_LIST_OFFSET.with(|o| o.set(offset));
 }
 
 fn render_cmd_log(frame: &mut Frame, app: &App, area: ratatui::layout::Rect, cmd_h: u16) {
