@@ -18,8 +18,8 @@ use crate::tui::app::App;
 use crate::tui::screens::Focus;
 use crate::tui::view::action::action_line;
 use crate::tui::view::widgets::{
-    cmdlog_height, draw_scrollbar, focus_border, focus_color, render_cmd_bar_with_help,
-    titled_block,
+    self, cmdlog_height, draw_scrollbar, empty_state_lines, favorite_star, focus_border,
+    focus_color, render_cmd_bar_with_help, titled_block,
 };
 
 thread_local! {
@@ -408,14 +408,14 @@ fn render_search(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     // the border, and coloured to match the text of the current state
     // (not accent), so it reads as part of the field rather than a badge.
     let line = if sf {
-        Line::from(vec![
-            Span::styled(" 󰍉 ", Style::default().fg(t.foreground)),
-            Span::styled(
-                app.vault.search_query.as_str(),
-                Style::default().fg(t.foreground),
-            ),
-            Span::styled("█", Style::default().fg(t.accent)),
-        ])
+        let mut spans = vec![Span::styled(" 󰍉 ", Style::default().fg(t.foreground))];
+        spans.extend(widgets::cursor_spans(
+            app.vault.search_query.as_str(),
+            app.vault.search_query.chars().count(),
+            true,
+            t,
+        ));
+        Line::from(spans)
     } else if !app.vault.search_query.is_empty() {
         Line::from(vec![
             Span::styled(" 󰍉 ", Style::default().fg(t.dim)),
@@ -508,7 +508,7 @@ fn render_list(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
             let mut spans: Vec<Span> = Vec::with_capacity(4);
             if any_fav {
                 spans.push(if item.favorite {
-                    Span::styled("★ ", Style::default().fg(t.item_favorite))
+                    favorite_star(t)
                 } else {
                     Span::raw("  ")
                 });
@@ -569,6 +569,30 @@ fn render_list(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     // Scroll cue on the right border when the list overflows. Driven by
     // the selection (which reaches both ends) rather than the top offset.
     draw_scrollbar(frame, area, flen, sel.unwrap_or(0), t);
+
+    // Empty states teach: name the keys that would fill the panel.
+    if flen == 0 {
+        let lines = if !app.vault.search_query.is_empty() {
+            empty_state_lines("No items match", &["Esc clears the search"], t)
+        } else if app.vault.is_trash_view() {
+            empty_state_lines(
+                "Trash is empty",
+                &["deleted items land here (x on an item)"],
+                t,
+            )
+        } else {
+            empty_state_lines(
+                "No items in this view",
+                &["Alt+N creates an item", "Alt+S syncs the vault"],
+                t,
+            )
+        };
+        let inner = area.inner(ratatui::layout::Margin {
+            horizontal: 2,
+            vertical: 1,
+        });
+        frame.render_widget(Paragraph::new(lines), inner);
+    }
 }
 
 fn render_cmd_log(frame: &mut Frame, app: &App, area: ratatui::layout::Rect, cmd_h: u16) {

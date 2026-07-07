@@ -12,8 +12,8 @@ use ratatui::{
 
 use crate::tui::app::App;
 use crate::tui::view::widgets::{
-    ScrollTarget, center_rect, draw_scrollbar, editor_spans, key_style, register_scroll,
-    rounded_block,
+    ScrollTarget, center_rect, draw_scrollbar, editor_spans, empty_state_lines, key_style,
+    legend_line, register_scroll, rounded_block,
 };
 
 thread_local! {
@@ -100,10 +100,11 @@ pub fn draw(frame: &mut Frame, app: &App) {
 
     if items.is_empty() {
         frame.render_widget(
-            Paragraph::new(Line::from(Span::styled(
-                "  no matching command",
-                Style::default().fg(t.dim),
-            ))),
+            Paragraph::new(empty_state_lines(
+                "No matching command",
+                &["fewer letters fuzzy-match more", "Esc closes"],
+                t,
+            )),
             rows[2],
         );
     } else {
@@ -150,10 +151,11 @@ pub fn draw(frame: &mut Frame, app: &App) {
     }
 
     frame.render_widget(
-        Paragraph::new(Line::from(Span::styled(
-            "↑↓ select · Enter run · Esc cancel",
-            Style::default().fg(t.dim),
-        ))),
+        Paragraph::new(legend_line(
+            &[("↑↓", "select"), ("Enter", "run"), ("Esc", "cancel")],
+            rows[3].width,
+            t,
+        )),
         rows[3],
     );
 }

@@ -272,6 +272,65 @@ pub fn key_style(t: &Theme) -> Style {
     t.emphasis()
 }
 
+/// Builds **the** hint/legend [`Line`] from `(key, label)` pairs: keys
+/// through [`key_style`], labels dim, ` · ` separators in `muted`,
+/// fitted to `width` by whole segments — a segment that doesn't fit is
+/// dropped behind a trailing ` …`, never clipped mid-key. Every overlay
+/// bottom-hint and inline legend routes here.
+pub fn legend_line(items: &[(&str, &str)], width: u16, t: &Theme) -> Line<'static> {
+    let mut spans: Vec<Span<'static>> = Vec::new();
+    let mut used = 0usize;
+    let width = width as usize;
+    for (i, (key, label)) in items.iter().enumerate() {
+        let sep = if i == 0 { 0 } else { 3 };
+        let seg = key.chars().count() + 1 + label.chars().count();
+        // Reserve room for the ellipsis unless every remaining segment fits.
+        let reserve = if i + 1 < items.len() { 2 } else { 0 };
+        if i > 0 && used + sep + seg + reserve > width {
+            spans.push(Span::styled(" …", Style::default().fg(t.muted)));
+            break;
+        }
+        if i > 0 {
+            spans.push(Span::styled(" · ", Style::default().fg(t.muted)));
+        }
+        spans.push(Span::styled((*key).to_string(), key_style(t)));
+        spans.push(Span::raw(" "));
+        spans.push(Span::styled(
+            (*label).to_string(),
+            Style::default().fg(t.dim),
+        ));
+        used += sep + seg;
+    }
+    Line::from(spans)
+}
+
+/// The shared empty-state body: a bold headline plus dim hint lines,
+/// each indented two cells. **Every empty state teaches** — the hints
+/// name the 2-3 keys that would fill the panel; a bare dim line is not
+/// an acceptable empty state.
+pub fn empty_state_lines(head: &str, hints: &[&str], t: &Theme) -> Vec<Line<'static>> {
+    let mut out = vec![Line::from(Span::styled(
+        format!("  {head}"),
+        Style::default()
+            .fg(t.foreground)
+            .add_modifier(Modifier::BOLD),
+    ))];
+    for h in hints {
+        out.push(Line::from(Span::styled(
+            format!("  {h}"),
+            Style::default().fg(t.dim),
+        )));
+    }
+    out
+}
+
+/// The one `★ ` favorite marker span (`item_favorite` tint) — every
+/// favorite affordance draws through this so the emphasis is identical
+/// everywhere.
+pub fn favorite_star(t: &Theme) -> Span<'static> {
+    Span::styled("★ ", Style::default().fg(t.item_favorite))
+}
+
 /// Rounded-border [`Block`] with the supplied border style.
 pub fn rounded_block(border_style: Style) -> Block<'static> {
     Block::default()
@@ -503,6 +562,24 @@ pub fn editor_spans_masked(
         Span::styled("●".to_string(), cursor_style),
         Span::styled("●".repeat(total - cur - 1), base),
     ]
+}
+
+/// [`editor_spans`] plus the empty-input affordance: when the editor is
+/// empty, the block cursor is followed by a `placeholder` hint. The
+/// standard body for a focused single-input popup / form field.
+pub fn editor_line_hinted(
+    editor: &crate::domain::LineEditor,
+    placeholder: &str,
+    t: &Theme,
+) -> Line<'static> {
+    let mut spans = editor_spans(editor, true, t);
+    if editor.is_empty() {
+        spans.push(Span::styled(
+            format!(" {placeholder}"),
+            Style::default().fg(t.placeholder),
+        ));
+    }
+    Line::from(spans)
 }
 
 /// Renders a labelled checkbox (☐ / ☑).

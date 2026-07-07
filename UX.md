@@ -504,14 +504,15 @@ The code has not caught up with this document yet on:
   draws its own modal), `draw_confirm_popup` (the confirm popups are
   near-identical per-file copies: `confirm.rs`, `logout_confirm.rs`,
   `folder_delete_confirm.rs`, `confirm_delete_attachment.rs`),
-  `draw_input_popup` (input popups are hand-built per file), `legend_line` /
-  `fit_segments` (footer hints are assembled inline), `empty_state_lines`,
-  `favorite_star` / the unread-style emphasis helpers.
-- **The text-input renderer** — the spec's `editor_spans` /
-  `editor_spans_masked` / `editor_lines` don't exist yet; the code uses
-  `editor_line` / `cursor_line` / `input_with_cursor` and masks secrets by
-  hand with `"●".repeat(n)` in `login.rs` / `reprompt.rs` / `detail.rs`.
-  Consolidate on the spec names.
+  `draw_input_popup` (input popups are hand-built per file).
+- **The footer command bar** — `render_cmd_bar` still takes pre-built
+  `full`/`short` hint strings; migrating the per-screen footers onto
+  `legend_line`'s `(key, label)` pairs retires that duplication.
+- **Edit-field cards aren't `LineEditor`s yet** — `EditField`
+  (`tui/edit_field.rs`) tracks its own string + char cursor, so the
+  detail/create cards render through the raw `cursor_line` core instead of
+  `editor_spans`. Migrating `EditField` onto `domain::LineEditor` retires
+  that seam.
 
 When you touch an area listed here, close its gap in the same change (or a
 dedicated PR) and delete its bullet.

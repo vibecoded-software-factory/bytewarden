@@ -10,7 +10,9 @@ use ratatui::{
 
 use crate::tui::app::App;
 use crate::tui::send::SendFocus;
-use crate::tui::view::widgets::{center_rect, editor_spans, register_field_hit, rounded_block};
+use crate::tui::view::widgets::{
+    center_rect, editor_line_hinted, register_field_hit, rounded_block,
+};
 
 /// Renders the send-create popup.
 pub fn draw_popup(frame: &mut Frame, area: Rect, app: &App) {
@@ -62,17 +64,7 @@ pub fn draw_popup(frame: &mut Frame, area: Rect, app: &App) {
     );
     let name_focus = state.focus == SendFocus::Name;
     let name_line = if name_focus {
-        if state.name.is_empty() {
-            Line::from(vec![
-                Span::styled("█", Style::default().fg(t.accent)),
-                Span::styled(
-                    "  e.g. \"meeting notes\"",
-                    Style::default().fg(t.placeholder),
-                ),
-            ])
-        } else {
-            Line::from(editor_spans(&state.name, true, t))
-        }
+        editor_line_hinted(&state.name, "e.g. \"meeting notes\"", t)
     } else {
         Line::from(Span::styled(
             state.name.as_str(),
@@ -135,14 +127,7 @@ pub fn draw_popup(frame: &mut Frame, area: Rect, app: &App) {
     );
     let content_focus = state.focus == SendFocus::Content;
     let content_line = if content_focus {
-        if state.content.is_empty() {
-            Line::from(vec![
-                Span::styled("█", Style::default().fg(t.accent)),
-                Span::styled("  the text to share", Style::default().fg(t.placeholder)),
-            ])
-        } else {
-            Line::from(editor_spans(&state.content, true, t))
-        }
+        editor_line_hinted(&state.content, "the text to share", t)
     } else {
         Line::from(Span::styled(
             state.content.as_str(),
