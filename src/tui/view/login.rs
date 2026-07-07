@@ -14,7 +14,8 @@ use crate::tui::view::action::action_line;
 use crate::tui::view::logo;
 use crate::tui::view::starfield::fill_stars;
 use crate::tui::view::widgets::{
-    focus_border, input_with_cursor, render_checkbox, render_cmd_bar_with_help, rounded_block,
+    editor_spans, editor_spans_masked, focus_border, render_checkbox, render_cmd_bar_with_help,
+    rounded_block,
 };
 
 thread_local! {
@@ -210,12 +211,11 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     );
     let server_foc = app.login.active_field == LoginField::Server;
     frame.render_widget(
-        Paragraph::new(input_with_cursor(
-            app.login.server_input.text(),
-            app.login.server_input.cursor(),
+        Paragraph::new(Line::from(editor_spans(
+            &app.login.server_input,
             server_foc,
             t,
-        ))
+        )))
         .block(rounded_block(focus_border(server_foc, t.accent))),
         f[2],
     );
@@ -227,12 +227,11 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     );
     let email_foc = app.login.active_field == LoginField::Email;
     frame.render_widget(
-        Paragraph::new(input_with_cursor(
-            app.login.email_input.text(),
-            app.login.email_input.cursor(),
+        Paragraph::new(Line::from(editor_spans(
+            &app.login.email_input,
             email_foc,
             t,
-        ))
+        )))
         .block(rounded_block(focus_border(email_foc, t.accent))),
         f[4],
     );
@@ -254,29 +253,9 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     );
     let pass_foc = app.login.active_field == LoginField::Password;
     let pass_line = if app.login.password_visible {
-        input_with_cursor(
-            app.login.password_input.text(),
-            app.login.password_input.cursor(),
-            pass_foc,
-            t,
-        )
+        Line::from(editor_spans(&app.login.password_input, pass_foc, t))
     } else {
-        let masked_before = "●".repeat(app.login.password_input.cursor());
-        let masked_after = "●".repeat(
-            app.login
-                .password_input
-                .len_chars()
-                .saturating_sub(app.login.password_input.cursor()),
-        );
-        if pass_foc {
-            Line::from(vec![
-                Span::raw(masked_before),
-                Span::styled("█", Style::default().fg(t.accent)),
-                Span::raw(masked_after),
-            ])
-        } else {
-            Line::from(Span::raw("●".repeat(app.login.password_input.len_chars())))
-        }
+        Line::from(editor_spans_masked(&app.login.password_input, pass_foc, t))
     };
     frame.render_widget(
         Paragraph::new(pass_line).block(rounded_block(focus_border(pass_foc, t.accent))),
@@ -312,12 +291,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         // right side so the user can tell at a glance which factor
         // is active. Cycling happens via ← → when focus is on the
         // Otp field.
-        let inner = input_with_cursor(
-            app.login.otp_input.text(),
-            app.login.otp_input.cursor(),
-            otp_foc,
-            t,
-        );
+        let inner = Line::from(editor_spans(&app.login.otp_input, otp_foc, t));
         let block = rounded_block(focus_border(otp_foc, t.accent));
         frame.render_widget(Paragraph::new(inner).block(block), f[idx_otp_in]);
 
@@ -341,8 +315,8 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
             // Repurpose the OTP-input area's last row by re-rendering
             // a thin overlay — but we don't have a dedicated chunk
             // for it in the layout. Easiest: render it on top of the
-            // input border's bottom row. Since `input_with_cursor`
-            // fills the box, we instead cram the method chip into
+            // input border's bottom row. Since the editor spans
+            // fill the box, we instead cram the method chip into
             // the *label* row when focused, by adding a second line
             // below the existing label hint via the strip helper.
             //

@@ -326,7 +326,7 @@ because any input can hold a secret). Detail / edit / create render one
 a hidden field (with the reprompt gate on protected items), generate a password
 into the focused field, custom fields cycle type and rename via the input
 popup, URL rows add a slot. Empty inputs show a dim placeholder
-(`theme.placeholder`). Rendering is always `editor_spans` / `editor_lines` —
+(`theme.placeholder`). Rendering is always `editor_spans` —
 never a hand-rolled `char_indices().nth()` editor in a screen.
 
 ## Keybindings — the gradient convention (hard rule)

@@ -12,7 +12,7 @@ use ratatui::{
 
 use crate::tui::app::App;
 use crate::tui::view::widgets::{
-    ScrollTarget, center_rect, cursor_line, draw_scrollbar, key_style, register_scroll,
+    ScrollTarget, center_rect, draw_scrollbar, editor_spans, key_style, register_scroll,
     rounded_block,
 };
 
@@ -65,7 +65,7 @@ pub fn draw(frame: &mut Frame, app: &App) {
 
     // Query row: `󰍉 ` prefix + the editor with its block cursor.
     let mut ql = vec![Span::styled("󰍉 ", Style::default().fg(t.dim))];
-    ql.extend(cursor_line(state.query.text(), state.query.cursor(), t).spans);
+    ql.extend(editor_spans(&state.query, true, t));
     frame.render_widget(Paragraph::new(Line::from(ql)), rows[0]);
 
     // Command list — label left, keybinding right-aligned in `key_style`.
