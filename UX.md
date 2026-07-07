@@ -190,8 +190,13 @@ hand-roll a `Block` with a different border type: a new panel is rounded via
   click-outside dismiss. Multi-action confirms (trash vs permanent delete)
   are extra `ConfirmAction` rows, never a bespoke popup. A new confirm is a
   `ConfirmPopup` value — never a new popup file.
-- `widgets::draw_input_popup(...)` — the small centered single-input popup
-  (folder name, rename field, attachment path, new-conversation-style boxes).
+- `widgets::draw_input_popup(frame, area, theme, InputPopup { .. })` — the
+  small centered single-input popup (folder name, rename field, attachment
+  paths): optional context lines, the dim label + parenthesised hint row,
+  the one `LineEditor` in its rounded box (placeholder via
+  `editor_line_hinted`) and a footer — a `legend_line` key legend or an
+  italic note. A new single-input popup is an `InputPopup` value, never a
+  bespoke popup file.
 - `widgets::legend_line(&[(key, label)], width, theme)` — **the** hint/legend
   builder: keys through `key_style` (accent + bold), labels dim, ` · `
   separators, fitted to the width by whole segments — **never a clipped key**.
@@ -504,8 +509,7 @@ The code has not caught up with this document yet on:
 
 - **Missing shared widgets** — `list_table` (lists/tables are still built
   inline per screen with `List`/`Table`), `draw_picker_modal` (the palette
-  draws its own modal), `draw_input_popup` (input popups are hand-built per
-  file).
+  draws its own modal).
 - **The footer command bar** — `render_cmd_bar` still takes pre-built
   `full`/`short` hint strings; migrating the per-screen footers onto
   `legend_line`'s `(key, label)` pairs retires that duplication.
