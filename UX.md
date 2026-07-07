@@ -512,8 +512,6 @@ The code has not caught up with this document yet on:
   `editor_line` / `cursor_line` / `input_with_cursor` and masks secrets by
   hand with `"●".repeat(n)` in `login.rs` / `reprompt.rs` / `detail.rs`.
   Consolidate on the spec names.
-- **Theme presets** — 14 ship today; `tokyonight-storm`, `kanagawa` and
-  `monokai-pro` are missing from the 17 in the spec.
 
 When you touch an area listed here, close its gap in the same change (or a
 dedicated PR) and delete its bullet.
