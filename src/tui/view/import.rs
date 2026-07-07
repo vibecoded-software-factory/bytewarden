@@ -10,7 +10,9 @@ use ratatui::{
 
 use crate::tui::app::App;
 use crate::tui::import::ImportFocus;
-use crate::tui::view::widgets::{center_rect, editor_spans, register_field_hit, rounded_block};
+use crate::tui::view::widgets::{
+    center_rect, editor_line_hinted, register_field_hit, rounded_block,
+};
 
 const FORMAT_HINT_FOCUSED: &str = "  (← → to cycle)";
 const FORMAT_HINT_BLURRED: &str = "  (Tab to focus, ← → to cycle)";
@@ -100,14 +102,7 @@ pub fn draw_popup(frame: &mut Frame, area: Rect, app: &App) {
     );
     let path_focus = state.focus == ImportFocus::Path;
     let path_line = if path_focus {
-        if state.path.is_empty() {
-            Line::from(vec![
-                Span::styled("█", Style::default().fg(t.accent)),
-                Span::styled("  /path/to/export.json", Style::default().fg(t.placeholder)),
-            ])
-        } else {
-            Line::from(editor_spans(&state.path, true, t))
-        }
+        editor_line_hinted(&state.path, "/path/to/export.json", t)
     } else {
         Line::from(Span::styled(
             state.path.as_str(),

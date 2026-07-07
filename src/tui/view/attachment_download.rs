@@ -9,7 +9,7 @@ use ratatui::{
 };
 
 use crate::tui::app::App;
-use crate::tui::view::widgets::{center_rect, editor_spans, rounded_block};
+use crate::tui::view::widgets::{center_rect, editor_line_hinted, rounded_block};
 
 /// Renders the attachment-download popup over the detail screen.
 pub fn draw_popup(frame: &mut Frame, area: Rect, app: &App) {
@@ -69,14 +69,7 @@ pub fn draw_popup(frame: &mut Frame, area: Rect, app: &App) {
         ])),
         chunks[3],
     );
-    let line = if state.path.is_empty() {
-        Line::from(vec![
-            Span::styled("█", Style::default().fg(t.accent)),
-            Span::styled("  /path/to/save", Style::default().fg(t.placeholder)),
-        ])
-    } else {
-        Line::from(editor_spans(&state.path, true, t))
-    };
+    let line = editor_line_hinted(&state.path, "/path/to/save", t);
     frame.render_widget(
         Paragraph::new(line).block(rounded_block(Style::default().fg(t.accent))),
         chunks[4],
