@@ -248,7 +248,7 @@ overlay / hint / empty-state / input **must** use these, never a one-off):
   (navigable, **default = cancel** on destructive).
 - `legend_line(&[(key, label)], width, theme)` — every hint/legend (keys in
   accent via `key_style`, fitted by whole segments, never a clipped key).
-- `editor_spans` / `editor_spans_masked` / `editor_lines` — the one
+- `editor_spans` / `editor_spans_masked` — the one
   text-input renderer, over a `domain::LineEditor` (see below).
 - `empty_state_lines(head, hints, theme)` — every empty state **teaches**
   (names the 2-3 keys that would fill the panel); a bare dim line is not

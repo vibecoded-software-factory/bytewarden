@@ -10,7 +10,7 @@ use ratatui::{
 
 use crate::tui::app::App;
 use crate::tui::flows::folders::FolderNamePurpose;
-use crate::tui::view::widgets::{center_rect, editor_line, rounded_block};
+use crate::tui::view::widgets::{center_rect, editor_spans, rounded_block};
 
 /// Renders the folder-name popup. No-op when no popup is in flight.
 pub fn draw_popup(frame: &mut Frame, area: Rect, app: &App) {
@@ -59,7 +59,7 @@ pub fn draw_popup(frame: &mut Frame, area: Rect, app: &App) {
             Span::styled("  type a folder name", Style::default().fg(t.placeholder)),
         ])
     } else {
-        editor_line(&state.input, t)
+        Line::from(editor_spans(&state.input, true, t))
     };
     frame.render_widget(
         Paragraph::new(line).block(rounded_block(Style::default().fg(t.accent))),

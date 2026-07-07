@@ -16,7 +16,7 @@ use ratatui::{
 
 use crate::tui::app::App;
 use crate::tui::reprompt::ProtectedAction;
-use crate::tui::view::widgets::{center_rect, rounded_block};
+use crate::tui::view::widgets::{center_rect, editor_spans_masked, rounded_block};
 
 /// Renders the popup. No-op when no reprompt is in flight.
 pub fn draw_popup(frame: &mut Frame, area: Rect, app: &App) {
@@ -71,20 +71,15 @@ pub fn draw_popup(frame: &mut Frame, area: Rect, app: &App) {
 
     // Always rendered masked — the popup never reveals the typed
     // password, even with F2.
-    let dots = "●".repeat(state.input.len_chars());
     let line = if state.input.is_empty() {
-        Line::from(vec![
-            Span::styled("█", Style::default().fg(t.accent)),
-            Span::styled(
-                "  type your master password",
-                Style::default().fg(t.placeholder),
-            ),
-        ])
+        let mut spans = editor_spans_masked(&state.input, true, t);
+        spans.push(Span::styled(
+            " type your master password",
+            Style::default().fg(t.placeholder),
+        ));
+        Line::from(spans)
     } else {
-        Line::from(vec![
-            Span::styled(dots, Style::default().fg(t.foreground)),
-            Span::styled("█", Style::default().fg(t.accent)),
-        ])
+        Line::from(editor_spans_masked(&state.input, true, t))
     };
     frame.render_widget(
         Paragraph::new(line).block(rounded_block(Style::default().fg(t.accent))),

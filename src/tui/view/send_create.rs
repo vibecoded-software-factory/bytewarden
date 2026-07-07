@@ -10,7 +10,7 @@ use ratatui::{
 
 use crate::tui::app::App;
 use crate::tui::send::SendFocus;
-use crate::tui::view::widgets::{center_rect, editor_line, register_field_hit, rounded_block};
+use crate::tui::view::widgets::{center_rect, editor_spans, register_field_hit, rounded_block};
 
 /// Renders the send-create popup.
 pub fn draw_popup(frame: &mut Frame, area: Rect, app: &App) {
@@ -71,7 +71,7 @@ pub fn draw_popup(frame: &mut Frame, area: Rect, app: &App) {
                 ),
             ])
         } else {
-            editor_line(&state.name, t)
+            Line::from(editor_spans(&state.name, true, t))
         }
     } else {
         Line::from(Span::styled(
@@ -141,7 +141,7 @@ pub fn draw_popup(frame: &mut Frame, area: Rect, app: &App) {
                 Span::styled("  the text to share", Style::default().fg(t.placeholder)),
             ])
         } else {
-            editor_line(&state.content, t)
+            Line::from(editor_spans(&state.content, true, t))
         }
     } else {
         Line::from(Span::styled(

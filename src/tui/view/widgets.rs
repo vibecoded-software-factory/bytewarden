@@ -432,47 +432,77 @@ fn render_cmd_bar_inner(
     }
 }
 
-/// Builds a `Line` showing a text input with a block cursor at
-/// `cursor_pos` (a character index, not a byte offset). When `focused`
-/// is `false` the cursor is omitted.
-pub fn input_with_cursor<'a>(
-    text: &'a str,
-    cursor_pos: usize,
-    focused: bool,
-    t: &Theme,
-) -> Line<'a> {
+/// The raw-text core of the input renderer: spans for `text` with a
+/// reverse-video block cursor on the character at `cursor` (a character
+/// index, not a byte offset) when `focused`; at end-of-text the cursor
+/// is a reversed space. Prefer [`editor_spans`] — this exists for the
+/// few inputs whose display string diverges from the editor content
+/// (the masked edit-field cards).
+pub fn cursor_spans(text: &str, cursor: usize, focused: bool, t: &Theme) -> Vec<Span<'static>> {
+    let base = Style::default().fg(t.foreground);
     if !focused {
-        return Line::from(Span::raw(text));
+        return vec![Span::styled(text.to_string(), base)];
     }
+    let cursor_style = Style::default().add_modifier(Modifier::REVERSED);
     let chars: Vec<char> = text.chars().collect();
-    let before: String = chars[..cursor_pos.min(chars.len())].iter().collect();
-    let after: String = chars[cursor_pos.min(chars.len())..].iter().collect();
-    Line::from(vec![
-        Span::raw(before),
-        Span::styled("█", Style::default().fg(t.accent)),
-        Span::styled(after, Style::default().fg(t.foreground)),
-    ])
-}
-
-/// Like [`input_with_cursor`] but always renders the cursor.
-pub fn cursor_line(display: &str, cursor: usize, t: &Theme) -> Line<'static> {
-    let chars: Vec<char> = display.chars().collect();
     let pos = cursor.min(chars.len());
     let before: String = chars[..pos].iter().collect();
-    let after: String = chars[pos..].iter().collect();
-    Line::from(vec![
-        Span::raw(before),
-        Span::styled("█", Style::default().fg(t.accent)),
-        Span::styled(after, Style::default().fg(t.foreground)),
-    ])
+    if pos >= chars.len() {
+        return vec![Span::styled(before, base), Span::styled(" ", cursor_style)];
+    }
+    let under: String = chars[pos].to_string();
+    let after: String = chars[pos + 1..].iter().collect();
+    vec![
+        Span::styled(before, base),
+        Span::styled(under, cursor_style),
+        Span::styled(after, base),
+    ]
 }
 
-/// Renders a [`LineEditor`] as a one-line span with the block cursor —
-/// the single popup text-input renderer. Thin wrapper over
-/// [`cursor_line`] so callers pass the editor, not a `(text, cursor)`
-/// pair.
-pub fn editor_line(editor: &crate::domain::LineEditor, t: &Theme) -> Line<'static> {
-    cursor_line(editor.text(), editor.cursor(), t)
+/// Like [`cursor_spans`] but always renders the cursor, as a `Line` —
+/// the edit-field-card renderer (those fields track their own display
+/// string + char cursor).
+pub fn cursor_line(display: &str, cursor: usize, t: &Theme) -> Line<'static> {
+    Line::from(cursor_spans(display, cursor, true, t))
+}
+
+/// Renders a [`LineEditor`]'s content as spans, drawing a reverse-video
+/// block cursor at the cursor position when `focused`. **The one
+/// text-input renderer** — every `LineEditor` on screen goes through
+/// this (or its masked sibling).
+pub fn editor_spans(
+    editor: &crate::domain::LineEditor,
+    focused: bool,
+    t: &Theme,
+) -> Vec<Span<'static>> {
+    cursor_spans(editor.text(), editor.cursor(), focused, t)
+}
+
+/// Like [`editor_spans`] but renders every character as `●` — for a
+/// secret field (master password, reprompt) shown masked. The block
+/// cursor still tracks the real cursor position so editing feels
+/// normal.
+pub fn editor_spans_masked(
+    editor: &crate::domain::LineEditor,
+    focused: bool,
+    t: &Theme,
+) -> Vec<Span<'static>> {
+    let total = editor.len_chars();
+    let base = Style::default().fg(t.foreground);
+    if !focused {
+        return vec![Span::styled("●".repeat(total), base)];
+    }
+    let cursor_style = Style::default().add_modifier(Modifier::REVERSED);
+    let cur = editor.cursor().min(total);
+    let before = "●".repeat(cur);
+    if cur >= total {
+        return vec![Span::styled(before, base), Span::styled(" ", cursor_style)];
+    }
+    vec![
+        Span::styled(before, base),
+        Span::styled("●".to_string(), cursor_style),
+        Span::styled("●".repeat(total - cur - 1), base),
+    ]
 }
 
 /// Renders a labelled checkbox (☐ / ☑).
