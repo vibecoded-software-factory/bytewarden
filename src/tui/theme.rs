@@ -931,10 +931,19 @@ mod tests {
         assert_eq!(t.accent, Theme::default().accent);
     }
 
+    // These two cover *file reading + parsing*, so they go through
+    // `load_unadapted` — the unadapted entry point that exists exactly
+    // so palette hex values stay exact for the picker preview and for
+    // tests. Asserting an `Rgb(..)` literal against `load` would make
+    // them depend on the ambient `$COLORTERM` / `$NO_COLOR`: truecolor
+    // passes the value through, anything else quantizes or greys it,
+    // and the test would pass on a developer's terminal while failing
+    // in CI. Adaptation has its own deterministic tests below.
+
     #[test]
     fn load_returns_default_when_file_missing() {
         let tmp = TempDir::new().unwrap();
-        let theme = load(tmp.path());
+        let theme = load_unadapted(tmp.path());
         assert_eq!(theme.accent, Theme::default().accent);
     }
 
@@ -946,8 +955,54 @@ mod tests {
             "[theme]\naccent = \"#abcdef\"\n",
         )
         .unwrap();
-        let theme = load(tmp.path());
+        let theme = load_unadapted(tmp.path());
         assert_eq!(theme.accent, Color::Rgb(0xab, 0xcd, 0xef));
+    }
+
+    /// `load` is `load_unadapted` + capability adaptation. Pinning that
+    /// composition without re-asserting a concrete colour keeps the
+    /// contract covered in every terminal: whatever `ColorCaps::detect`
+    /// reports here, the two sides go through the same mapping.
+    #[test]
+    fn load_applies_capability_adaptation() {
+        let tmp = TempDir::new().unwrap();
+        std::fs::write(
+            tmp.path().join("config.toml"),
+            "[theme]\naccent = \"#abcdef\"\n",
+        )
+        .unwrap();
+        let expected = adapt(load_unadapted(tmp.path()), ColorCaps::detect());
+        assert_eq!(load(tmp.path()).accent, expected.accent);
+    }
+
+    /// The concrete downgrade, asserted without touching the
+    /// environment: forcing each capability is what makes this
+    /// deterministic where the old `load` assertions were not.
+    #[test]
+    fn load_unadapted_survives_every_capability_mode() {
+        let tmp = TempDir::new().unwrap();
+        std::fs::write(
+            tmp.path().join("config.toml"),
+            "[theme]\naccent = \"#abcdef\"\n",
+        )
+        .unwrap();
+        let raw = load_unadapted(tmp.path());
+        assert_eq!(
+            adapt(raw.clone(), ColorCaps::True).accent,
+            Color::Rgb(0xab, 0xcd, 0xef),
+            "truecolor passes the configured hex through untouched"
+        );
+        assert!(
+            matches!(
+                adapt(raw.clone(), ColorCaps::Indexed256).accent,
+                Color::Indexed(_)
+            ),
+            "a 256-colour terminal gets a deterministic palette index"
+        );
+        assert!(
+            !matches!(adapt(raw, ColorCaps::Mono).accent, Color::Rgb(..)),
+            "NO_COLOR collapses the hue to a grayscale tier"
+        );
     }
 
     // ── Named presets ───────────────────────────────────────────
