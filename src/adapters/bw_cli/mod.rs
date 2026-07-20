@@ -68,6 +68,15 @@ const QUICK_NET_TIMEOUT: u64 = 10;
 /// Auth flows: master-password login, API-key login, OTP login. MFA
 /// adds a roundtrip so we keep this generous.
 const AUTH_TIMEOUT: u64 = 30;
+/// SSO login. `bw login --sso` opens the user's browser and blocks
+/// until the identity provider calls back, so the budget has to cover
+/// a human typing credentials into a web form (and possibly clearing
+/// their own MFA prompt) — not a server round-trip. Three minutes is
+/// far above any realistic interactive login while still bounding a
+/// child whose callback never arrives: without a ceiling a wedged
+/// `bw` would hold the single worker slot forever and the watchdog
+/// would be the only thing left to unstick the UI.
+const SSO_TIMEOUT: u64 = 180;
 /// Per-item online operations: create / edit / delete / restore item,
 /// folder CRUD, send_text, HIBP exposed check, get_item_json.
 const ITEM_OP_TIMEOUT: u64 = 15;
@@ -406,12 +415,13 @@ impl VaultPort for BwCliAdapter {
 
     fn login_with_sso(&mut self) -> Result<(), BwError> {
         // `bw login --sso` opens the user's browser and blocks until
-        // the callback arrives. Intentionally **no timeout** — the user
-        // can take as long as they need to authenticate in the browser.
-        // The TUI looks frozen during that window; there's no way
-        // around it without extra plumbing (we'd have to fork bw and
-        // stream its progress).
-        let out = bw_run(&["login", "--sso"])?;
+        // the callback arrives, so it gets its own human-scale budget
+        // ([`SSO_TIMEOUT`]) instead of the default local-op fallback —
+        // a 10 s ceiling killed the child while the user was still on
+        // the identity provider's page. The TUI looks frozen during
+        // that window; there's no way around it without extra plumbing
+        // (we'd have to fork bw and stream its progress).
+        let out = bw_run_timeout(&["login", "--sso"], SSO_TIMEOUT)?;
         if out.status.success() {
             Ok(())
         } else {

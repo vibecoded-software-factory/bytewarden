@@ -441,13 +441,15 @@ impl App {
         if self.in_flight.is_none() {
             return;
         }
-        // Above every fixed per-op timeout (≤60 s) and the configurable
-        // list budget, plus generous slack — it only ever fires on a
+        // Above every fixed per-op timeout — the largest is the SSO
+        // login budget (180 s, human-scale: the user is typing into
+        // their identity provider's page) — and above the configurable
+        // list budget, plus generous slack. It only ever fires on a
         // genuinely lost ticket, not a slow-but-live call.
         let budget = self
             .list_items_timeout
             .load(Ordering::Relaxed)
-            .max(90)
+            .max(180)
             .saturating_add(60);
         if started.elapsed() > Duration::from_secs(budget) {
             self.in_flight = None;
