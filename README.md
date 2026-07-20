@@ -59,7 +59,7 @@ with full CRUD over items, folders, attachments, sends, exports and more.
 - **Attachments** — upload, download (with destination picker) and delete.
 - **Bitwarden Send** — create text Sends with expiry and auto-copy of the URL.
 - **Export** (CSV / JSON / encrypted JSON) and **Import** (any `bw import --formats`).
-- **HaveIBeenPwned breach check** for any login password (`Alt+X`).
+- **HaveIBeenPwned breach check** for any login password (`x`).
 - **Memberships** read-only view: organisations and their collections.
 - **Three login methods**: master password, headless API key (`BW_CLIENTID/SECRET`), SSO (browser).
 - **Self-hosted** support — edit Server URL on the login screen.
@@ -149,7 +149,7 @@ Release profile is tuned for size: `lto = true`, `codegen-units = 1`, `opt-level
    - Pre-fills the email and jumps to the **password field** if your account is *Locked*.
    - Loads the vault directly if `$BW_SESSION` is exported and valid (*Unlocked*).
 3. Enter your credentials. If your backend triggers a "new device" challenge, an OTP field appears — paste the code from your e-mail and hit `Enter`.
-4. Once unlocked, navigate the vault with `j`/`k`, search with `/`, open an item with `Enter`, copy values with `Alt+C` / `Alt+U`, and so on. Press `F1` from any screen for context-aware help.
+4. Once unlocked, navigate the vault with `j`/`k`, search with `/`, open an item with `Enter`, copy values with `c` / `u`, and so on. Press `F1` from any screen for context-aware help.
 5. Quit with `Ctrl+C`.
 
 ---
@@ -430,7 +430,7 @@ Toggling **Keep session** on the login screen makes the unlocked `bw` session ke
 │ ─────────────       │
 │ 󰩺 Trash           4 │
 └─────────────────────┘
-                      Tab: panel  |  /: search  |  ?: help  |  F1: help
+  j/k nav · Enter open · n new · c pass                    F1 help · F10 settings
 ```
 
 ### Panels
@@ -458,20 +458,31 @@ Toggling **Keep session** on the login screen makes the unlocked `bw` session ke
 
 Number keys `0`–`4` are disabled while Search is focused so you can type them as part of a query.
 
-### List actions (Search & List panels)
+### List actions
+
+The **[3]-Vault list doesn't type**, so per the [keybinding gradient](#keyboard-reference) its row actions are **bare letters**. The `Alt+` column is a transition alias kept working for muscle memory — it is not the canonical form.
+
+| Key | Alias | Action |
+|-----|-------|--------|
+| `j` / `↓`, `k` / `↑` | | Move selection |
+| `PgUp` / `PgDn` | | Page (10 rows) |
+| `Enter` / `l` | | Open item detail |
+| `n` | `Alt+N` | **New item** — opens the create flow |
+| `e` | | **Edit** — opens the item straight in edit mode |
+| `u` | `Alt+U` | Copy username to clipboard |
+| `c` | `Alt+C` | Copy password to clipboard |
+| `f` | `Alt+F` | Toggle favorite ★ |
+| `x` | | **Check password against HaveIBeenPwned breaches** (toast) |
+| `d` | `Alt+D` | **Delete item** — opens confirmation popup |
+| `r` | `Alt+R` | Restore (Trash filter only) |
+
+The **Search box types**, so from there the row actions ride on `Alt+` instead (`Alt+N`, `Alt+U`, `Alt+C`, `Alt+F`, `Alt+D`, `Alt+R`). `e` (edit) and `x` (HIBP) have no `Alt+` form, so they are list-only.
+
+### Vault-wide commands (any focus)
 
 | Key | Action |
 |-----|--------|
-| `j` / `↓`, `k` / `↑` | Move selection |
-| `PgUp` / `PgDn` | Page (10 rows) |
-| `Enter` / `l` | Open item detail |
-| `Alt+N` | **New item** — opens the create flow |
-| `Alt+U` | Copy username to clipboard |
-| `Alt+C` | Copy password to clipboard |
-| `Alt+F` | Toggle favorite ★ |
 | `Alt+S` | **Sync** vault with the server |
-| `Alt+D` | **Delete item** — opens confirmation popup |
-| `Alt+R` | Restore (only meaningful inside the Trash filter) |
 | `Alt+L` / `Alt+Q` | **Lock** vault |
 | `Alt+O` | **Log out** — removes the account from the local CLI |
 | `Alt+I` | Show the user's **fingerprint phrase** (toast) |
@@ -480,11 +491,10 @@ Number keys `0`–`4` are disabled while Search is focused so you can type them 
 | `Alt+M` | Open the **import** popup |
 | `Alt+W` | Create a text **Send** (popup) |
 | `Alt+B` | View **memberships** (organisations + collections) |
+| `Ctrl+P` | **Command palette** — fuzzy-search & run any action |
 | `F1` | Help popup — context-aware |
 | `F10` | Open **Settings** (Theme preset picker · Security · Advanced) |
 | `Ctrl+C` | Quit |
-
-All `Alt+` shortcuts also work while Search is focused.
 
 ### Item indicators
 
@@ -581,20 +591,22 @@ Two modes: **read** (default) and **edit** (`Alt+E`). Both walk the same field l
 | `j` / `k`, `↑` / `↓`, `Tab` / `Shift+Tab` | Move between fields |
 | `PgUp` / `PgDn` | Same as `k` / `j` |
 | `F2` | Reveal / hide selected hidden field |
-| `Alt+C` | Copy selected field to clipboard |
-| `Alt+E` | **Enter edit mode** |
-| `Alt+M` | **Move into your organisation** — opens the assign-collections popup pre-filled with the user's org. Only when the item is personal and the user has exactly 1 organisation; multi-org accounts get an error toast asking them to use `bw move` from shell. |
-| `Alt+D` | **Delete item** — confirm popup |
-| `Alt+X` | **Check password against HaveIBeenPwned breaches** (toast) |
-| `Alt+A` | **Upload attachment** (popup) |
-| `Alt+S` | **Download** focused attachment (popup with destination path) |
-| `Alt+Del` | **Delete** focused attachment (confirm) |
-| `Alt+R` | **Restore** item (only inside Trash) |
+| `c` | Copy selected field to clipboard |
+| `e` | **Enter edit mode** |
+| `m` | **Move into your organisation** — opens the assign-collections popup pre-filled with the user's org. Only when the item is personal and the user has exactly 1 organisation; multi-org accounts get an error toast asking them to use `bw move` from shell. |
+| `d` | **Delete item** — confirm popup |
+| `x` | **Check password against HaveIBeenPwned breaches** (toast) |
+| `a` | **Upload attachment** (popup) |
+| `s` | **Download** focused attachment (popup with destination path) |
+| `Alt+Del` | **Delete** focused attachment (confirm) — kept on a modifier so a stray `Del` can't wipe an attachment |
+| `r` | **Restore** item (only inside Trash) |
 | `Esc` / `h` | Back to vault |
+
+Read mode is a viewer, not a form, so its actions are **bare letters** (the gradient). The `Alt+` form of each still works as a transition alias.
 
 Hidden fields (Password, Card Number, CVV, TOTP, SSN, Passport, License, custom hidden fields) render as `●●●●●●●●` until `F2` is pressed. Navigating away re-hides the field.
 
-The **HIBP check** (`Alt+X`) hashes the password locally and queries [HaveIBeenPwned](https://haveibeenpwned.com) k-anonymity range API. The result is shown as a toast: "0 breaches" (safe so far) or "found in N breaches".
+The **HIBP check** (`x`) hashes the password locally and queries [HaveIBeenPwned](https://haveibeenpwned.com) k-anonymity range API. The result is shown as a toast: "0 breaches" (safe so far) or "found in N breaches".
 
 ### Edit mode
 
