@@ -23,10 +23,25 @@ use zeroize::Zeroizing;
 use codec::base64_encode;
 use json::opt_str;
 use process::{
-    BW_PASSWORD_ENV, bw_run, bw_run_timeout, bw_run_with_password,
-    bw_run_with_password_and_stdin_timeout, bw_run_with_password_timeout, bw_run_with_session,
-    bw_run_with_session_timeout, stderr_str, stdout_str,
+    BW_PASSWORD_ENV, PromptWait, bw_run, bw_run_timeout, bw_run_with_password,
+    bw_run_with_password_and_stdin_timeout, bw_run_with_session, bw_run_with_session_timeout,
+    spawn_interactive, stderr_str, stdout_str,
 };
+
+/// Replaces `secret` with `***` wherever it appears in `text`.
+///
+/// `inquirer` renders a plain `input` prompt by echoing each keystroke
+/// back to stderr, so the verification code we write to stdin comes
+/// straight back out in the captured stderr — which then feeds the
+/// error message, the in-app command log and `~/.bytewarden.log`. Same
+/// discipline as the session-key redaction: a one-time code is still a
+/// credential, and it has no business being written to disk.
+fn redact_secret(text: &str, secret: &str) -> String {
+    if secret.is_empty() {
+        return text.to_string();
+    }
+    text.replace(secret, "***")
+}
 
 /// Classifies a non-zero `bw` exit into [`BwError::Exit`], carrying the
 /// process's stderr verbatim (what the user needs to read) plus the exit
@@ -96,39 +111,97 @@ const BULK_TIMEOUT: u64 = 60;
 /// `config.toml` if you ever hit the ceiling.
 const DEFAULT_LIST_ITEMS_TIMEOUT: u64 = 60;
 
-/// Patterns that indicate `bw login` is challenging us with the
-/// **permanent** second factor enrolled on the user's account
-/// (Authenticator app, YubiKey, Email 2FA, …).
+// ── Login-challenge classification ───────────────────────────────────────
+//
+// `bw` has no structured signal for "I need a code" — it reports the
+// challenge as a failed exit plus a human-readable message — so this is
+// string matching, deliberately kept in the adapter.
+//
+// There are **two** vocabularies to match, because the message depends on
+// whether `bw` thought it could prompt:
+//
+//   * The *interactive* prompt text ("Two-step login code:", "New device
+//     verification required. Enter OTP sent to login email:"). These are
+//     specific and tell the two challenges apart.
+//   * The *non-interactive* error text. Our initial `login` runs under
+//     `--nointeraction`, which sets `BW_NOINTERACTION=true` and makes
+//     `canInteract` false, so `bw` skips the prompt entirely and exits
+//     with a terse message instead — and the terse message for a missing
+//     device-verification code and for a missing 2FA code is the *same
+//     string*: "Code is required." (verified against the bw 2026.6.0
+//     bundle, `login.command.ts`).
+//
+// That ambiguity is not resolvable from the text, and it does not need to
+// be: both follow-ups re-run `bw login` *interactively* with the code on
+// stdin, and `bw` then prompts for whatever it actually wants. The only
+// case that genuinely needs `--method` is an account with **several** 2FA
+// providers, and that one reports itself distinctly ("No provider
+// selected") because bw couldn't show its picker.
+
+/// Messages that mean `bw login` wants the **permanent** second factor
+/// enrolled on the account (Authenticator app, YubiKey, Email 2FA, …).
 ///
 /// Resolved by [`VaultPort::login_with_two_factor`], which passes
-/// `--method N` to `bw login` so the CLI knows which factor to use.
+/// `--method N` so the CLI knows which factor to use — required here
+/// because these are exactly the cases where `bw` could not choose a
+/// provider on its own.
 ///
-/// Each pattern is matched as a case-insensitive substring against
-/// the combined stdout + stderr of the failed `login` invocation.
+/// Each pattern is matched as a case-insensitive substring against the
+/// combined stdout + stderr of the failed `login` invocation.
 const TWO_FACTOR_PROMPT_PATTERNS: &[&str] = &[
+    // Interactive prompt text.
     "two-step login",
     "two-step token",
     "authenticator app",
     "additional authentication",
+    // Non-interactive: bw had more than one provider and no `--method`,
+    // so it could not render its picker.
+    "no provider selected",
+    "no providers available",
 ];
 
-/// Patterns that indicate `bw login` is asking for a one-time
-/// **device-verification** code (the e-mailed OTP that fires when bw
-/// doesn't recognise the source device).
+/// Messages that mean `bw login` wants a one-time code it can obtain
+/// without being told which factor to use — the e-mailed
+/// device-verification OTP, or a 2FA challenge on an account with a
+/// single enrolled provider (which `bw` auto-selects).
 ///
-/// Resolved by [`VaultPort::login_with_otp`] — no `--method` flag is
-/// involved; bw matches the prompt automatically.
+/// Resolved by [`VaultPort::login_with_otp`]: no `--method` flag, code
+/// on stdin, `bw` prompts for whichever of the two it actually needs.
 ///
-/// The list is checked **after** [`TWO_FACTOR_PROMPT_PATTERNS`] so a
-/// 2FA prompt that happens to mention "verification code" is routed
-/// down the right path.
+/// Checked **after** [`TWO_FACTOR_PROMPT_PATTERNS`] so a message that
+/// names a specific factor, or reports that no provider could be
+/// selected, wins over the generic ones.
 const DEVICE_VERIFICATION_PROMPT_PATTERNS: &[&str] = &[
+    // Interactive prompt text.
     "new device",
     "device verification",
     "verification required",
     "verification code",
     "enter otp",
+    // Non-interactive: the shared terse message. This is the one the
+    // vast majority of users hit, because the initial `login` always
+    // runs under `--nointeraction`.
+    "code is required",
 ];
+
+// ── Interactive prompt markers ───────────────────────────────────────────
+//
+// What `bw` writes to stderr when it *does* prompt (i.e. when we omit
+// `--nointeraction`). Unlike the terse non-interactive messages above,
+// these name the challenge, so they tell the two apart. Matched
+// case-insensitively; `inquirer` redraws the line with ANSI escapes
+// interleaved, but the message text itself stays contiguous.
+
+/// The e-mailed new-device code prompt.
+const PROMPT_DEVICE_VERIFICATION: &[&str] = &["new device verification required"];
+
+/// The 2FA code prompt, shown once `bw` has a provider selected.
+const PROMPT_TWO_FACTOR_CODE: &[&str] = &["two-step login code"];
+
+/// The 2FA *method* picker — a list prompt `bw` shows when several
+/// providers are enrolled. We cannot drive a list prompt over a pipe,
+/// so this one is not parked; it falls through to the `--method` path.
+const PROMPT_TWO_FACTOR_METHOD: &[&str] = &["two-step login method"];
 
 /// Classifies a failed `bw login` output into one of the interactive
 /// outcomes (or `None` if the failure is just bad credentials).
@@ -188,6 +261,20 @@ pub struct BwCliAdapter {
     /// Settings overlay: the worker reads the current value on the next
     /// list, no restart needed.
     list_items_timeout: Arc<AtomicU64>,
+    /// A `bw login` process parked at its verification-code prompt.
+    ///
+    /// Device verification cannot be driven one-shot: the backend
+    /// e-mails the code as part of the login request itself, so each
+    /// fresh `bw login` sends a *new* code and invalidates the one the
+    /// user is holding. The only attempt that can validate a code is
+    /// the one that caused it to be sent, which means keeping that
+    /// process alive across the user's typing — see
+    /// [`process::InteractiveChild`].
+    ///
+    /// `Arc<Mutex<_>>` because the adapter is [`Clone`] (see
+    /// [`Self::parallel_session_data`]) and a child process is not.
+    /// Clones only ever happen after login, when this is `None`.
+    pending_login: Arc<std::sync::Mutex<Option<process::InteractiveChild>>>,
 }
 
 impl BwCliAdapter {
@@ -227,6 +314,7 @@ impl BwCliAdapter {
         Self {
             session_key,
             list_items_timeout: Arc::new(AtomicU64::new(DEFAULT_LIST_ITEMS_TIMEOUT)),
+            pending_login: Arc::new(std::sync::Mutex::new(None)),
         }
     }
 
@@ -250,6 +338,28 @@ impl BwCliAdapter {
     /// worker channel.
     pub fn list_items_timeout_handle(&self) -> Arc<AtomicU64> {
         Arc::clone(&self.list_items_timeout)
+    }
+
+    // ── Parked interactive login ──────────────────────────────────────
+
+    /// Parks a `bw login` child that is waiting at its code prompt.
+    /// Replacing an existing one drops it, which kills it.
+    fn park_pending_login(&mut self, child: process::InteractiveChild) {
+        if let Ok(mut slot) = self.pending_login.lock() {
+            *slot = Some(child);
+        }
+    }
+
+    /// Takes the parked child, leaving the slot empty. The caller owns
+    /// it from here — dropping it without finishing kills the process.
+    fn take_pending_login(&mut self) -> Option<process::InteractiveChild> {
+        self.pending_login.lock().ok().and_then(|mut s| s.take())
+    }
+
+    /// Kills any parked child. Called at the top of every fresh login:
+    /// the new attempt supersedes whatever the old one was waiting for.
+    fn clear_pending_login(&mut self) {
+        drop(self.take_pending_login());
     }
 
     /// Returns an owned copy of the current session key, or a "Vault is
@@ -304,67 +414,113 @@ impl VaultPort for BwCliAdapter {
     }
 
     fn login(&mut self, email: &str, password: &str) -> LoginOutcome {
+        // Any previous parked attempt is dead to us — its code has been
+        // superseded by the one this call is about to trigger.
+        self.clear_pending_login();
+
         // Password is fed via $BW_PASS_INPUT, not argv, so it is invisible
-        // in `ps aux`. See `process::bw_run_with_password`.
-        let out = match bw_run_with_password_timeout(
+        // in `ps aux`. Note the deliberate absence of `--nointeraction`:
+        // this call has to be able to *reach* bw's challenge prompt, and
+        // that flag is exactly what suppresses it. See the module comment
+        // on `process::InteractiveChild` for why a one-shot call cannot
+        // satisfy device verification.
+        let mut child = match spawn_interactive(
             &["login", email, "--passwordenv", BW_PASSWORD_ENV, "--raw"],
             password,
-            AUTH_TIMEOUT,
         ) {
-            Ok(o) => o,
+            Ok(c) => c,
             Err(e) => return LoginOutcome::Failed(e.to_string()),
         };
-        if out.status.success() {
-            let key = stdout_str(&out);
-            // Stash the zeroizing copy first so the long-lived storage
-            // is the protected one; the LoginOutcome value is discarded
-            // by every current caller.
-            self.session_key = Some(Arc::new(Zeroizing::new(key.clone())));
-            return LoginOutcome::Success(key);
-        }
-        // `bw` exits with an error when it needs an interactive code but
-        // stdin is empty; detect it via the prompt text on stdout/stderr.
-        // The follow-up classification (device-verification vs permanent
-        // 2FA) lives in [`combined_outcome`].
-        let combined = format!("{}\n{}", stdout_str(&out), stderr_str(&out));
-        match combined_outcome(&combined) {
-            Some(o) => o,
-            None => LoginOutcome::Failed(stderr_str(&out)),
+
+        let markers: Vec<&str> = PROMPT_DEVICE_VERIFICATION
+            .iter()
+            .chain(PROMPT_TWO_FACTOR_CODE)
+            .chain(PROMPT_TWO_FACTOR_METHOD)
+            .copied()
+            .collect();
+
+        match child.wait_for_prompt(&markers, AUTH_TIMEOUT) {
+            Err(e) => LoginOutcome::Failed(e.to_string()),
+            Ok(PromptWait::TimedOut) => {
+                // Dropping kills it. Something we don't model is holding
+                // the prompt — better to fail loudly than hang the UI.
+                LoginOutcome::Failed(format!("bw login did not respond within {AUTH_TIMEOUT}s"))
+            }
+            Ok(PromptWait::Reached) => {
+                let seen = child.stderr_so_far().to_lowercase();
+                if PROMPT_TWO_FACTOR_METHOD.iter().any(|m| seen.contains(m)) {
+                    // A list prompt can't be driven over a pipe; let the
+                    // child die and route to the `--method` path, which
+                    // starts a fresh login the user's authenticator code
+                    // (not bound to this attempt) can still satisfy.
+                    return LoginOutcome::NeedsTwoFactor;
+                }
+                let outcome = if PROMPT_TWO_FACTOR_CODE.iter().any(|m| seen.contains(m)) {
+                    LoginOutcome::NeedsTwoFactor
+                } else {
+                    LoginOutcome::NeedsDeviceVerification
+                };
+                // Park it: this is the only process whose challenge the
+                // user's code will match.
+                self.park_pending_login(child);
+                outcome
+            }
+            Ok(PromptWait::Exited(out)) => {
+                if out.status.success() {
+                    let key = stdout_str(&out);
+                    // Stash the zeroizing copy first so the long-lived
+                    // storage is the protected one; the LoginOutcome value
+                    // is discarded by every current caller.
+                    self.session_key = Some(Arc::new(Zeroizing::new(key.clone())));
+                    return LoginOutcome::Success(key);
+                }
+                // Exited without prompting: either plain bad credentials,
+                // or a bw build/path that reports the challenge as an
+                // error instead. [`combined_outcome`] tells them apart.
+                let combined = format!("{}\n{}", stdout_str(&out), stderr_str(&out));
+                match combined_outcome(&combined) {
+                    Some(o) => o,
+                    None => LoginOutcome::Failed(stderr_str(&out)),
+                }
+            }
         }
     }
 
     fn login_with_otp(
         &mut self,
-        email: &str,
-        password: &str,
+        _email: &str,
+        _password: &str,
         otp: &str,
     ) -> Result<String, BwError> {
-        // The OTP is fed via stdin instead of `--code <otp>` so it
-        // never appears in `argv` (and therefore never in `ps`). That
-        // requires dropping `--nointeraction` for this single call so
-        // bw's interactive prompt reads the code off stdin. We
-        // intentionally **do not** prepend the global `--nointeraction`
-        // here.
-        //
-        // A trailing newline is required — `inquirer` (the prompt
-        // library bw uses) treats it as the line terminator.
-        // Wrap the `format!` result so the intermediate buffer
-        // carrying the verification code is overwritten with zeros
-        // when it goes out of scope, instead of being freed-but-not-
-        // scrubbed by the allocator.
-        let stdin_payload = Zeroizing::new(format!("{otp}\n"));
-        let out = bw_run_with_password_and_stdin_timeout(
-            &["login", email, "--passwordenv", BW_PASSWORD_ENV, "--raw"],
-            password,
-            &stdin_payload,
-            AUTH_TIMEOUT,
-        )?;
+        // The code is written to the stdin of the *parked* child — the
+        // one whose login request caused the backend to send it. A fresh
+        // `bw login` would trigger a new e-mail and invalidate the code
+        // the user just typed, which is why there is no fallback here:
+        // silently starting a second attempt would fail forever while
+        // looking like a wrong code.
+        let mut child = self.take_pending_login().ok_or_else(|| {
+            BwError::Internal(
+                "the login attempt that requested this code is gone — start the login again".into(),
+            )
+        })?;
+
+        // A trailing newline is the line terminator `inquirer` waits for.
+        let payload = Zeroizing::new(format!("{otp}\n"));
+        child.submit_line(&payload)?;
+        let out = child.finish(AUTH_TIMEOUT, "bw login")?;
+
         if out.status.success() {
             let key = stdout_str(&out);
             self.session_key = Some(Arc::new(Zeroizing::new(key.clone())));
             Ok(key)
         } else {
-            Err(bw_exit(&out))
+            // `inquirer` echoes the typed code back onto stderr, so scrub
+            // it before the message reaches the error, the command log or
+            // the debug log.
+            Err(BwError::exit(
+                redact_secret(&stderr_str(&out), otp),
+                out.status.code(),
+            ))
         }
     }
 
@@ -383,6 +539,30 @@ impl VaultPort for BwCliAdapter {
         // bw's argument parser does not accept `--method` together with
         // `--nointeraction`, so the global flag is dropped here just
         // like in the device-verification path.
+        //
+        // When `login` managed to park a child at the "Two-step login
+        // code:" prompt, drive *that* one: bw has already chosen the
+        // provider, and for an Email second factor the code is bound to
+        // that attempt exactly like a device-verification code is. The
+        // fresh-spawn path below is for the case `login` could not park
+        // — several enrolled providers, where bw showed a list prompt we
+        // can't drive over a pipe and `--method` is what resolves it.
+        if let Some(mut child) = self.take_pending_login() {
+            let payload = Zeroizing::new(format!("{code}\n"));
+            child.submit_line(&payload)?;
+            let out = child.finish(AUTH_TIMEOUT, "bw login")?;
+            return if out.status.success() {
+                let key = stdout_str(&out);
+                self.session_key = Some(Arc::new(Zeroizing::new(key.clone())));
+                Ok(key)
+            } else {
+                Err(BwError::exit(
+                    redact_secret(&stderr_str(&out), code),
+                    out.status.code(),
+                ))
+            };
+        }
+
         let method_str = method.as_u8().to_string();
         // Same zeroization rationale as `login_with_otp` for the
         // stdin payload — the 2FA code is a short-lived secret that
@@ -1084,6 +1264,63 @@ mod tests {
         assert!(combined_outcome("").is_none());
     }
 
+    /// The regression this list exists for. Our initial `login` always
+    /// runs under `--nointeraction`, so `bw` never prints its prompt —
+    /// it exits with a terse message instead. Before this was matched,
+    /// a brand-new device fell through to `LoginOutcome::Failed` and the
+    /// UI told the user their credentials were invalid while Bitwarden
+    /// was e-mailing them a verification code.
+    ///
+    /// String verified against the bw 2026.6.0 bundle: both the missing
+    /// device-verification code and the missing 2FA code return
+    /// `Response.badRequest("Code is required.")`, written to stderr.
+    #[test]
+    fn non_interactive_code_request_is_a_challenge_not_a_credential_failure() {
+        for text in [
+            "Code is required.",
+            "code is required",
+            // As it actually arrives: stdout is empty, stderr carries the
+            // message, and `login` joins them with a newline.
+            "\nCode is required.",
+        ] {
+            assert!(
+                matches!(
+                    combined_outcome(text),
+                    Some(LoginOutcome::NeedsDeviceVerification)
+                ),
+                "{text:?} must be treated as a code challenge"
+            );
+        }
+    }
+
+    /// The one case that genuinely needs `--method`: several enrolled
+    /// providers and no picker, because bw could not prompt. It reports
+    /// itself distinctly, so it routes to the two-factor path where the
+    /// user chooses the method.
+    #[test]
+    fn non_interactive_multi_provider_two_factor_routes_to_the_method_picker() {
+        for text in [
+            "Login failed. No provider selected.",
+            "No providers available for this client.",
+        ] {
+            assert!(
+                matches!(combined_outcome(text), Some(LoginOutcome::NeedsTwoFactor)),
+                "{text:?} must ask the user to pick a 2FA method"
+            );
+        }
+    }
+
+    /// A message naming a specific factor must win over the generic
+    /// "code is required", which is why the two-factor list is consulted
+    /// first. Guards the ordering, not just the membership.
+    #[test]
+    fn a_named_factor_outranks_the_generic_code_request() {
+        assert!(matches!(
+            combined_outcome("Two-step login code:\nCode is required."),
+            Some(LoginOutcome::NeedsTwoFactor)
+        ));
+    }
+
     /// `lock` must drop the cached session key. The zeroizing wrapper
     /// only helps if `lock` actually triggers the drop, so guard
     /// against a refactor that accidentally keeps the field populated.
@@ -1095,6 +1332,7 @@ mod tests {
         let mut a = BwCliAdapter {
             session_key: Some(Arc::new(Zeroizing::new("test-key-DO-NOT-USE".into()))),
             list_items_timeout: Arc::new(AtomicU64::new(DEFAULT_LIST_ITEMS_TIMEOUT)),
+            pending_login: Arc::new(std::sync::Mutex::new(None)),
         };
         assert!(a.session_key().is_some());
         a.lock();
@@ -1113,6 +1351,7 @@ mod tests {
         let a = BwCliAdapter {
             session_key: None,
             list_items_timeout: Arc::new(AtomicU64::new(DEFAULT_LIST_ITEMS_TIMEOUT)),
+            pending_login: Arc::new(std::sync::Mutex::new(None)),
         };
         assert_is_arc_zeroizing(&a.session_key);
     }
@@ -1130,6 +1369,7 @@ mod tests {
         let a = BwCliAdapter {
             session_key: Some(Arc::new(Zeroizing::new("SESSION".to_string()))),
             list_items_timeout: Arc::new(AtomicU64::new(DEFAULT_LIST_ITEMS_TIMEOUT)),
+            pending_login: Arc::new(std::sync::Mutex::new(None)),
         };
         let session = a.session().expect("unlocked adapter yields a key");
         assert_is_zeroizing(&session);
@@ -1144,6 +1384,7 @@ mod tests {
         let a = BwCliAdapter {
             session_key: None,
             list_items_timeout: Arc::new(AtomicU64::new(DEFAULT_LIST_ITEMS_TIMEOUT)),
+            pending_login: Arc::new(std::sync::Mutex::new(None)),
         };
         assert!(matches!(a.session(), Err(BwError::Internal(_))));
     }
@@ -1160,6 +1401,7 @@ mod tests {
         let a = BwCliAdapter {
             session_key: Some(Arc::new(Zeroizing::new("shared-key".into()))),
             list_items_timeout: Arc::new(AtomicU64::new(DEFAULT_LIST_ITEMS_TIMEOUT)),
+            pending_login: Arc::new(std::sync::Mutex::new(None)),
         };
         let b = a.clone();
         let arc_a = a.session_key.as_ref().unwrap();

@@ -315,6 +315,210 @@ pub fn stderr_str(out: &Output) -> String {
     String::from_utf8_lossy(&out.stderr).trim().to_string()
 }
 
+// ── Interactive login: a child kept alive across a user interaction ──────
+//
+// Every other `bw` call in this adapter is one-shot: spawn, feed
+// everything up front, collect the output, done. Device verification
+// cannot work that way.
+//
+// When the backend doesn't recognise the device, it e-mails a code
+// **as part of the login request itself** and `bw` then prompts for it.
+// Each fresh `bw login` therefore triggers a *new* e-mail and
+// invalidates the previous code, so submitting a code that was obtained
+// before the process started can never succeed — the code the user is
+// holding always belongs to the previous attempt. `bw` also offers no
+// non-interactive flag for it (`--code` is documented, and implemented,
+// as the *two-step* login code only; the new-device token is read
+// exclusively from the prompt).
+//
+// The only workable shape is to keep **one** `bw login` alive across the
+// user's code entry: spawn it, wait until it prints its prompt, hand
+// control back to the UI, and later write the code to that same child's
+// stdin. `inquirer` (the prompt library `bw` uses) reads whatever
+// arrives on stdin whenever it arrives, so the pause costs nothing.
+
+/// Outcome of waiting for a parked child to reach its prompt.
+pub enum PromptWait {
+    /// One of the caller's markers appeared on stderr — the child is
+    /// parked at its prompt, waiting for a line on stdin.
+    Reached,
+    /// The child exited before prompting (success, or a plain failure).
+    Exited(Box<Output>),
+    /// Neither happened inside the budget; the caller should give up
+    /// and kill the child.
+    TimedOut,
+}
+
+/// A `bw` child held open across a user interaction.
+///
+/// Both pipes are drained by reader threads from the moment it spawns —
+/// same rationale as [`wait_with_timeout`], and doubly so here: the
+/// child lives for as long as a human takes to read an e-mail, which is
+/// ample time to fill a pipe buffer and deadlock.
+///
+/// Dropping kills the child. A parked login is an authentication
+/// attempt in progress; leaving one running after the UI has moved on
+/// would silently hold a `bw` process (and its in-flight auth state)
+/// for the lifetime of the app.
+pub struct InteractiveChild {
+    child: Child,
+    stdout: std::sync::Arc<std::sync::Mutex<Vec<u8>>>,
+    stderr: std::sync::Arc<std::sync::Mutex<Vec<u8>>>,
+    readers: Vec<std::thread::JoinHandle<()>>,
+}
+
+/// Drains `r` into `buf` until EOF. Any read error ends the pump — the
+/// child exiting is the normal way out.
+fn pump<R: Read>(mut r: R, buf: &std::sync::Arc<std::sync::Mutex<Vec<u8>>>) {
+    let mut chunk = [0u8; 4096];
+    loop {
+        match r.read(&mut chunk) {
+            Ok(0) | Err(_) => break,
+            Ok(n) => {
+                if let Ok(mut b) = buf.lock() {
+                    b.extend_from_slice(&chunk[..n]);
+                }
+            }
+        }
+    }
+}
+
+/// Spawns `bw <args>` **without** `--nointeraction`, with the password
+/// in the environment and all three pipes open, ready to be driven
+/// interactively.
+///
+/// `--nointeraction` is deliberately omitted: it is exactly what
+/// suppresses the prompt this whole mechanism waits for.
+pub fn spawn_interactive(args: &[&str], password: &str) -> Result<InteractiveChild, BwError> {
+    let mut child = Command::new("bw")
+        .args(args)
+        .env(BW_PASSWORD_ENV, password)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| BwError::Spawn(format!("Could not run bw: {e}")))?;
+
+    let stdout = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let stderr = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let mut readers = Vec::new();
+    if let Some(out) = child.stdout.take() {
+        let buf = std::sync::Arc::clone(&stdout);
+        readers.push(std::thread::spawn(move || pump(out, &buf)));
+    }
+    if let Some(err) = child.stderr.take() {
+        let buf = std::sync::Arc::clone(&stderr);
+        readers.push(std::thread::spawn(move || pump(err, &buf)));
+    }
+    Ok(InteractiveChild {
+        child,
+        stdout,
+        stderr,
+        readers,
+    })
+}
+
+impl InteractiveChild {
+    /// Everything the child has written to stderr so far, lossily
+    /// decoded. `bw` prompts on stderr, so this is where the markers
+    /// show up.
+    pub fn stderr_so_far(&self) -> String {
+        self.stderr
+            .lock()
+            .map(|b| String::from_utf8_lossy(&b).to_string())
+            .unwrap_or_default()
+    }
+
+    /// Polls until the child's stderr contains one of `markers`
+    /// (case-insensitive), the child exits, or `secs` elapses.
+    ///
+    /// Markers are checked **before** the exit test on each pass so a
+    /// prompt that lands in the same tick as an exit is not missed.
+    pub fn wait_for_prompt(&mut self, markers: &[&str], secs: u64) -> Result<PromptWait, BwError> {
+        let deadline = Instant::now() + Duration::from_secs(secs);
+        loop {
+            let seen = self.stderr_so_far().to_lowercase();
+            if markers.iter().any(|m| seen.contains(m)) {
+                return Ok(PromptWait::Reached);
+            }
+            match self.child.try_wait() {
+                Err(e) => return Err(BwError::Internal(format!("bw wait error: {e}"))),
+                Ok(Some(status)) => return Ok(PromptWait::Exited(Box::new(self.collect(status)))),
+                Ok(None) => {}
+            }
+            if Instant::now() >= deadline {
+                return Ok(PromptWait::TimedOut);
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    }
+
+    /// Writes one line to the child's stdin and closes it, which is what
+    /// releases `inquirer`'s read. Closing also guarantees the child can
+    /// never block waiting for a second line we are not going to send.
+    pub fn submit_line(&mut self, line: &str) -> Result<(), BwError> {
+        let mut stdin = self
+            .child
+            .stdin
+            .take()
+            .ok_or_else(|| BwError::Internal("bw login stdin is already closed".into()))?;
+        stdin
+            .write_all(line.as_bytes())
+            .and_then(|()| stdin.flush())
+            .map_err(|e| BwError::Internal(format!("could not send the code to bw: {e}")))?;
+        Ok(())
+    }
+
+    /// Waits for the child to exit within `secs` and returns its output,
+    /// killing it on timeout.
+    pub fn finish(mut self, secs: u64, label: &str) -> Result<Output, BwError> {
+        let deadline = Instant::now() + Duration::from_secs(secs);
+        loop {
+            match self.child.try_wait() {
+                Err(e) => return Err(BwError::Internal(format!("bw wait error: {e}"))),
+                Ok(Some(status)) => return Ok(self.collect(status)),
+                Ok(None) => {}
+            }
+            if Instant::now() >= deadline {
+                let _ = self.child.kill();
+                let _ = self.child.wait();
+                return Err(BwError::Timeout {
+                    label: label.to_string(),
+                    secs,
+                });
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    }
+
+    /// Joins the reader threads (bounded — the child has exited, so both
+    /// pipes are at EOF) and packages the drained buffers as an
+    /// [`Output`].
+    fn collect(&mut self, status: std::process::ExitStatus) -> Output {
+        for r in self.readers.drain(..) {
+            let _ = r.join();
+        }
+        let take = |b: &std::sync::Arc<std::sync::Mutex<Vec<u8>>>| {
+            b.lock()
+                .map(|mut v| std::mem::take(&mut *v))
+                .unwrap_or_default()
+        };
+        Output {
+            status,
+            stdout: take(&self.stdout),
+            stderr: take(&self.stderr),
+        }
+    }
+}
+
+impl Drop for InteractiveChild {
+    fn drop(&mut self) {
+        // Best-effort: if it already exited, both calls are no-ops.
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -322,6 +526,107 @@ mod tests {
     /// Spawns `sh -c <script>` with stdout/stderr piped and runs the
     /// shared timeout poller against it. Lets us exercise the polling
     /// path without depending on `bw` being installed.
+    /// Builds an [`InteractiveChild`] around `sh -c <script>` instead of
+    /// `bw`, so the parking mechanics can be tested without the CLI (or
+    /// a Bitwarden account). Mirrors `spawn_interactive` exactly apart
+    /// from the program name.
+    fn interactive_sh(script: &str) -> InteractiveChild {
+        let mut child = Command::new("sh")
+            .args(["-c", script])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("spawn sh");
+        let stdout = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let stderr = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let mut readers = Vec::new();
+        if let Some(out) = child.stdout.take() {
+            let buf = std::sync::Arc::clone(&stdout);
+            readers.push(std::thread::spawn(move || pump(out, &buf)));
+        }
+        if let Some(err) = child.stderr.take() {
+            let buf = std::sync::Arc::clone(&stderr);
+            readers.push(std::thread::spawn(move || pump(err, &buf)));
+        }
+        InteractiveChild {
+            child,
+            stdout,
+            stderr,
+            readers,
+        }
+    }
+
+    /// The core of the device-verification fix: a child that prints a
+    /// prompt and then blocks on stdin must be reported as *parked*, not
+    /// as exited and not as a timeout — that is what lets the UI collect
+    /// the code while this exact process stays alive.
+    #[test]
+    fn interactive_child_parks_at_its_prompt_and_completes_on_the_submitted_line() {
+        let mut c = interactive_sh(
+            "printf 'New device verification required. Enter OTP:' >&2; read code; \
+             printf '%s' \"$code\"; test \"$code\" = 424242",
+        );
+        assert!(
+            matches!(
+                c.wait_for_prompt(&["new device verification required"], 5),
+                Ok(PromptWait::Reached)
+            ),
+            "the child is waiting at its prompt, not exited"
+        );
+        c.submit_line("424242\n").expect("stdin accepted the code");
+        let out = c.finish(5, "test").expect("child exited");
+        assert!(out.status.success(), "the code reached the same process");
+        assert_eq!(String::from_utf8_lossy(&out.stdout), "424242");
+    }
+
+    /// A child that exits before prompting must surface its output, so
+    /// the caller can classify a plain credential failure.
+    #[test]
+    fn interactive_child_reports_an_early_exit_with_its_output() {
+        let mut c = interactive_sh("printf 'Username or password is incorrect.' >&2; exit 1");
+        match c.wait_for_prompt(&["new device verification required"], 5) {
+            Ok(PromptWait::Exited(out)) => {
+                assert!(!out.status.success());
+                assert!(stderr_str(&out).contains("incorrect"));
+            }
+            other => panic!(
+                "expected an early exit, got a different outcome: {}",
+                matches!(other, Ok(PromptWait::Reached))
+            ),
+        }
+    }
+
+    /// Neither prompting nor exiting inside the budget must be reported
+    /// as a timeout rather than hanging the caller forever.
+    #[test]
+    fn interactive_child_times_out_when_nothing_happens() {
+        let mut c = interactive_sh("exec sleep 5");
+        assert!(matches!(
+            c.wait_for_prompt(&["never appears"], 1),
+            Ok(PromptWait::TimedOut)
+        ));
+    }
+
+    /// Dropping a parked child must kill it — an abandoned login is an
+    /// authentication attempt in flight, not something to leave running.
+    #[test]
+    fn dropping_a_parked_child_kills_the_process() {
+        let c = interactive_sh("exec sleep 30");
+        let pid = c.child.id();
+        drop(c);
+        // `kill -0` fails once the process is gone (reaped by `wait` in
+        // the Drop impl).
+        let alive = Command::new("kill")
+            .args(["-0", &pid.to_string()])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+        assert!(!alive, "the parked child outlived its owner");
+    }
+
     fn spawn_sh(script: &str) -> Child {
         Command::new("sh")
             .args(["-c", script])
