@@ -84,8 +84,13 @@ pub enum Focus {
 /// Active text input on the [`Screen::Login`] form.
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum LoginField {
-    /// Bitwarden server URL (`https://vault.bitwarden.com` by default,
-    /// editable for self-hosted instances).
+    /// Bitwarden server URL, editable for self-hosted instances.
+    ///
+    /// Defaults to `https://bitwarden.com` — **not** the web-vault URL.
+    /// That exact literal is `bw config server`'s sentinel for "official
+    /// cloud, no self-hosted server"; it maps the value to `null`
+    /// internally. Any other value, `https://vault.bitwarden.com`
+    /// included, is stored as a *self-hosted* base URL.
     Server,
     Email,
     Password,

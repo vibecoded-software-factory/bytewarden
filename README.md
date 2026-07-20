@@ -308,6 +308,10 @@ Three text fields plus a one-time-code field that only appears when the backend 
 
 The Server field is pre-filled from `bw status` so you always see which backend you're hitting. Editing the value and pressing `Enter` (or leaving the field with `Tab`) calls `bw config server <url>` for you. Self-hosted Bitwarden_RS / Vaultwarden instances work out of the box — no extra wrapper script needed.
 
+On the official cloud `bw status` reports no server at all, and the field shows **`https://bitwarden.com`**. That is not the web-vault address — it is the literal `bw config server` recognises as *"official cloud, nothing self-hosted"*, which it stores as `null`. Anything else, `https://vault.bitwarden.com` included, is saved as a **self-hosted** base URL with the remaining service URLs derived from it. There is no shorthand for the EU cloud; point the field at `https://vault.bitwarden.eu` (or use `bw config server --api …` from a shell) if that is your region.
+
+`bw` refuses to change the server while an account is logged in, so log out first.
+
 ### Alternative login methods
 
 - **API key** (`Alt+K`) — headless flow that reads `BW_CLIENTID` and `BW_CLIENTSECRET` from the environment. After it succeeds the vault is *Locked* (not unlocked) — bytewarden tells you to type your master password and hit `Enter` to finish.

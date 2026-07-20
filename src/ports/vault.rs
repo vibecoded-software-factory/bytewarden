@@ -98,10 +98,19 @@ pub trait VaultPort {
 
     /// Configures the Bitwarden server URL (`bw config server <url>`).
     ///
-    /// `url` may be a fully-qualified URL (`https://vault.example.com`)
-    /// or a known hostname (`bitwarden.com`, `bitwarden.eu`). Per the
-    /// CLI, this is only valid when the vault is *unauthenticated* —
-    /// the caller is responsible for logging out first.
+    /// `url` is a fully-qualified URL (`https://vault.example.com`) and
+    /// is stored as a **self-hosted** base URL — every other service URL
+    /// is derived from it unless overridden.
+    ///
+    /// The one exception is `bitwarden.com` / `https://bitwarden.com`,
+    /// which the CLI treats as a sentinel meaning "official cloud" and
+    /// maps to `null`, clearing any self-hosted configuration. There is
+    /// no shorthand for the EU cloud: passing `bitwarden.eu` would be
+    /// stored as a self-hosted base like any other host.
+    ///
+    /// Per the CLI, this is only valid when the vault is
+    /// *unauthenticated* — the caller is responsible for logging out
+    /// first.
     fn set_server(&mut self, url: &str) -> Result<(), BwError>;
 
     // ── Vault data ────────────────────────────────────────────────────────

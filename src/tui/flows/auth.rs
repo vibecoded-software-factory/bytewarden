@@ -44,6 +44,14 @@ pub fn handle_boot_status(app: &mut App, r: Result<VaultInfo, BwError>) {
 
     // Seed the Server field from the CLI's reported URL so the user can
     // see (and edit) which backend they're hitting.
+    //
+    // `bw status` reports `serverUrl: null` on the official cloud, and
+    // the fallback below is deliberately `https://bitwarden.com`: that
+    // exact literal is `bw config server`'s sentinel for "official
+    // cloud", mapped back to `null` internally. Do **not** "correct" it
+    // to the web-vault URL — committing `https://vault.bitwarden.com`
+    // would configure a *self-hosted* server with that base instead of
+    // leaving the default alone.
     let server = info
         .server_url
         .clone()
