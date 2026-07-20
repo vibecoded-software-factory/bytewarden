@@ -394,17 +394,12 @@ fn render_search(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     // (not accent), so it reads as part of the field rather than a badge.
     let line = if sf {
         let mut spans = vec![Span::styled(" 󰍉 ", Style::default().fg(t.foreground))];
-        spans.extend(widgets::cursor_spans(
-            app.vault.search_query.as_str(),
-            app.vault.search_query.chars().count(),
-            true,
-            t,
-        ));
+        spans.extend(widgets::editor_spans(&app.vault.search_query, true, t));
         Line::from(spans)
     } else if !app.vault.search_query.is_empty() {
         Line::from(vec![
             Span::styled(" 󰍉 ", Style::default().fg(t.dim)),
-            Span::styled(app.vault.search_query.as_str(), Style::default().fg(t.dim)),
+            Span::styled(app.vault.search_query.text(), Style::default().fg(t.dim)),
         ])
     } else {
         Line::from(vec![

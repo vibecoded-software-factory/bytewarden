@@ -6,6 +6,7 @@ use crate::tui::app::App;
 use crate::tui::flows::{
     auth, copy, export, folders, generator, import, items, memberships, send, vault,
 };
+use crate::tui::input::common;
 use crate::tui::input::is_alt;
 use crate::tui::screens::{Focus, Screen};
 
@@ -111,28 +112,28 @@ pub fn handle(app: &mut App, key: KeyEvent) {
             _ => {}
         },
 
+        // The Search box is a typing surface: only the keys the list
+        // owns are intercepted here (arrows / paging / Enter / Tab /
+        // Esc). Everything else — bare letters included — goes to the
+        // shared `search_key`, which is why `j`/`k` type instead of
+        // navigating and why the readline word ops work in the query.
         Focus::Search => match key.code {
             KeyCode::Esc => app.clear_search(),
             KeyCode::Tab => app.cycle_focus(),
-            KeyCode::Char('j') | KeyCode::Down => app.vault.move_down(),
-            KeyCode::Char('k') | KeyCode::Up => app.vault.move_up(),
+            KeyCode::Down => app.vault.move_down(),
+            KeyCode::Up => app.vault.move_up(),
             KeyCode::PageDown => app.vault.move_down_page(),
             KeyCode::PageUp => app.vault.move_up_page(),
             KeyCode::Enter if !app.vault.filtered_items().is_empty() => {
                 app.screen = Screen::Detail;
                 app.show_password = false;
             }
-            KeyCode::Backspace => {
-                app.vault.search_query.pop();
-                app.vault.perform_search();
-            }
             _ if is_alt(&key) => handle_alt_shortcuts(app, key),
-            // Plain char only feeds search when no modifiers are active.
-            KeyCode::Char(c) if key.modifiers == KeyModifiers::NONE => {
-                app.vault.search_query.push(c);
-                app.vault.perform_search();
+            _ => {
+                if common::search_key(&mut app.vault.search_query, key) {
+                    app.vault.perform_search();
+                }
             }
-            _ => {}
         },
 
         Focus::List => match key.code {

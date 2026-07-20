@@ -14,9 +14,9 @@
 
 use std::collections::HashMap;
 
-use crate::domain::LoweredItem;
 use crate::domain::filter::{ITEM_FILTERS, ItemFilter};
 use crate::domain::item::Item;
+use crate::domain::{LineEditor, LoweredItem};
 use crate::tui::app::{PAGE_STEP, VAULT_VIEWPORT_ROWS, compute_filtered_indices};
 use crate::tui::folders::FolderFilter;
 
@@ -57,8 +57,12 @@ pub struct Vault {
     pub active_folder: FolderFilter,
     /// Highlight index in the Folders sidebar panel.
     pub folder_selected: usize,
-    /// The search-box text (drives the fuzzy ranking).
-    pub search_query: String,
+    /// The search box, backed by the same [`LineEditor`] as every other
+    /// text input — so the cursor keys and the readline word ops
+    /// (`Ctrl+W`/`Ctrl+U`/`Ctrl+←→`/`Ctrl+A`/`Ctrl+E`) work here too,
+    /// and a typed query is scrubbed on drop like any other buffer.
+    /// Its `text()` drives the fuzzy ranking.
+    pub search_query: LineEditor,
 }
 
 impl Default for Vault {
@@ -78,7 +82,7 @@ impl Default for Vault {
             collection_counts: HashMap::new(),
             active_folder: FolderFilter::All,
             folder_selected: 0,
-            search_query: String::new(),
+            search_query: LineEditor::new(),
         }
     }
 }
@@ -225,7 +229,7 @@ impl Vault {
             lowered,
             &self.active_filter,
             &self.active_folder,
-            &self.search_query,
+            self.search_query.text(),
         );
     }
 
