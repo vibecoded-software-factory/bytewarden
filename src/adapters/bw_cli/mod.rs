@@ -96,38 +96,77 @@ const BULK_TIMEOUT: u64 = 60;
 /// `config.toml` if you ever hit the ceiling.
 const DEFAULT_LIST_ITEMS_TIMEOUT: u64 = 60;
 
-/// Patterns that indicate `bw login` is challenging us with the
-/// **permanent** second factor enrolled on the user's account
-/// (Authenticator app, YubiKey, Email 2FA, …).
+// ── Login-challenge classification ───────────────────────────────────────
+//
+// `bw` has no structured signal for "I need a code" — it reports the
+// challenge as a failed exit plus a human-readable message — so this is
+// string matching, deliberately kept in the adapter.
+//
+// There are **two** vocabularies to match, because the message depends on
+// whether `bw` thought it could prompt:
+//
+//   * The *interactive* prompt text ("Two-step login code:", "New device
+//     verification required. Enter OTP sent to login email:"). These are
+//     specific and tell the two challenges apart.
+//   * The *non-interactive* error text. Our initial `login` runs under
+//     `--nointeraction`, which sets `BW_NOINTERACTION=true` and makes
+//     `canInteract` false, so `bw` skips the prompt entirely and exits
+//     with a terse message instead — and the terse message for a missing
+//     device-verification code and for a missing 2FA code is the *same
+//     string*: "Code is required." (verified against the bw 2026.6.0
+//     bundle, `login.command.ts`).
+//
+// That ambiguity is not resolvable from the text, and it does not need to
+// be: both follow-ups re-run `bw login` *interactively* with the code on
+// stdin, and `bw` then prompts for whatever it actually wants. The only
+// case that genuinely needs `--method` is an account with **several** 2FA
+// providers, and that one reports itself distinctly ("No provider
+// selected") because bw couldn't show its picker.
+
+/// Messages that mean `bw login` wants the **permanent** second factor
+/// enrolled on the account (Authenticator app, YubiKey, Email 2FA, …).
 ///
 /// Resolved by [`VaultPort::login_with_two_factor`], which passes
-/// `--method N` to `bw login` so the CLI knows which factor to use.
+/// `--method N` so the CLI knows which factor to use — required here
+/// because these are exactly the cases where `bw` could not choose a
+/// provider on its own.
 ///
-/// Each pattern is matched as a case-insensitive substring against
-/// the combined stdout + stderr of the failed `login` invocation.
+/// Each pattern is matched as a case-insensitive substring against the
+/// combined stdout + stderr of the failed `login` invocation.
 const TWO_FACTOR_PROMPT_PATTERNS: &[&str] = &[
+    // Interactive prompt text.
     "two-step login",
     "two-step token",
     "authenticator app",
     "additional authentication",
+    // Non-interactive: bw had more than one provider and no `--method`,
+    // so it could not render its picker.
+    "no provider selected",
+    "no providers available",
 ];
 
-/// Patterns that indicate `bw login` is asking for a one-time
-/// **device-verification** code (the e-mailed OTP that fires when bw
-/// doesn't recognise the source device).
+/// Messages that mean `bw login` wants a one-time code it can obtain
+/// without being told which factor to use — the e-mailed
+/// device-verification OTP, or a 2FA challenge on an account with a
+/// single enrolled provider (which `bw` auto-selects).
 ///
-/// Resolved by [`VaultPort::login_with_otp`] — no `--method` flag is
-/// involved; bw matches the prompt automatically.
+/// Resolved by [`VaultPort::login_with_otp`]: no `--method` flag, code
+/// on stdin, `bw` prompts for whichever of the two it actually needs.
 ///
-/// The list is checked **after** [`TWO_FACTOR_PROMPT_PATTERNS`] so a
-/// 2FA prompt that happens to mention "verification code" is routed
-/// down the right path.
+/// Checked **after** [`TWO_FACTOR_PROMPT_PATTERNS`] so a message that
+/// names a specific factor, or reports that no provider could be
+/// selected, wins over the generic ones.
 const DEVICE_VERIFICATION_PROMPT_PATTERNS: &[&str] = &[
+    // Interactive prompt text.
     "new device",
     "device verification",
     "verification required",
     "verification code",
     "enter otp",
+    // Non-interactive: the shared terse message. This is the one the
+    // vast majority of users hit, because the initial `login` always
+    // runs under `--nointeraction`.
+    "code is required",
 ];
 
 /// Classifies a failed `bw login` output into one of the interactive
@@ -1082,6 +1121,63 @@ mod tests {
         assert!(combined_outcome("Invalid email address").is_none());
         assert!(combined_outcome("Username or password is incorrect.").is_none());
         assert!(combined_outcome("").is_none());
+    }
+
+    /// The regression this list exists for. Our initial `login` always
+    /// runs under `--nointeraction`, so `bw` never prints its prompt —
+    /// it exits with a terse message instead. Before this was matched,
+    /// a brand-new device fell through to `LoginOutcome::Failed` and the
+    /// UI told the user their credentials were invalid while Bitwarden
+    /// was e-mailing them a verification code.
+    ///
+    /// String verified against the bw 2026.6.0 bundle: both the missing
+    /// device-verification code and the missing 2FA code return
+    /// `Response.badRequest("Code is required.")`, written to stderr.
+    #[test]
+    fn non_interactive_code_request_is_a_challenge_not_a_credential_failure() {
+        for text in [
+            "Code is required.",
+            "code is required",
+            // As it actually arrives: stdout is empty, stderr carries the
+            // message, and `login` joins them with a newline.
+            "\nCode is required.",
+        ] {
+            assert!(
+                matches!(
+                    combined_outcome(text),
+                    Some(LoginOutcome::NeedsDeviceVerification)
+                ),
+                "{text:?} must be treated as a code challenge"
+            );
+        }
+    }
+
+    /// The one case that genuinely needs `--method`: several enrolled
+    /// providers and no picker, because bw could not prompt. It reports
+    /// itself distinctly, so it routes to the two-factor path where the
+    /// user chooses the method.
+    #[test]
+    fn non_interactive_multi_provider_two_factor_routes_to_the_method_picker() {
+        for text in [
+            "Login failed. No provider selected.",
+            "No providers available for this client.",
+        ] {
+            assert!(
+                matches!(combined_outcome(text), Some(LoginOutcome::NeedsTwoFactor)),
+                "{text:?} must ask the user to pick a 2FA method"
+            );
+        }
+    }
+
+    /// A message naming a specific factor must win over the generic
+    /// "code is required", which is why the two-factor list is consulted
+    /// first. Guards the ordering, not just the membership.
+    #[test]
+    fn a_named_factor_outranks_the_generic_code_request() {
+        assert!(matches!(
+            combined_outcome("Two-step login code:\nCode is required."),
+            Some(LoginOutcome::NeedsTwoFactor)
+        ));
     }
 
     /// `lock` must drop the cached session key. The zeroizing wrapper
