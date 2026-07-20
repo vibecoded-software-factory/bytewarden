@@ -152,15 +152,25 @@ pattern instead: a `WorkerRequest`/`WorkerResponse`/`InFlight` variant + a
   **`App::submit(slot, label, req)`**: it claims the `in_flight` slot via
   `begin`, shows the `Running` toast, and sends; a failed send releases the
   slot and routes through `on_worker_dead` instead of leaving the UI busy.
-  Only reach for bare `begin()` when state must mutate between claiming and
-  sending — comment why. **One request in flight at a time**
+  Reach for bare `begin()` + a raw `worker_tx.send` only for a **silent**
+  step that must not raise a toast of its own — the chained post-mutation
+  reloads below, or a case where state must mutate between claiming and
+  sending. Comment why. **One request in flight at a time**
   (`App::in_flight: Option<_>`); `input::busy_blocks` gates every key
   but `Esc` while busy so a second request can't be queued.
-- **Background lane** (optional, for silent work that must never gate the
-  user): the post-mutation silent reloads (reload-items, reload-trash,
-  reload-folders after a delete/import/move) and the auto-lock-safe idle
-  resync belong here. Its responses carry **no ticket** and are routed **by
-  variant** at the top of `apply_response`, off the user's `in_flight` slot.
+- **No background lane** — and don't add one. A second worker would need
+  its own `VaultPort`, but the session key is per-adapter (set on the user
+  lane at unlock), so that adapter would have no session and couldn't read
+  anything. With no idle/push refresh to serve either, the lane has no work
+  that justifies the plumbing. The post-mutation reloads (reload-items,
+  reload-trash, reload-folders after a delete/import/move) are instead
+  **silent chained requests on the user lane**: the `handle_*` claims the
+  slot with bare `begin()` — never `submit` — so the toast from the step
+  the user actually asked for survives, and the response still routes by
+  ticket like any other. The one genuinely ticketless response is
+  `WorkerResponse::Locked`, matched by variant at the top of
+  `apply_response` (`flows::is_fire_and_forget`) because `lock_vault`
+  fires and forgets.
 - **No push lane.** The `bw` CLI has no realtime stream, so there is no
   `api-listen` equivalent and no listener supervisor. The vault is refreshed
   by explicit sync / reload, not by pushed events. Do not invent one.
