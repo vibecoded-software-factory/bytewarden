@@ -117,25 +117,28 @@ main ──► tui ──► flows ──► ports ◄── adapters
   - `worker.rs` — worker thread(s) + `WorkerRequest`/`WorkerResponse`/
     `InFlight`; `run_caught` panic isolation per call.
   - `flows/` — per-feature `request_*`/`handle_*` pairs (`auth`, `vault`,
-    `items`, `copy`, `generator`, `folders`, `memberships`, `reprompt`,
-    `export`, `import`, `send`, `assign_collections`, `item_json`).
+    `items`, `item_actions`, `item_json`, `copy`, `generator`, `folders`,
+    `memberships`, `reprompt`, `export`, `import`, `send`,
+    `assign_collections`, `palette`).
     `flows::apply_response` routes each response by the `in_flight` ticket.
-  - `input/` — per-screen key handlers (router `input/mod.rs`) + `mouse.rs`;
-    shared mechanics in `input/common.rs` (`list_nav`, `route_line_editor`,
-    `search_key`, `confirm_key` + `run_confirm`, `busy_blocks`,
-    `cycle_focus`) — every handler delegates, never re-implements.
+  - `input/` — per-screen key handlers (router `input/mod.rs`) + `mouse.rs`.
+    Shared mechanics — every handler delegates, never re-implements:
+    `input/common.rs` (`route_line_editor`, `search_key`) ·
+    `input/nav.rs` (`nav_wrap`, `nav_clamp`, `text_input`) ·
+    `input/mod.rs` (`busy_blocks`, `is_alt`, `dispatch_screen_key`) ·
+    `App::cycle_focus` / `App::focus_panel` / `App::go_back`.
   - `view/` — per-screen renderers (router `view/mod.rs::draw`; popups draw
     their base screen underneath) + the widget system in `view/widgets.rs`
     (see *UI system*); `logo.rs`/`starfield.rs` (splash/login only).
   - Support modules under `tui/`: `theme.rs` (presets + `ColorCaps`
-    adaptation + semantic styles), `settings_model.rs`, `action.rs`
+    adaptation + semantic styles), `settings_overlay.rs`, `action.rs`
     (`ActionState`/`CmdEntry`), `screens.rs` (`Screen`/`Focus`),
     `mouse_areas.rs` (hit-test rects), `session_file.rs` (keep-session
     per-PPID file), `debug_log.rs`.
 
 New screen = `Screen` variant + `input/<screen>.rs` (wired in the router) +
 `view/<screen>.rs` (wired in `draw`) + a `view/help.rs` section + the
-four-surface keybinding sync. **Reuse the shared helpers rather than
+five-surface keybinding sync (see the pre-flight checklist). **Reuse the shared helpers rather than
 re-implementing per screen** — that is what keeps the app coherent.
 
 ## Execution model — worker thread(s) + mpsc (do NOT touch unprompted)
@@ -151,7 +154,7 @@ pattern instead: a `WorkerRequest`/`WorkerResponse`/`InFlight` variant + a
   slot and routes through `on_worker_dead` instead of leaving the UI busy.
   Only reach for bare `begin()` when state must mutate between claiming and
   sending — comment why. **One request in flight at a time**
-  (`App::in_flight: Option<_>`); `input::common::busy_blocks` gates every key
+  (`App::in_flight: Option<_>`); `input::busy_blocks` gates every key
   but `Esc` while busy so a second request can't be queued.
 - **Background lane** (optional, for silent work that must never gate the
   user): the post-mutation silent reloads (reload-items, reload-trash,
