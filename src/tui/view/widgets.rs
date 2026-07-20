@@ -850,9 +850,12 @@ fn render_cmd_bar_inner(
 /// The raw-text core of the input renderer: spans for `text` with a
 /// reverse-video block cursor on the character at `cursor` (a character
 /// index, not a byte offset) when `focused`; at end-of-text the cursor
-/// is a reversed space. Prefer [`editor_spans`] — this exists for the
-/// one input not backed by a `LineEditor` (the vault search query).
-pub fn cursor_spans(text: &str, cursor: usize, focused: bool, t: &Theme) -> Vec<Span<'static>> {
+/// is a reversed space.
+///
+/// Private on purpose — every input in the app is a `LineEditor`, so
+/// [`editor_spans`] is the only entry point. Exposing the raw-text form
+/// is what let the vault search box drift into a hand-rolled buffer.
+fn cursor_spans(text: &str, cursor: usize, focused: bool, t: &Theme) -> Vec<Span<'static>> {
     let base = Style::default().fg(t.foreground);
     if !focused {
         return vec![Span::styled(text.to_string(), base)];

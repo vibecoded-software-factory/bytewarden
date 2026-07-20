@@ -362,11 +362,18 @@ fn vault_sections(out: &mut Vec<Line<'static>>, focus: &Focus, t: &Theme) {
                 "Append to query — list re-ranks live",
                 t,
             ));
-            out.push(help_line("Backspace", "Pop last character", t));
+            out.push(help_line("Backspace / Del", "Delete around the cursor", t));
+            out.push(help_line("← → / Home / End", "Move the cursor", t));
+            out.push(help_line(
+                "Ctrl+W / Ctrl+U",
+                "Delete word back / to line start",
+                t,
+            ));
+            out.push(help_line("Ctrl+← / Ctrl+→", "Move by word", t));
             out.push(help_line("Esc", "Clear query and return to list", t));
             out.push(help_line(
-                "j / k  ↑ ↓  PgUp/PgDn",
-                "Move selection in the list",
+                "↑ ↓  PgUp/PgDn",
+                "Move selection in the list (j/k type here)",
                 t,
             ));
             out.push(help_line("Enter", "Open detail of the selected item", t));

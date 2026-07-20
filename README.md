@@ -514,10 +514,13 @@ Prefix the query with `url:` to narrow the match to login URIs only — the equi
 
 Non-prefixed queries keep the regular fuzzy ranking over name + username + URI + notes. While focused:
 
-- Plain characters extend the query.
-- `Backspace` pops the last character.
+The search box is a full text input (the same `LineEditor` behind every other field), so it is edited, not just appended to:
+
+- Plain characters insert at the cursor — **including `j` and `k`**, which type here rather than navigating.
+- `←` / `→` / `Home` / `End` move the cursor; `Backspace` / `Delete` remove around it.
+- `Ctrl+W` deletes the previous word, `Ctrl+U` kills to the line start, `Ctrl+←` / `Ctrl+→` move by word, `Ctrl+A` / `Ctrl+E` jump to line start / end.
+- `↑` / `↓` and `PgUp` / `PgDn` move the list selection; `Enter` opens the highlighted item.
 - `Esc` clears the query and returns to the list.
-- `j`/`k` and `Enter` navigate / open the highlighted item.
 - `Tab` cycles to the next panel.
 
 The score (descending) is roughly:
@@ -1145,7 +1148,8 @@ VAULT — folders [1]
 
 VAULT — items filter [2] · search [/]
   Items:  j/k nav · Enter apply
-  Search: type to filter · ↑↓ PgUp/PgDn navigate · Enter open · Esc clear
+  Search: type to filter (j/k type too) · ←→ Home End Ctrl+W/U cursor & word ops
+          ↑↓ PgUp/PgDn navigate · Enter open · Esc clear
 
 DETAIL — read (bare letters act)
   j/k ↑↓ Tab fields · F2 reveal hidden · Esc/h back

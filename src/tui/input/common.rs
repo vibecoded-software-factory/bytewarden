@@ -63,6 +63,34 @@ pub fn route_line_editor(editor: &mut LineEditor, key: KeyEvent) -> bool {
     false
 }
 
+/// Routes one key into a search box's [`LineEditor`], returning `true`
+/// when the query changed (so the caller rebuilds its filter).
+///
+/// A search box is a typing surface layered over a list, so it can't
+/// simply forward every key: the ones the list owns — `↑`/`↓`,
+/// `PgUp`/`PgDn`, `Enter`, `Tab`/`BackTab` and `Esc` — have to reach the
+/// list. This declines exactly those and forwards the rest to
+/// [`route_line_editor`], which makes it safe to use as a handler's
+/// fallback arm without shadowing navigation.
+///
+/// Everything else *types*, bare `j`/`k` included: the gradient reserves
+/// bare letters for actions only on surfaces that don't type, and a
+/// search box types. Arrow-key list navigation is what a search box
+/// gives up its letters for.
+pub fn search_key(editor: &mut LineEditor, key: KeyEvent) -> bool {
+    match key.code {
+        KeyCode::Up
+        | KeyCode::Down
+        | KeyCode::PageUp
+        | KeyCode::PageDown
+        | KeyCode::Enter
+        | KeyCode::Tab
+        | KeyCode::BackTab
+        | KeyCode::Esc => false,
+        _ => route_line_editor(editor, key),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -111,5 +139,49 @@ mod tests {
         // Ctrl+A is a cursor move, not an 'a' insertion.
         assert!(!route_line_editor(&mut e, ctrl(KeyCode::Char('a'))));
         assert_eq!(e.text(), "");
+    }
+
+    #[test]
+    fn search_key_types_bare_letters_including_j_and_k() {
+        let mut e = LineEditor::new();
+        for c in ['j', 'k', 'x'] {
+            assert!(search_key(&mut e, key(KeyCode::Char(c))));
+        }
+        assert_eq!(e.text(), "jkx");
+    }
+
+    #[test]
+    fn search_key_declines_the_keys_the_list_owns() {
+        let mut e = LineEditor::with_text("q");
+        for code in [
+            KeyCode::Up,
+            KeyCode::Down,
+            KeyCode::PageUp,
+            KeyCode::PageDown,
+            KeyCode::Enter,
+            KeyCode::Tab,
+            KeyCode::BackTab,
+            KeyCode::Esc,
+        ] {
+            assert!(
+                !search_key(&mut e, key(code)),
+                "{code:?} must reach the list"
+            );
+        }
+        assert_eq!(e.text(), "q", "navigation keys never touch the buffer");
+    }
+
+    #[test]
+    fn search_key_inherits_the_word_ops() {
+        let mut e = LineEditor::with_text("foo bar");
+        assert!(search_key(&mut e, ctrl(KeyCode::Char('w'))));
+        assert_eq!(e.text(), "foo ");
+    }
+
+    #[test]
+    fn search_key_moves_the_cursor_without_reporting_change() {
+        let mut e = LineEditor::with_text("hi");
+        assert!(!search_key(&mut e, key(KeyCode::Left)));
+        assert_eq!(e.cursor(), 1);
     }
 }
