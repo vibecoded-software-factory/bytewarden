@@ -1075,7 +1075,9 @@ src/
 
 ## Testing & coverage
 
-The crate has **252 unit tests + 4 doctests**, all run with `cargo test`.
+The crate ships **300+ unit tests** plus doctests, all run with `cargo test`. For the
+exact current figure, read the output — a hard-coded count in a README only ever
+drifts.
 
 ```bash
 cargo test                      # everything
@@ -1095,19 +1097,38 @@ cargo llvm-cov --open           # generate + open in the browser
 
 ### Coverage status
 
-| Layer | Lines |
-|-------|-------|
-| `domain/` (pure) | ~98% |
-| `adapters/` (bw_cli/codec, bw_cli/json, bw_generator::build_args, settings_toml) | ~94% |
-| `tui/` testable helpers (folders, edit_field, detail_fields, theme, session_file, flows::item_json) | ~95% |
-| **TOTAL (all 12 k LOC)** | **~29%** |
+Measured with `cargo llvm-cov --summary-only`; percentages are line coverage over
+executable lines, so they don't match a raw `wc -l` of the sources.
 
-The "lo que apuntamos a cubrir" capa is at **~95%**. The total is brought down by:
+| Layer | Executable lines | Covered |
+|-------|-----------------:|--------:|
+| `domain/` (pure) | 1 047 | **96.7%** |
+| `ports/` | 79 | 86.1% |
+| `adapters/` | 1 694 | 58.7% |
+| `tui/` (all) | 12 697 | 46.8% |
+| **TOTAL** | **15 532** | **51.6%** |
 
-- `tui/view/*` (~3 200 lines) — render code, untested without snapshot tests.
-- `tui/input/*` (~1 400 lines) — handlers, untested without a synthetic event harness.
-- `tui/flows/*` except `item_json` — untested without fakes for the four ports.
-- `adapters/bw_cli/{mod,process}.rs` — untested without a fake `bw` binary in `$PATH`.
+The layer we deliberately target is high — the pure logic that a bug would silently
+corrupt:
+
+| Module | Covered |
+|--------|--------:|
+| `adapters/bw_cli/codec.rs`, `adapters/bw_cli/json.rs` | 100% |
+| `tui/folders.rs` | 100% |
+| `domain/item.rs`, `domain/search.rs`, `domain/validation.rs` | ~99% |
+| `tui/edit_field.rs`, `tui/detail_fields.rs` | ~99% |
+| `tui/theme.rs` | 98.4% |
+| `adapters/settings_toml.rs` | 95.2% |
+| `tui/session_file.rs` | 92.6% |
+| `tui/flows/item_json.rs` | 86.0% |
+
+The total is held down by the code we knowingly don't cover:
+
+- `tui/input/*` (13.0%) — key handlers, untested without a synthetic event harness.
+- `tui/flows/*` (22.2% overall, `item_json` excepted) — untested without fakes for the four ports.
+- `tui/view/*` (40.1%) — render code; the mouse hit-testing tests exercise a good
+  slice of it incidentally, but there are no snapshot tests.
+- `adapters/bw_cli/mod.rs` (25.6%) — untested without a fake `bw` binary in `$PATH`.
 
 Tests live alongside their source files in `#[cfg(test)] mod tests` blocks (the Rust convention), so they have access to private functions and `cargo test` builds them; the release binary contains no test code.
 
