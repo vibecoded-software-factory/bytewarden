@@ -1027,9 +1027,12 @@ pub fn handle_delete(
         Ok(()) => {
             app.vault.items.retain(|i| i.id != item_id);
             app.vault.rebuild_caches();
-            if app.vault.selected_index >= app.vault.items.len() && !app.vault.items.is_empty() {
-                app.vault.selected_index = app.vault.items.len() - 1;
-            }
+            // The cursor indexes the *filtered* cache, not `items`, so it
+            // has to be clamped through the shared contract — under an
+            // active search or folder/type filter the filtered list is
+            // shorter than `items` and a raw `items.len()` bound leaves the
+            // cursor past its end.
+            app.vault.reanchor_selection(None);
             let label = if permanent {
                 "deleted permanently"
             } else {
