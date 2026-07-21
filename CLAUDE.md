@@ -2,12 +2,18 @@
 
 Guidance for Claude Code when working in this repository.
 
-> **This spec is the target architecture of an in-progress restructuring.**
-> It describes where `bytewarden` is going, not necessarily every line as it
-> stands today. Where the current code diverges from this document, **the
-> document wins** — bring the code to the spec, and never re-introduce a
-> pattern this file rules out. Update the spec in the same change whenever a
-> decision here changes.
+> **This document describes `bytewarden` as it is actually built.** It is a
+> map of the code, not a wish-list: every factual claim here — a type name, a
+> signature, which module owns what — should be verifiable by reading `src/`.
+> Where the two disagree, **the code wins**: the document is the thing that's
+> wrong, and correcting it is part of the change that caused the drift.
+>
+> Design rules are still rules (reuse the shared component, keep the ports
+> boundary, never regress the hygiene discipline) — but where the code doesn't
+> yet meet one everywhere, this file **names the exceptions** instead of
+> stating the rule as if it were universal. If you tighten a rule, either
+> bring the code along in the same change or record the remaining distance.
+> Never describe intended behaviour in the present tense.
 
 `bytewarden` — a terminal UI (Ratatui) over the **Bitwarden CLI**. It shells
 out to the `bw` binary and parses its JSON; there is **no** Bitwarden SDK
@@ -94,15 +100,24 @@ main ──► tui ──► flows ──► ports ◄── adapters
   `fuzzy_score_lowered`/`LoweredItem`, the login/2FA types (`VaultInfo`,
   `LoginOutcome`, `TwoFactorMethod`), validators, identity helpers.
 - `src/ports/` — traits: `VaultPort`, `ClipboardPort`, `SettingsPort`,
-  `PasswordGeneratorPort` (+ the typed `BwError`). Every port method returns
-  `Result<_, BwError>`, never `Result<_, String>` (see *Error taxonomy*).
-  `SettingsPort::write_*` return `bool` — never fatal, but callers must
-  inform on failure.
+  `PasswordGeneratorPort` (+ the typed `BwError`). Every fallible port method
+  returns `Result<_, BwError>`, never `Result<_, String>` (see *Error
+  taxonomy*); the deliberate exceptions are `VaultPort::login` (returns the
+  domain `LoginOutcome`, since a 2FA challenge isn't an error) and
+  `VaultPort::lock`, which is infallible. `SettingsPort::write_*` return
+  `()`: a settings write is never fatal, and today it is also **silent** —
+  `settings_toml` swallows the underlying error, so no caller can tell a
+  failed persist from a successful one. Widening these to `bool`/`Result` so
+  the UI can toast a failed write is an open improvement, not the contract.
 - `src/adapters/` — the **only** layer doing I/O:
-  - `bw_cli/` — subprocess + `codec` (serde-built JSON payloads, base64) +
-    `process` (wall-clock timeouts, concurrent piped-drain) + `json`
-    (tolerant parsing). One-shot subprocess model; there is **no** persistent
-    session or push stream (the `bw` CLI has neither — see *Execution model*).
+  - `bw_cli/` — subprocess + `codec` (a standalone base64 encoder, and
+    nothing else) + `process` (wall-clock timeouts, concurrent piped-drain) +
+    `json` (one `opt_str` helper). Note the two small modules are narrower
+    than their names suggest: the request payloads are built inline in
+    `bw_cli/mod.rs` with `serde_json::json!` / `to_string`, and the tolerant
+    list parsing lives there too as `parse_list_tolerant`. One-shot subprocess
+    model; there is **no** persistent session or push stream (the `bw` CLI has
+    neither — see *Execution model*).
   - `clipboard_system.rs` — wl-copy/xclip/xsel/pbcopy + **OSC 52** fallback
     for headless, with compare-and-clear auto-clear (`clipboard_clear_secs`).
   - `settings_toml.rs` — hand-rolled TOML preserving unknown keys, **atomic**
@@ -156,8 +171,13 @@ pattern instead: a `WorkerRequest`/`WorkerResponse`/`InFlight` variant + a
   step that must not raise a toast of its own — the chained post-mutation
   reloads below, or a case where state must mutate between claiming and
   sending. Comment why. **One request in flight at a time**
-  (`App::in_flight: Option<_>`); `input::busy_blocks` gates every key
-  but `Esc` while busy so a second request can't be queued.
+  (`App::in_flight: Option<_>`); `input::busy_blocks` gates every **key** but
+  `Esc` while busy so a second request can't be queued. It gates *keys only* —
+  `handle_events` dispatches `Event::Mouse` before that check, so a click
+  during an in-flight request still mutates local state (selection, filter,
+  `show_password`). The duplicate worker request itself is refused by
+  `App::begin`, so this can't wedge the UI, but the mouse path is not the
+  equal of the key path here.
 - **No background lane** — and don't add one. A second worker would need
   its own `VaultPort`, but the session key is per-adapter (set on the user
   lane at unlock), so that adapter would have no session and couldn't read
@@ -204,7 +224,7 @@ instead:
 - `Spawn(String)` — couldn't exec `bw` (not on PATH / perms).
 - `Timeout { label, secs }` — wall-clock budget exceeded, child killed.
 - `Exit { stderr, status }` — non-zero exit; stderr passed through verbatim.
-- `InvalidJson { detail }` — stdout wasn't the JSON we expected.
+- `InvalidJson(String)` — stdout wasn't the JSON we expected.
 - `Shape(String)` — parsed, exit 0, but an expected field/shape was missing.
 - `Internal(String)` — an adapter/worker panic captured via `catch_unwind`,
   or an internal precondition failure (e.g. a session-required call while
@@ -242,9 +262,15 @@ All calls below are methods on `app.vault`.
 | theme / settings change | (no cache) | re-resolve the theme; nothing to invalidate |
 
 After any load/reload handler, re-anchor `selected_index` onto the same item
-**by id** so a background resync never yanks the cursor. `selected_index`
-must only ever reach `items`/`trashed_items` through the filtered cache via
-`.get()`, so it can never point out of bounds.
+**by id** via `Vault::reanchor_selection(Some(id))` so a background resync
+never yanks the cursor. After an **in-place removal** (delete), call
+`reanchor_selection(None)` — the same helper with no anchor clamps the cursor
+against the *filtered* list, parks it at 0 on an empty view and keeps
+`scroll_offset` consistent. Never bound the cursor by `items.len()`: it
+indexes the filtered cache, which is shorter whenever a search or folder/type
+filter is active, so a raw `items.len()` bound silently fails to fire.
+`selected_index` must only ever reach `items`/`trashed_items` through the
+filtered cache via `.get()`, so it can never point out of bounds.
 
 ## UI system
 
@@ -300,17 +326,25 @@ All Bitwarden access is the `bw` binary spawned as a subprocess
 (`adapters/bw_cli/`). Adding functionality means a new CLI invocation, not an
 SDK crate:
 
-- Build argv/JSON payloads in `codec.rs` (serde → base64, **never** string
-  concat), run with a per-op **timeout** via `process.rs`, parse
-  **strict-but-tolerant** in `json.rs` (skip a malformed row with a
-  diagnostic, never drop the whole list).
+- Build JSON payloads with `serde_json::json!` / `to_string` in
+  `bw_cli/mod.rs` and base64 them through `codec::base64_encode` (**never**
+  string concat), run with a per-op **timeout** via `process.rs`, and parse
+  lists through `parse_list_tolerant` so one malformed row can never drop the
+  whole list. That helper currently discards a bad row **silently**
+  (`filter_map(.. .ok())`) — a schema drift loses items with no trace at all;
+  emitting a per-row diagnostic is an open improvement.
 - **Secrets never in argv.** Master passwords / OTP / 2FA codes are fed via
   stdin or the `BW_PASS_INPUT` env var; the session key via `BW_SESSION`,
   never `--session`. (`ps aux` / `/proc/PID/cmdline` must never show a
   secret.)
-- Every invocation is appended to the in-app command log with the session key
-  **redacted** (`***`); the same redacted line goes to `~/.bytewarden.log`
-  under `BYTEWARDEN_DEBUG=1`.
+- The **TUI** appends each invocation it drives to the in-app command log with
+  the session key **redacted** (`***`), and the same redacted line goes to
+  `~/.bytewarden.log` under `BYTEWARDEN_DEBUG=1`. Redaction lives in
+  `App::push_cmd` (it owns the cached session marker), not in the adapter — so
+  an invocation the adapter issues on its own (the four
+  `parallel_session_data` threads, the parked login child) is only logged if
+  the flow that started it records one. A new flow that skips `push_cmd`
+  leaves its `bw` call invisible.
 - `parallel_session_data` overlaps the four post-login reads
   (folders/orgs/collections/import-formats) by cloning the adapter (sharing
   one `Arc<Zeroizing>` session key) across short-lived threads; a partial
@@ -379,7 +413,11 @@ sibling's approach; don't reference it in what ships here.
   UX is a change to all of them (see *Working agreements*).
 - The hygiene discipline: zeroize, tolerant parsing, panic isolation,
   timeouts on every subprocess, redacted logging, no secrets in argv / on
-  disk, atomic settings writes, owner-only perms.
+  disk, atomic settings writes, owner-only perms. One live exception:
+  `process::bw_run_with_password_and_stdin` waits with `wait_with_output()`
+  and **no** deadline. It currently has zero call sites (every caller uses the
+  `_timeout` twin), but it is `pub` in a `pub mod`, so treat it as a footgun —
+  don't reach for it, and prefer deleting it over using it.
 - The Rust toolchain pin (`rust-toolchain.toml`, 1.95.0). There is **no**
   crate-wide `#![forbid(unsafe_code)]` and `main.rs` carries no `unsafe`; keep
   the composition root unsafe-free (seed the keep-session key via

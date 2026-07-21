@@ -5,11 +5,16 @@ any UI change or new feature, and keep it up to date before every push** (see
 `CLAUDE.md`). The whole point is that every screen looks and behaves the
 same — when in doubt, reuse an existing component; never invent a one-off.
 
-> **This spec is the target of an in-progress restructuring.** It describes
-> where the UI is going. Where the code diverges, **the spec wins** — bring
-> the code to it, and update the spec in the same change when a decision here
-> changes. Everything documented here is backed (or to be backed) by real
-> code in `src/tui/view/` and `src/tui/input/`.
+> **This document describes the UI as it is actually built.** Where the code
+> diverges, **the code wins** — this file is what's wrong, and correcting it
+> is part of the change that caused the drift. Every component named here
+> exists in `src/tui/view/` or `src/tui/input/`; if you can't `grep` it, it
+> doesn't belong in this file.
+>
+> The conventions below are still binding for new code. Where the code doesn't
+> yet follow one everywhere, the rule **names its exceptions** rather than
+> pretending they aren't there, and the full list lives in *Gaps* at the
+> bottom. Shrink that list; never let it go stale.
 
 **Responsiveness is a hard rule.** Every element must adapt to the panel
 width: show in full when it fits, otherwise **wrap** onto continuation lines
@@ -22,11 +27,11 @@ real content width, not a magic number.
 
 The router `view::mod::draw` picks a base screen per `Screen`, then overlays
 any popup on top (popups draw the base screen underneath first). The terminal
-floor is **60×18** (`view::mod::MIN_W`/`MIN_H`); below it every screen is
-replaced by the centered "terminal too small" notice
+floor is **60×18** (`view::mod::MIN_TERM_WIDTH` / `MIN_TERM_HEIGHT`); below it
+every screen is replaced by the centered "terminal too small" notice
 (`view::mod::draw_too_small`): three vertically-centered lines — an
 `error`-colored bold `Terminal too small` title, a `dim` `Resize to at least
-{MIN_W}×{MIN_H} (currently {w}×{h})` line, and a `dim` `Ctrl+C to quit` hint.
+{w}×{h}` line, and a `dim` `Ctrl+C to quit` hint.
 
 **Vault** (`view/vault.rs`) is the reference layout: a 2-column body over the
 shared command log and hint bar.
@@ -84,15 +89,19 @@ The vault's focusable panels are the `screens::Focus` variants: `Status`,
 - **Every focusable panel's border tag is its literal go-to combo.** Titles
   follow the **`─[N]-Name`** form where `[N]` is the number-key focus target
   (`0`–`4`); `/` jumps to Search. `Tab`/`Shift+Tab` cycle focus via
-  `input::common::cycle_focus`.
-- **Border tiers signal reachability** (not just two states):
-  - **focused** → accent + bold (`view::mod::titled_block(title, true, app)`).
-  - **available, unfocused** → the `inactive` tint (a *bright*, near-text
-    gray — you can Tab / go-to it).
-  - **unavailable** → the darker `muted` tint for a panel you can't focus
-    right now, so it doesn't read as a Tab target that's ignoring you.
-- A dim `{selected} of {total}` counter sits bottom-right in the border
-  (`widgets::list_title` → `list_table`).
+  `App::cycle_focus`.
+- **The border signals focus, in two states** — the single decision lives in
+  `widgets::focus_style(theme, focused)`, consumed by
+  `widgets::titled_block(title, bottom, focused, theme)`:
+  - **focused** → accent + bold.
+  - **unfocused** → the `inactive` tint (a *bright*, near-text gray).
+
+  There is no third "unavailable" tier: nothing renders a `muted` panel
+  border, and a panel you can't focus right now looks the same as one you can.
+- A dim `{selected} of {total}` counter sits bottom-right in the border — it
+  is the `bottom` argument of `titled_block`, which `list_table` fills from
+  its `ListTable::counter`. Panels that hand-roll their block (Status, Search,
+  the command log) have no such counter.
 
 ## Lists & tables — the single pattern
 
@@ -123,8 +132,10 @@ bytewarden has **two list flavors**; reuse the matching one, never a one-off.
    `▶ ` highlight symbol, a **`muted` dotted-rule separator row** (`┈`, via
    `separator_row`) injected before the last group — an explicit divider, not
    a blank gap — and a `ListState` whose visual index skips the separator.
-   Per-row counts come from precomputed maps (`App::rebuild_sidebar_counts`) —
-   never scan `items` per frame.
+   Per-row counts come from precomputed maps (`Vault::rebuild_sidebar_counts`)
+   — never scan `items` per frame. Neither sidebar list draws a scrollbar
+   today, and the Folders panel is height-clamped to 14 rows, so it overflows
+   silently past ~9 folders + collections (see *Gaps*).
 
 Row indicators (item list): `★` favorite, `🔒` reprompt-protected, `👥`
 belongs to an organisation.
@@ -157,21 +168,32 @@ hand-roll a `Block` with a different border type: a new panel is rounded via
 - `widgets::titled_block(title, bottom, focused, theme)` — the rounded section
   panel: focused → accent border + **bold** title, else the `inactive` tint.
   `focused` is passed explicitly (the widget never reverse-engineers it from
-  the color). Used for every panel.
+  the color). Used by the Folders and Items sidebars and by `list_table`;
+  the Status, Search and command-log panels in `view/vault.rs` still assemble
+  their own `Block` (see *Gaps*).
 - `widgets::focus_style(theme, focused)` — the **single** focused/unfocused
   chrome decision (`Theme::emphasis()` when focused, else `inactive`);
   `titled_block` and anything else that shows focus consume it.
 - `widgets::rounded_block(style)` — the rounded frame for popups / field
   value boxes.
-- `widgets::list_table` / `list_title` / `middle_ellipsis` /
-  `trim_end_ellipsis` / `table_row_at` — the list renderer + sizing helpers.
-- `widgets::draw_search_box(...)` — the `─[/]-Search` box; a leading `󰍉 `
-  magnifying-glass affordance (one-column left margin, coloured to match the
-  current state's text — not accent), then the placeholder when empty/unfocused
-  or the block cursor when focused (via `editor_spans`).
-- `widgets::editor_spans` / `editor_spans_masked` / `editor_lines` — the one
-  text-input renderer over a `LineEditor` (masked `●` for secret fields —
-  the login master password / OTP, detail hidden fields until reveal).
+- `widgets::list_table(frame, theme, area, ListTable { .. })` — the list
+  renderer. It returns the **realised** `TableState` offset so the caller can
+  map a click back to a row after auto-scroll. Sizing (indicator width, the
+  6–14 type-column clamp) is computed by the caller in `view/vault.rs`; there
+  are no shared ellipsis/row-hit helpers in `widgets` today.
+- The `─[/]-Search` box is rendered inline by `view::vault::render_search`,
+  not by a shared widget: a leading `󰍉 ` magnifying-glass affordance
+  (one-column left margin, coloured to match the current state's text — not
+  accent), then the placeholder when empty/unfocused or the block cursor when
+  focused (via `editor_spans`). A second search box would be the point at
+  which to extract it.
+- `widgets::editor_spans` / `editor_spans_masked` — the one text-input
+  renderer over a `LineEditor` (masked `●` for secret fields — the login
+  master password / OTP, detail hidden fields until reveal).
+  `editor_line_hinted` is the placeholder-aware variant used by
+  `draw_input_popup`. `cursor_spans` underneath them is deliberately
+  **private**: exposing raw text is what let the vault search drift into a
+  hand-rolled buffer once already.
 - `widgets::render_cmd_bar_with_help(frame, bar, &[(key, label)], theme)` —
   the bottom per-focus hint bar: `(key, label)` pairs through `legend_line`
   on the left, `F1 help · F10 settings` anchored right (clickable, never
@@ -183,7 +205,9 @@ hand-roll a `Block` with a different border type: a new panel is rounded via
   + rounded accent block + emphasized title (with its live count) + optional
   query row + a windowed list (multi-line items + non-selectable section
   headers supported) with the `▶` + `selected_bg` selection + a scrollbar +
-  a width-fitted `legend_line` footer. A new picker overlay **must** use it.
+  a width-fitted `legend_line` footer. A new picker overlay **must** use it —
+  though today the **command palette is its only consumer**; ItemActions and
+  Memberships each hand-roll the same skeleton (see *Gaps*).
 - `widgets::draw_confirm_popup(frame, area, theme, ConfirmPopup { .. })` —
   **the** confirm overlay: a centered, rounded, error-bordered popup with the
   caller's body copy above one key-labelled `ConfirmAction` row per action
@@ -202,16 +226,29 @@ hand-roll a `Block` with a different border type: a new panel is rounded via
 - `widgets::legend_line(&[(key, label)], width, theme)` — **the** hint/legend
   builder: keys through `key_style` (accent + bold), labels dim, ` · `
   separators, fitted to the width by whole segments — **never a clipped key**.
-  Every footer hint and inline legend routes here.
-- `widgets::button(label, active, theme)` — **the** `[ label ]` action button
-  (login buttons, confirm confirm/cancel). One look for every button.
+  Screens reach it *indirectly*, by handing `&[(key, label)]` pairs to
+  `render_cmd_bar` / `render_cmd_bar_with_help` / `draw_picker_modal` /
+  `draw_confirm_popup` / `draw_input_popup`; no view module calls it directly.
+  The Settings, ItemActions and Memberships overlays bypass it entirely with
+  hardcoded ` · `-joined strings that clip mid-key on a narrow modal (see
+  *Gaps*).
+- There is **no** shared `button` widget. Action affordances are rendered by
+  their own screens (the login form's rows, `ConfirmAction` rows inside
+  `draw_confirm_popup`), so "one look for every button" is a convention held
+  by hand, not by a component.
 - `widgets::empty_state_lines(head, hints, theme)` — the shared empty-state
   body (bold headline + dim hints). **Every empty state teaches**: it names
   the 2-3 keys that would fill the panel (an empty vault → `Alt+N to create`;
   a search that matches nothing → `Esc clears the filter`; a failed load →
   the error + a retry key). A bare dim line is not an acceptable empty state.
-- `widgets::draw_scrollbar` — one dim right-border scrollbar on **every**
-  overflowing region (list, picker list, command log, help).
+  The vault list's three empty states follow this; the **command log** and the
+  **Memberships** overlay still render bare dim text (see *Gaps*).
+- `widgets::draw_scrollbar` — the dim right-border scrollbar for an
+  overflowing region. Wired today into `list_table`, `draw_picker_modal`, the
+  Settings theme picker and AssignCollections. The **command log**, the two
+  **sidebar lists** (Folders, Items) and **Memberships** overflow without one
+  (see *Gaps*); the help popup uses `▲`/`▼` border marks instead, which is
+  deliberate.
 - **Scroll registry** — every scrollable surface records its rect + a
   `widgets::ScrollTarget` as it draws (`register_scroll`, cleared each frame by
   `reset_scroll_regions`); `input::mouse` dispatches the wheel purely by pointer
@@ -321,10 +358,14 @@ sync on every keybinding / action change.
 for the screen it was opened from (`App::help_from`, stamped on F1) plus a
 shared Global section, and on the vault it narrows further to the focused
 panel. The renderer owns the viewport — it clamps `App::help_scroll` against
-the real overflow, so the input handler bumps the offset freely (`j/k`/arrows
-scroll, `PgUp/PgDn` page, `g/G` top/bottom, `q`/`Esc`/`F1` close); `▲`/`▼`
-border marks flag hidden content. Add a section for every new screen and keep
-it in sync with `README.md`.
+the real overflow, so the input handler bumps the offset freely: `j`/`k` and
+`↑`/`↓` scroll a row, `h`/`l` and `←`/`→` pan two columns, `PgUp`/`PgDn` page
+vertically, `Shift+H`/`Shift+L` page horizontally, `Home` returns to the
+origin, `End` jumps to the bottom (a `u16::MAX` sentinel the renderer clamps),
+and `q`/`Esc`/`F1` close. There is **no** `g`/`G` binding. `▲`/`▼` border marks
+flag hidden content — the help popup deliberately uses these in place of a
+`draw_scrollbar`. Add a section for every new screen and keep it in sync with
+`README.md`.
 
 ## Inline editing & the text-input model
 
@@ -468,9 +509,11 @@ mechanisms; don't regress them:
 - **Command log is height-responsive** (`widgets::cmdlog_height`): it yields
   rows to the list as the terminal gets short (monotonically — a taller
   terminal never shrinks the body); `0` hides it.
-- **Footer hint** fits by whole ` · ` segments (`legend_line` / `fit_segments`)
-  with a trailing ` …`, never cutting a keybinding; `F1 help` is anchored
-  right and reserved first.
+- **Footer hint** fits by whole ` · ` segments (inside `legend_line`) with a
+  trailing ` …`, never cutting a keybinding; the `F1 help · F10 settings`
+  anchor is reserved first and wins the space contest. This holds for the
+  screens that go through `render_cmd_bar*`; the overlays listed in *Gaps*
+  hardcode their footer and will clip.
 - **List columns** size to the *visible* rows, clamped; only the final column
   may be `Min`. Overflow uses `middle_ellipsis` (head-biased, keeps an
   identifier tail) or `trim_end_ellipsis` (start-anchored previews).
@@ -479,10 +522,16 @@ mechanisms; don't regress them:
   lists stay clean. The list, command log and help each own their viewport and
   clamp scroll against the *real* overflow (so a `usize::MAX` "jump to end"
   sentinel is safe).
-- **Modals share one geometry** (`center_rect(MODAL_WIDTH_PCT, MODAL_HEIGHT)`)
-  and window their content by the *real* inner height, so a short-but-valid
-  terminal shrinks the modal and the content follows — nothing clips off the
-  bottom.
+- **Modals are centered through one helper, not one size.** Everything routes
+  through `widgets::center_rect(width_pct, height, area)`, but the constants
+  `MODAL_WIDTH_PCT` / `MODAL_HEIGHT` (60 × 20) are used by `draw_picker_modal`
+  alone. `draw_confirm_popup` and `draw_input_popup` take `width_pct` from the
+  caller and derive their height from the content; every other overlay picks
+  its own pair (Export 70×13, Import 70×14, SendCreate 72×17, Reprompt 60×11,
+  AssignCollections 60×16, Memberships 70×22, ItemActions 28×content), and
+  Settings computes width and height from the terminal directly. Overlays that
+  window their content by the real inner height don't clip; Memberships, which
+  doesn't, does (see *Gaps*).
 - **Resize hygiene**: `view::draw` stamps `mouse_areas` with the frame size
   each frame and the run loop `terminal.clear()`s on a size change; clicks
   whose coordinates predate the latest resize are dropped.
@@ -499,8 +548,10 @@ identity comes from the bordered `─[N]-Name` block titles.
 1. **Reuse, don't reinvent** — a new list = `list_table`; a new input =
    `LineEditor` + `editor_spans` (routed via `input::common`); a new panel =
    `titled_block`; a new confirm = `draw_confirm_popup`; a new picker =
-   `draw_picker_modal`; a new button = `widgets::button`; a new hint =
-   `legend_line`; a new empty state = `empty_state_lines`.
+   `draw_picker_modal`; a new single-input popup = `draw_input_popup`; a new
+   hint = `legend_line` (directly, or by handing pairs to `render_cmd_bar*`);
+   a new empty state = `empty_state_lines`; a new scrollable region =
+   `draw_scrollbar` + one `register_scroll` call.
 2. **Fix the class, not the instance** — when you change one screen, change
    every screen with the same pattern (and update this file).
 3. **Every change stays coherent** with the rest of the UI. If you're tempted
@@ -508,8 +559,75 @@ identity comes from the bordered `─[N]-Name` block titles.
 4. **No decorative noise on working screens** — the figlet + starfield belong
    to splash/login only. Screen identity comes from the bordered block titles.
 
-## Gaps vs this spec (known distance, shrink it — never grow it)
+## Gaps — where the code falls short of the conventions above
 
-**None right now.** When code is knowingly left short of this spec, add a
-bullet here naming the distance; whoever touches that area closes the gap in
-the same change (or a dedicated PR) and deletes the bullet.
+These are real, verified divergences, not aspirations. Whoever touches one of
+these areas closes the gap in the same change (or a dedicated PR) and deletes
+the bullet. Shrink this list; never grow it silently — and never "close" a
+bullet by softening the rule instead of fixing the code.
+
+**Widget reuse**
+
+- **ItemActions hand-rolls the picker.** `view/item_actions.rs` re-implements
+  the whole `draw_picker_modal` skeleton — its own `center_rect(28, …)`,
+  `Clear`, accent block, `▶ ` selection, hit registry and footer — for what is
+  a title + selectable rows + a legend. `view/palette.rs` is currently
+  `draw_picker_modal`'s only consumer.
+- **Memberships hand-rolls an overlay and cannot scroll.** `view/memberships.rs`
+  renders an unbounded `Vec<Line>` (one per org + one per collection) into a
+  `Paragraph` with no scroll offset and no scrollbar, inside a fixed
+  `center_rect(70, 22)` — an account with many collections silently loses
+  everything past the fold. It should be a `PickerModal` with a
+  `PickerRow::Header` per org.
+- **Three vault panels bypass `titled_block`.** Status, Search and the command
+  log in `view/vault.rs` assemble their own `Block`, so they carry no
+  `title_bottom` counter (the command log fakes one with an in-title `↑N`).
+
+**Scrollbars and empty states**
+
+- **The command log has neither.** It computes `visible` / `total` / `scroll`
+  but never calls `draw_scrollbar`, and its empty state is a single dim
+  `"  no commands yet"` — exactly the bare line `empty_state_lines` exists to
+  prevent.
+- **Neither sidebar list draws a scrollbar.** Folders is clamped to 14 rows
+  while its content grows with folders + collections; Items can overflow on a
+  short terminal.
+- **Memberships' empty state** is four dim lines with no headline and no keys.
+
+**Legends and geometry**
+
+- **Hardcoded footer strings** (they clip mid-key instead of fitting by whole
+  segments): `view/settings.rs`, `view/item_actions.rs`, `view/memberships.rs`,
+  `view/export.rs`, `view/import.rs`, `view/send_create.rs`, `view/reprompt.rs`,
+  `view/assign_collections.rs`.
+- **Settings computes its own modal geometry** from the terminal rather than
+  going through the shared `center_rect` width/height pair like the other
+  overlays.
+
+**Input**
+
+- **The mouse path is not the twin of the key path while busy.**
+  `input::busy_blocks` gates keys only; `Event::Mouse` is dispatched before the
+  check, so a click during an in-flight request still mutates local state.
+  `App::begin` still refuses the duplicate worker request, so it can't wedge.
+- **The Folders panel's bare letters swallow every modifier.**
+  `input/vault.rs` matches `Char('n'|'r'|'d')` without the `modifiers == NONE`
+  guard the List panel uses. Catching `Alt+` there is deliberate (the code says
+  so — it keeps the old aliases working), but `Ctrl+` falls into the same arm,
+  so `Ctrl+N` on Folders creates a folder.
+- **The generator's Separator field hand-rolls text input** and accepts
+  Ctrl-modified chars, so `Ctrl+W` sets the separator to `"w"`.
+- **Several handlers re-implement `nav_clamp`** inline instead of delegating:
+  `input/settings.rs` (three times), `input/assign_collections.rs`,
+  `flows/folders.rs`, `flows/item_actions.rs`, `flows/palette.rs`.
+- **The palette lists "Sync vault" unconditionally**, while its keybinding
+  (`Alt+S`) is guarded by `!is_trash_view()`.
+
+**Platform**
+
+- **`Alt` is unreachable on a default macOS terminal.** Option sends a composed
+  character unless the terminal is configured to send Meta/`Esc+`, so the
+  `Alt`-tier commands don't arrive at all. The app-wide verbs have `Ctrl+P` as
+  a fallback; the edit/create form verbs (`Alt+N`, `Alt+U`, `Alt+T`, `Alt+R`,
+  `Alt+L`, `Alt+G`, `Alt+Delete`) and the generator's `Alt+C` / `Alt+U` have
+  **no** alternative binding.
