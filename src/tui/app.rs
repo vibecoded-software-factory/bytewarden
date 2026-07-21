@@ -1200,6 +1200,61 @@ mod tests {
         assert!(app.vault.selected_item().is_some());
     }
 
+    #[test]
+    fn deleting_under_an_active_search_clamps_against_the_filtered_list() {
+        use crate::tui::flows::items;
+
+        let (mut app, _req_rx, _resp_tx) = fresh_app();
+        app.vault.items = vec![
+            item("a1", "alpha one", 1, None),
+            item("a2", "alpha two", 1, None),
+            item("z", "zeta", 1, None),
+            item("o", "omega", 1, None),
+            item("k", "kappa", 1, None),
+        ];
+        app.vault.search_query.set("alpha");
+        app.vault.rebuild_caches();
+
+        // The filtered list is much shorter than `items` — that gap is
+        // exactly what a raw `items.len()` clamp used to miss.
+        assert_eq!(app.vault.filtered_items().len(), 2);
+        app.vault.selected_index = 1; // "alpha two", the last visible row
+        assert_eq!(app.vault.selected_item_id().as_deref(), Some("a2"));
+
+        items::handle_delete(&mut app, false, "a2".into(), "alpha two".into(), Ok(()));
+
+        // One match left, so the cursor must come back to it instead of
+        // dangling one past the end of the filtered list.
+        assert_eq!(app.vault.filtered_items().len(), 1);
+        assert_eq!(app.vault.selected_index, 0);
+        assert_eq!(app.vault.selected_item_id().as_deref(), Some("a1"));
+    }
+
+    #[test]
+    fn deleting_the_only_search_match_leaves_the_cursor_parked_at_zero() {
+        use crate::tui::flows::items;
+
+        let (mut app, _req_rx, _resp_tx) = fresh_app();
+        app.vault.items = vec![
+            item("a1", "alpha one", 1, None),
+            item("z", "zeta", 1, None),
+            item("o", "omega", 1, None),
+        ];
+        app.vault.search_query.set("alpha");
+        app.vault.rebuild_caches();
+        assert_eq!(app.vault.filtered_items().len(), 1);
+
+        items::handle_delete(&mut app, true, "a1".into(), "alpha one".into(), Ok(()));
+
+        // Empty filtered view: the cursor parks at 0 and resolves to
+        // nothing, rather than pointing at a row the user can't see.
+        assert!(app.vault.filtered_items().is_empty());
+        assert_eq!(app.vault.selected_index, 0);
+        assert!(app.vault.selected_item().is_none());
+        // The other items are untouched — only the filter hides them.
+        assert_eq!(app.vault.items.len(), 2);
+    }
+
     fn item(id: &str, name: &str, item_type: u8, folder: Option<&str>) -> Item {
         Item {
             id: id.into(),
