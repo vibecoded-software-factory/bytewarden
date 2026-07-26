@@ -77,9 +77,13 @@ with full CRUD over items, folders, attachments, sends, exports and more.
 - [Bitwarden CLI](https://bitwarden.com/help/cli/) (`bw`) installed and on `$PATH`.
 - [Rust toolchain](https://rustup.rs) (`cargo`) to build from source.
 - A clipboard tool: `wl-copy` (Wayland), `xclip` / `xsel` (X11), or `pbcopy` (macOS).
-  Optional — with none installed, bytewarden falls back to the **OSC 52**
-  terminal escape (works over SSH / tmux in a compatible terminal), though the
-  timed auto-clear is skipped on that path (OSC 52 can't read the clipboard back).
+  Required in a graphical session — bytewarden selects the backend whose binary is
+  actually on `$PATH`, and when a graphical session has none installed it reports
+  which package to install instead of silently failing (a terminal that ignores
+  OSC 52 would otherwise make a "copied" report a lie). In a **headless** session
+  (no `$WAYLAND_DISPLAY` / `$DISPLAY`) it falls back to the **OSC 52** terminal
+  escape (works over SSH / tmux in a compatible terminal), though the timed
+  auto-clear is skipped on that path (OSC 52 can't read the clipboard back).
 
 The login wordmark uses the bundled `slant` FIGlet font via `figlet-rs` — no system `figlet` install needed.
 
@@ -993,7 +997,7 @@ Hexagonal (ports & adapters):
 - `adapters/` — concrete implementations:
   - `BwCliAdapter` — spawns the `bw` binary; passwords go through `BW_PASS_INPUT` env var (never argv); base64 encoding done in-process; OTP detection by regex on stderr/stdout.
   - `BwGeneratorAdapter` — `bw generate <flags>`, stateless.
-  - `SystemClipboardAdapter` — picks `wl-copy` / `xclip` / `xsel` / `pbcopy` at runtime.
+  - `SystemClipboardAdapter` — picks `wl-copy` / `xclip` / `xsel` / `pbcopy` by binary availability on `$PATH`; OSC 52 fallback only when headless.
   - `TomlSettingsAdapter` — hand-rolled TOML reader/writer that preserves unknown sections (the `[theme]` block in particular).
 - `tui/` — the driving adapter: `App` state container, `Screen` enum, input router (per-screen handlers), view router (per-screen renderers), action queue (`PendingAction`), session-file helper.
 - `main.rs` — composition root. Hydrates `BW_SESSION` from the keep-session file (if any) and wires concrete adapters into `tui::run`.
