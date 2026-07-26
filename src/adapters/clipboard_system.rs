@@ -1,13 +1,21 @@
 //! [`crate::ports::ClipboardPort`] implementation that shells out to the
 //! native clipboard tool of the running session.
 //!
-//! Backend selection priority:
+//! Backend selection is driven by **tool availability on `$PATH`**, not by
+//! environment variables alone: a session may advertise Wayland/X11 yet not
+//! have the matching binary installed (and the tool can live anywhere on
+//! `$PATH`, e.g. a Homebrew prefix, not only `/usr/bin`). Priority within a
+//! session:
 //! 1. Wayland (`$WAYLAND_DISPLAY` set) → `wl-copy` / `wl-paste`.
 //! 2. X11 (`$DISPLAY` set) → `xclip`, falling back to `xsel`.
 //! 3. macOS → `pbcopy` / `pbpaste`.
 //!
-//! When none of the above can be detected the call returns an error
-//! describing the missing tool.
+//! When a graphical session is detected but its clipboard tool is missing,
+//! the call returns an actionable error naming the package to install —
+//! deliberately *not* a silent OSC 52 fallback, because a terminal that
+//! ignores OSC 52 (e.g. VTE, off by default) would make a "copied" report a
+//! lie about a secret. OSC 52 is used only for a genuinely headless session
+//! (no `$WAYLAND_DISPLAY` / `$DISPLAY`), where it is the only option.
 
 use std::io::Write;
 use std::path::Path;
@@ -33,42 +41,127 @@ struct Backend {
     read_argv: Vec<&'static str>,
 }
 
+/// The kind of session we're running in, for clipboard purposes. Detected
+/// from the environment; kept separate from the (pure) backend decision so
+/// the latter is unit-testable without touching the real environment.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Session {
+    Wayland,
+    X11,
+    MacOs,
+    Headless,
+}
+
+/// Outcome of choosing a clipboard backend for a session.
+enum BackendChoice {
+    /// A tool is available — use it.
+    Use(Backend),
+    /// A graphical session, but none of its clipboard tools are installed.
+    /// Carries the package hint for an actionable error.
+    MissingTool { hint: &'static str },
+    /// No graphical session at all — fall back to OSC 52.
+    Headless,
+}
+
+/// Detects the session kind from the environment. Wayland wins over X11 when
+/// both are advertised (an XWayland session exports both).
+fn detect_session() -> Session {
+    if std::env::var_os("WAYLAND_DISPLAY").is_some() {
+        return Session::Wayland;
+    }
+    if std::env::var_os("DISPLAY").is_some() {
+        return Session::X11;
+    }
+    if cfg!(target_os = "macos") {
+        return Session::MacOs;
+    }
+    Session::Headless
+}
+
+/// True if `name` resolves to a file on `$PATH` (or, for an absolute path,
+/// exists directly). This mirrors how `Command::new` resolves a bare command
+/// name, so it recognises a tool installed anywhere on the user's PATH — not
+/// just a hardcoded `/usr/bin`.
+fn tool_available(name: &str) -> bool {
+    let p = Path::new(name);
+    if p.is_absolute() {
+        return p.exists();
+    }
+    let Some(paths) = std::env::var_os("PATH") else {
+        return false;
+    };
+    std::env::split_paths(&paths).any(|dir| dir.join(name).exists())
+}
+
+/// Pure backend decision: given the session and a tool-availability probe,
+/// pick the backend, report a missing tool, or defer to OSC 52. Pure (the
+/// probe is injected) so it can be unit-tested without a real environment.
+fn select_backend(session: Session, available: &dyn Fn(&str) -> bool) -> BackendChoice {
+    match session {
+        Session::Wayland => {
+            if available("wl-copy") {
+                BackendChoice::Use(Backend {
+                    write_argv: vec!["wl-copy"],
+                    read_argv: vec!["wl-paste", "--no-newline"],
+                })
+            } else {
+                BackendChoice::MissingTool {
+                    hint: "wl-clipboard (provides wl-copy)",
+                }
+            }
+        }
+        Session::X11 => {
+            if available("xclip") {
+                BackendChoice::Use(Backend {
+                    write_argv: vec!["xclip", "-selection", "clipboard"],
+                    read_argv: vec!["xclip", "-selection", "clipboard", "-o"],
+                })
+            } else if available("xsel") {
+                BackendChoice::Use(Backend {
+                    write_argv: vec!["xsel", "--clipboard", "--input"],
+                    read_argv: vec!["xsel", "--clipboard", "--output"],
+                })
+            } else {
+                BackendChoice::MissingTool {
+                    hint: "xclip or xsel",
+                }
+            }
+        }
+        Session::MacOs => {
+            if available("pbcopy") {
+                BackendChoice::Use(Backend {
+                    write_argv: vec!["pbcopy"],
+                    read_argv: vec!["pbpaste"],
+                })
+            } else {
+                BackendChoice::MissingTool {
+                    hint: "pbcopy (a base macOS tool)",
+                }
+            }
+        }
+        Session::Headless => BackendChoice::Headless,
+    }
+}
+
 impl SystemClipboardAdapter {
     /// Constructs a new adapter. Cheap — selection happens at call-time.
     pub fn new() -> Self {
         Self
     }
 
-    /// Picks the clipboard read+write commands for the current session.
-    ///
-    /// Returns `None` when no backend is detectable so the caller can
-    /// surface a clear error to the user instead of guessing.
-    fn choose_backend() -> Option<Backend> {
-        if std::env::var("WAYLAND_DISPLAY").is_ok() {
-            return Some(Backend {
-                write_argv: vec!["wl-copy"],
-                read_argv: vec!["wl-paste", "--no-newline"],
-            });
-        }
-        if std::env::var("DISPLAY").is_ok() {
-            if Path::new("/usr/bin/xclip").exists() || Path::new("/usr/local/bin/xclip").exists() {
-                return Some(Backend {
-                    write_argv: vec!["xclip", "-selection", "clipboard"],
-                    read_argv: vec!["xclip", "-selection", "clipboard", "-o"],
-                });
-            }
-            return Some(Backend {
-                write_argv: vec!["xsel", "--clipboard", "--input"],
-                read_argv: vec!["xsel", "--clipboard", "--output"],
-            });
-        }
-        if cfg!(target_os = "macos") {
-            return Some(Backend {
-                write_argv: vec!["pbcopy"],
-                read_argv: vec!["pbpaste"],
-            });
-        }
-        None
+    /// Picks the clipboard backend for the current session, resolving tool
+    /// availability against the real `$PATH`.
+    fn choose() -> BackendChoice {
+        select_backend(detect_session(), &tool_available)
+    }
+
+    /// Builds the actionable error raised when a graphical session has no
+    /// clipboard tool installed. Reuses `BwError::Spawn` (the same variant
+    /// `write_via` returns) since clipboard access has no dedicated error.
+    fn missing_tool_err(hint: &str) -> BwError {
+        BwError::Spawn(format!(
+            "no clipboard tool found for this session — install {hint}"
+        ))
     }
 
     /// Pipes `text` into the configured write tool via stdin.
@@ -131,23 +224,30 @@ impl SystemClipboardAdapter {
 
 impl ClipboardPort for SystemClipboardAdapter {
     fn write(&self, text: &str) -> Result<(), BwError> {
-        match Self::choose_backend() {
-            Some(backend) => Self::write_via(&backend.write_argv, text),
-            // No native tool — fall back to OSC 52 instead of failing.
-            None => {
+        match Self::choose() {
+            BackendChoice::Use(backend) => Self::write_via(&backend.write_argv, text),
+            // No graphical session — OSC 52 is the only path.
+            BackendChoice::Headless => {
                 Self::write_osc52(text);
                 Ok(())
             }
+            // Graphical session but the tool is missing: surface it instead of
+            // silently pretending to copy (see the module docs).
+            BackendChoice::MissingTool { hint } => Err(Self::missing_tool_err(hint)),
         }
     }
 
     fn write_with_clear(&self, text: &str, clear_after_secs: u64) -> Result<(), BwError> {
-        let Some(backend) = Self::choose_backend() else {
-            // No native tool — OSC 52. We can't read the clipboard back
-            // over OSC 52 to compare, so the timed auto-clear is skipped
-            // on this path (the write still happens).
-            Self::write_osc52(text);
-            return Ok(());
+        let backend = match Self::choose() {
+            BackendChoice::Use(backend) => backend,
+            BackendChoice::Headless => {
+                // OSC 52. We can't read the clipboard back over OSC 52 to
+                // compare, so the timed auto-clear is skipped on this path
+                // (the write still happens).
+                Self::write_osc52(text);
+                return Ok(());
+            }
+            BackendChoice::MissingTool { hint } => return Err(Self::missing_tool_err(hint)),
         };
         Self::write_via(&backend.write_argv, text)?;
 
@@ -188,6 +288,70 @@ impl ClipboardPort for SystemClipboardAdapter {
 mod tests {
     use super::*;
 
+    /// Builds a probe closure that reports the given tools as available.
+    fn probe(available: &'static [&'static str]) -> impl Fn(&str) -> bool {
+        move |name| available.contains(&name)
+    }
+
+    #[test]
+    fn wayland_uses_wl_copy_when_present() {
+        match select_backend(Session::Wayland, &probe(&["wl-copy"])) {
+            BackendChoice::Use(b) => assert_eq!(b.write_argv, vec!["wl-copy"]),
+            _ => panic!("expected wl-copy backend"),
+        }
+    }
+
+    #[test]
+    fn wayland_reports_missing_when_wl_copy_absent() {
+        // The original bug: WAYLAND_DISPLAY set but wl-copy not installed.
+        assert!(matches!(
+            select_backend(Session::Wayland, &probe(&[])),
+            BackendChoice::MissingTool { .. }
+        ));
+    }
+
+    #[test]
+    fn x11_prefers_xclip_over_xsel() {
+        match select_backend(Session::X11, &probe(&["xclip", "xsel"])) {
+            BackendChoice::Use(b) => assert_eq!(b.write_argv[0], "xclip"),
+            _ => panic!("expected xclip backend"),
+        }
+    }
+
+    #[test]
+    fn x11_falls_back_to_xsel() {
+        match select_backend(Session::X11, &probe(&["xsel"])) {
+            BackendChoice::Use(b) => assert_eq!(b.write_argv[0], "xsel"),
+            _ => panic!("expected xsel backend"),
+        }
+    }
+
+    #[test]
+    fn x11_reports_missing_when_no_tool() {
+        assert!(matches!(
+            select_backend(Session::X11, &probe(&[])),
+            BackendChoice::MissingTool { .. }
+        ));
+    }
+
+    #[test]
+    fn macos_uses_pbcopy_when_present() {
+        match select_backend(Session::MacOs, &probe(&["pbcopy"])) {
+            BackendChoice::Use(b) => assert_eq!(b.write_argv, vec!["pbcopy"]),
+            _ => panic!("expected pbcopy backend"),
+        }
+    }
+
+    #[test]
+    fn headless_defers_to_osc52_even_with_tools_present() {
+        // A headless session never spawns a tool, even if one happens to be
+        // on PATH — OSC 52 is the contract there.
+        assert!(matches!(
+            select_backend(Session::Headless, &probe(&["wl-copy", "xclip"])),
+            BackendChoice::Headless
+        ));
+    }
+
     /// `write_with_clear` with `clear_after_secs = 0` must not spawn a
     /// background thread (and therefore must return immediately). We
     /// can't observe the thread directly without instrumenting the
@@ -196,12 +360,12 @@ mod tests {
     /// block the test for at least N seconds if the constant ever got
     /// passed straight through.
     ///
-    /// The test only runs in environments where a clipboard backend is
-    /// available; CI without `wl-copy`/`xclip` skips it because there's
-    /// no useful assertion to make.
+    /// The test only runs where a clipboard backend is actually available;
+    /// otherwise the call short-circuits (OSC 52 or a missing-tool error)
+    /// and there's no timer path to exercise.
     #[test]
     fn write_with_clear_zero_disables_timer() {
-        if SystemClipboardAdapter::choose_backend().is_none() {
+        if !matches!(SystemClipboardAdapter::choose(), BackendChoice::Use(_)) {
             return;
         }
         let a = SystemClipboardAdapter::new();
