@@ -330,15 +330,19 @@ fn render_filters(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
                 ItemFilter::Trash => t.error,
                 ItemFilter::All => t.foreground,
             };
+            // Item-type markers come from the active icon set (font-safe
+            // Unicode by default; Nerd when configured + supported). All and
+            // Favorites keep font-safe literals; a single space holds the
+            // glyph column for All so labels stay aligned.
             let icon = match f {
-                ItemFilter::All => "  ",
-                ItemFilter::Favorites => "★ ",
-                ItemFilter::Login => "󰌋 ",
-                ItemFilter::Card => "󰻷 ",
-                ItemFilter::Identity => "󰀉 ",
-                ItemFilter::SecureNote => "󰎞 ",
-                ItemFilter::SshKey => "󰣀 ",
-                ItemFilter::Trash => "󰩺 ",
+                ItemFilter::All => " ",
+                ItemFilter::Favorites => "★",
+                ItemFilter::Login => app.icons.login(),
+                ItemFilter::Card => app.icons.card(),
+                ItemFilter::Identity => app.icons.identity(),
+                ItemFilter::SecureNote => app.icons.note(),
+                ItemFilter::SshKey => app.icons.ssh(),
+                ItemFilter::Trash => app.icons.trash(),
             };
             let active = *f == app.vault.active_filter;
             let style = if active {
@@ -347,7 +351,7 @@ fn render_filters(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
                 Style::default().fg(col)
             };
             ListItem::new(Line::from(vec![
-                Span::styled(format!(" {icon}{}", f.label()), style),
+                Span::styled(format!(" {icon} {}", f.label()), style),
                 Span::styled(format!("  {count}"), Style::default().fg(t.dim)),
             ]))
         })
@@ -393,17 +397,26 @@ fn render_search(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     // the border, and coloured to match the text of the current state
     // (not accent), so it reads as part of the field rather than a badge.
     let line = if sf {
-        let mut spans = vec![Span::styled(" 󰍉 ", Style::default().fg(t.foreground))];
+        let mut spans = vec![Span::styled(
+            format!(" {} ", app.icons.search()),
+            Style::default().fg(t.foreground),
+        )];
         spans.extend(widgets::editor_spans(&app.vault.search_query, true, t));
         Line::from(spans)
     } else if !app.vault.search_query.is_empty() {
         Line::from(vec![
-            Span::styled(" 󰍉 ", Style::default().fg(t.dim)),
+            Span::styled(
+                format!(" {} ", app.icons.search()),
+                Style::default().fg(t.dim),
+            ),
             Span::styled(app.vault.search_query.text(), Style::default().fg(t.dim)),
         ])
     } else {
         Line::from(vec![
-            Span::styled(" 󰍉 ", Style::default().fg(t.placeholder)),
+            Span::styled(
+                format!(" {} ", app.icons.search()),
+                Style::default().fg(t.placeholder),
+            ),
             Span::styled("type to filter…", Style::default().fg(t.placeholder)),
         ])
     };

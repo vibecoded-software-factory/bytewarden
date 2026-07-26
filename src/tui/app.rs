@@ -31,6 +31,7 @@ use crate::tui::action::{ActionState, CmdEntry};
 use crate::tui::auto_lock::AutoLock;
 use crate::tui::cmd_log::CmdLog;
 use crate::tui::generator::GeneratorState;
+use crate::tui::glyph::GlyphCaps;
 use crate::tui::item_forms::{CreateForm, EditForm};
 use crate::tui::login_form::LoginForm;
 use crate::tui::mouse_areas::MouseAreas;
@@ -38,6 +39,7 @@ use crate::tui::screens::{Focus, LoginField, Screen};
 use crate::tui::settings_overlay::{SettingRow, SettingsFocus, SettingsOverlay};
 use crate::tui::theme::{self, Theme};
 use crate::tui::vault::Vault;
+use crate::tui::view::icons::{self, IconSet};
 use crate::tui::worker::{InFlight, WorkerRequest, WorkerResponse};
 
 /// Per-page step size when paging through the vault list.
@@ -254,6 +256,15 @@ pub struct App {
     // ── Theme ─────────────────────────────────────────────────────────────
     pub theme: Theme,
 
+    // ── Icons / glyph capability ──────────────────────────────────────────
+    /// The terminal's glyph capability, detected once at boot.
+    pub glyphs: GlyphCaps,
+    /// The `icon_style` setting as configured (`"unicode"` / `"nerd"`).
+    pub icon_style: String,
+    /// The effective icon set — the setting resolved against [`Self::glyphs`]
+    /// (a bare console is forced to Unicode). Read by the view layer.
+    pub icons: IconSet,
+
     // ── Settings overlay (F10) ─────────────────────────────────────────────
     /// The Settings overlay's transient state. See
     /// [`crate::tui::settings_overlay::SettingsOverlay`].
@@ -291,6 +302,8 @@ impl App {
         let cfg = settings.read();
         let saved_email = cfg.email.clone().unwrap_or_default();
         let theme = theme::load(&settings.config_dir());
+        let glyphs = GlyphCaps::detect();
+        let icons = icons::resolve_icons(&cfg.icon_style, glyphs);
         // Preselect the picker on the configured preset, else Nord.
         let settings_theme_idx = theme::configured_preset(&settings.config_dir())
             .or(Some(theme::Preset::DEFAULT))
@@ -340,6 +353,9 @@ impl App {
             help_from: None,
             help_scroll: (0, 0),
             theme: theme.clone(),
+            glyphs,
+            icon_style: cfg.icon_style.clone(),
+            icons,
             settings_ui: SettingsOverlay {
                 focus: SettingsFocus::Sidebar,
                 section: 0,
@@ -492,6 +508,13 @@ impl App {
             SettingRow::ListTimeout => {
                 format!("{} s", self.list_items_timeout.load(Ordering::Relaxed))
             }
+            SettingRow::IconStyle => {
+                if self.icon_style.eq_ignore_ascii_case("nerd") {
+                    "Nerd".into()
+                } else {
+                    "Unicode".into()
+                }
+            }
         }
     }
 
@@ -527,6 +550,17 @@ impl App {
                 // up the new budget on its next list — then persist it.
                 self.list_items_timeout.store(secs, Ordering::Relaxed);
                 self.settings.write_list_items_timeout_secs(secs);
+            }
+            SettingRow::IconStyle => {
+                // Two-state; either arrow flips it. Re-resolve immediately so
+                // the change shows without a restart, then persist.
+                self.icon_style = if self.icon_style.eq_ignore_ascii_case("nerd") {
+                    "unicode".to_string()
+                } else {
+                    "nerd".to_string()
+                };
+                self.icons = icons::resolve_icons(&self.icon_style, self.glyphs);
+                self.settings.write_icon_style(&self.icon_style);
             }
         }
     }
@@ -839,6 +873,7 @@ mod tests {
         fn write_lock_after_secs(&self, _: u64) {}
         fn write_clipboard_clear_secs(&self, _: u64) {}
         fn write_list_items_timeout_secs(&self, _: u64) {}
+        fn write_icon_style(&self, _: &str) {}
         fn write_theme_name(&self, _: &str) {}
         fn config_dir(&self) -> std::path::PathBuf {
             std::path::PathBuf::from(".")

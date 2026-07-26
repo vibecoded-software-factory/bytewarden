@@ -48,6 +48,7 @@ pub fn draw(frame: &mut Frame, app: &App) {
     draw_picker_modal(
         frame,
         t,
+        app.icons,
         PickerModal {
             title: format!(" Command palette · {} ", state.filtered.len()),
             query: Some((&state.query, "type to search commands…")),

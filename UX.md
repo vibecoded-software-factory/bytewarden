@@ -47,6 +47,10 @@ shared command log and hint bar.
     precomputed count maps.
   - `─[2]-Items` — the item-type filter list (All, Favorites, Login, Card,
     Identity, Note, SSH Key, separator, Trash) with per-row counts + icons.
+    Icons come from the active set (the `Icons` setting): a font-safe **Unicode**
+    default that renders on any font, or **Nerd** glyphs when configured. A bare
+    console is forced to Unicode, and any stray private-use glyph is sanitised to
+    `?` on the finished frame so nothing tofus.
 - **Right main** (~74 %): `─[/]-Search` (3 rows) · `─[3]-Vault` list (fills) ·
   the `─[4]-Command log`.
 - **Bottom**: the command log (responsive height) and the **per-focus hint
@@ -495,7 +499,7 @@ Three sections today: **Theme** (a live preset picker whose list **scrolls** —
 the presets window around the highlighted row and a `draw_scrollbar` cue rides
 the panel's right border when they overflow), **Security** (auto-lock + its
 window, keep-session, remember-email) and **Advanced** (clipboard-clear,
-list-timeout). The non-Theme sections are value-lists: `↑/↓` pick a row, `←/→`
+list-timeout, icons). The non-Theme sections are value-lists: `↑/↓` pick a row, `←/→`
 toggle a bool or step a number in place. Each row maps 1:1 to a `config.toml`
 key. **Apply-immediately**: each change writes to the settings
 cache *and* persists to `config.toml` on adjust (atomic write), so closing just

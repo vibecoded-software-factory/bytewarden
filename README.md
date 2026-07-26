@@ -173,6 +173,9 @@ keep_session         = false               # persist BW_SESSION while parent she
 lock_after_minutes   = 15                  # idle threshold for auto-lock
 clipboard_clear_secs = 30                  # auto-clear copied secrets (0 = disabled)
 
+# ── Display ──────────────────────────────────────────────────────
+icon_style = "unicode"                     # "unicode" (font-safe) or "nerd" (needs a Nerd font)
+
 # ── Theme (every key optional — see the next section) ────────────
 [theme]
 name        = "nord"                       # bundled preset (see Theme below)
@@ -193,6 +196,7 @@ The config file and its parent directory are kept owner-only — bytewarden re-a
 - `keep_session` — login screen "Keep session" checkbox.
 - `lock_after_minutes` — only via the config file (no UI toggle).
 - `clipboard_clear_secs` — only via the config file. Default `30` (seconds); set to `0` to disable. Applies to every clipboard write that carries a secret (passwords, usernames, TOTP codes, copied detail-view fields, generated values, Send URLs). The clear is contingent on the clipboard still holding the value bytewarden wrote — if you copied something else in the meantime, your selection is left alone.
+- `icon_style` — Settings overlay (`F10`) → Advanced → Icons, or the config file. `"unicode"` is the font-safe default (renders on any font); `"nerd"` uses Nerd-font glyphs and needs a patched font. On a bare console (`TERM=linux`/`dumb`) the icon set is forced to Unicode regardless; `BYTEWARDEN_GLYPHS=console|full` overrides that detection.
 - `[theme]` — only via the config file.
 
 ---

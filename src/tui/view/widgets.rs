@@ -12,6 +12,7 @@ use ratatui::{
 };
 
 use crate::tui::theme::Theme;
+use crate::tui::view::icons::IconSet;
 
 thread_local! {
     /// Frame-local **scroll registry**: every scrollable surface records its
@@ -633,13 +634,13 @@ pub fn picker_row_at(column: u16, row: u16) -> Option<usize> {
 }
 
 /// Draws **the** standard centered picker modal: `Clear`, rounded accent
-/// block, emphasized title (carrying its live count), optional `󰍉` query
+/// block, emphasized title (carrying its live count), optional search-glass query
 /// row (+ spacer), a **windowed** list that keeps the whole selected item
 /// visible with the shared `▶` + `selected_bg` selection treatment, a
 /// [`draw_scrollbar`] cue on overflow, and a width-fitted [`legend_line`]
 /// footer. Every centered query/list overlay renders through this — a new
 /// picker is a [`PickerModal`] value, never a bespoke modal.
-pub fn draw_picker_modal(frame: &mut Frame, t: &Theme, m: PickerModal<'_>) {
+pub fn draw_picker_modal(frame: &mut Frame, t: &Theme, icons: IconSet, m: PickerModal<'_>) {
     let area = center_rect(MODAL_WIDTH_PCT, MODAL_HEIGHT, frame.area());
     register_modal(area); // click outside dismisses it
     frame.render_widget(Clear, area);
@@ -662,7 +663,10 @@ pub fn draw_picker_modal(frame: &mut Frame, t: &Theme, m: PickerModal<'_>) {
     .split(inner);
 
     if let Some((editor, placeholder)) = m.query {
-        let mut spans = vec![Span::styled("󰍉 ", Style::default().fg(t.dim))];
+        let mut spans = vec![Span::styled(
+            format!("{} ", icons.search()),
+            Style::default().fg(t.dim),
+        )];
         if editor.is_empty() {
             spans.push(Span::styled(
                 placeholder.to_string(),
