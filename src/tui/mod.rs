@@ -24,6 +24,7 @@ pub mod export;
 pub mod flows;
 pub mod folders;
 pub mod generator;
+pub mod glyph;
 pub mod import;
 pub mod input;
 pub mod item_actions;
@@ -93,7 +94,7 @@ pub fn run(
         // Show the splash + spinner while the boot `bw status` runs on
         // the worker; the response handler routes to login / vault.
         app.set_action(ActionState::Running("Checking session…".into()));
-        terminal.draw(|frame| view::draw(frame, &mut app))?;
+        draw_frame(terminal, &mut app)?;
         flows::auth::request_resume(&mut app);
 
         let result = run_loop(terminal, &mut app);
@@ -104,6 +105,19 @@ pub fn run(
         drop(worker);
         result
     })
+}
+
+/// Draws one frame, then — on a bare console (`GlyphCaps::Console`) —
+/// sanitises any stray private-use glyph the console font can't render.
+/// The single render boundary both the splash and the loop go through.
+fn draw_frame(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<()> {
+    terminal.draw(|frame| {
+        view::draw(frame, app);
+        if app.glyphs == crate::tui::glyph::GlyphCaps::Console {
+            crate::tui::glyph::sanitize_buffer(frame.buffer_mut());
+        }
+    })?;
+    Ok(())
 }
 
 /// Inner event loop — separated from [`run`] so the terminal restore
@@ -122,7 +136,7 @@ fn run_loop(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<()
             terminal.clear()?;
         }
 
-        terminal.draw(|frame| view::draw(frame, app))?;
+        draw_frame(terminal, app)?;
 
         // Drain every worker response that has arrived, applying each to
         // `App`. Non-blocking — the worker runs the `bw` call off-thread,

@@ -14,6 +14,7 @@ pub mod folder_delete_confirm;
 pub mod folder_name;
 pub mod generator;
 pub mod help;
+pub mod icons;
 pub mod import;
 pub mod item_actions;
 pub mod login;

@@ -56,7 +56,11 @@ impl SettingsSection {
                 SettingRow::KeepSession,
                 SettingRow::RememberEmail,
             ],
-            SettingsSection::Advanced => &[SettingRow::ClipboardClear, SettingRow::ListTimeout],
+            SettingsSection::Advanced => &[
+                SettingRow::ClipboardClear,
+                SettingRow::ListTimeout,
+                SettingRow::IconStyle,
+            ],
         }
     }
 }
@@ -79,6 +83,8 @@ pub enum SettingRow {
     ClipboardClear,
     /// `list_items_timeout_secs` — `bw list items` wall-clock budget.
     ListTimeout,
+    /// `icon_style` — which glyph set the UI draws icons from.
+    IconStyle,
 }
 
 impl SettingRow {
@@ -91,6 +97,7 @@ impl SettingRow {
             SettingRow::RememberEmail => "Remember email",
             SettingRow::ClipboardClear => "Clipboard clear",
             SettingRow::ListTimeout => "List timeout",
+            SettingRow::IconStyle => "Icons",
         }
     }
 
@@ -103,6 +110,9 @@ impl SettingRow {
             SettingRow::RememberEmail => "←/→ toggle remembering the login e-mail",
             SettingRow::ClipboardClear => "←/→ adjust auto-clear seconds (0 = off)",
             SettingRow::ListTimeout => "←/→ adjust the bw list-items timeout (seconds)",
+            SettingRow::IconStyle => {
+                "←/→ switch icon set (Unicode is font-safe; Nerd needs a patched font)"
+            }
         }
     }
 }

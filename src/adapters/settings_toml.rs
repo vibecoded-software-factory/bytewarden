@@ -27,6 +27,8 @@ const DEFAULT_CLIPBOARD_CLEAR_SECS: u64 = 30;
 /// `list_items_timeout_secs = N` in `config.toml` if you have a
 /// genuinely huge vault and start hitting the ceiling.
 const DEFAULT_LIST_ITEMS_TIMEOUT_SECS: u64 = 60;
+/// Font-safe by default: renders on any font, so a fresh user never sees tofu.
+const DEFAULT_ICON_STYLE: &str = "unicode";
 
 /// Escapes a string for embedding inside a TOML basic-string literal
 /// (`"…"`). Only the two TOML-significant characters need handling
@@ -214,6 +216,7 @@ impl SettingsPort for TomlSettingsAdapter {
             lock_after_secs: DEFAULT_LOCK_AFTER_SECS,
             clipboard_clear_secs: DEFAULT_CLIPBOARD_CLEAR_SECS,
             list_items_timeout_secs: DEFAULT_LIST_ITEMS_TIMEOUT_SECS,
+            icon_style: DEFAULT_ICON_STYLE.to_string(),
             ..Default::default()
         };
         let Ok(text) = fs::read_to_string(self.file()) else {
@@ -253,6 +256,11 @@ impl SettingsPort for TomlSettingsAdapter {
                 // accepted; the operator can pick "effectively no
                 // timeout" by setting a very large number.
                 cfg.list_items_timeout_secs = s;
+            } else if let Some(v) = line.strip_prefix("icon_style = ") {
+                let inner = v.trim().trim_matches('"');
+                if !inner.is_empty() {
+                    cfg.icon_style = inner.to_string();
+                }
             }
         }
         cfg
@@ -346,6 +354,19 @@ impl SettingsPort for TomlSettingsAdapter {
             "list_items_timeout_secs",
             secs.to_string(),
             &["clipboard_clear_secs", "keep_session", "save_email"],
+        );
+    }
+
+    fn write_icon_style(&self, style: &str) {
+        // Stored as a TOML basic string; `read` strips the quotes back off.
+        self.upsert_scalar(
+            "icon_style",
+            format!("\"{style}\""),
+            &[
+                "list_items_timeout_secs",
+                "clipboard_clear_secs",
+                "save_email",
+            ],
         );
     }
 
@@ -478,6 +499,31 @@ mod tests {
         let (a, _t) = fresh();
         std::fs::write(a.file(), "clipboard_clear_secs = nope\n").unwrap();
         assert_eq!(a.read().clipboard_clear_secs, DEFAULT_CLIPBOARD_CLEAR_SECS);
+    }
+
+    #[test]
+    fn read_defaults_icon_style_to_font_safe_unicode() {
+        let (a, _t) = fresh();
+        assert_eq!(a.read().icon_style, DEFAULT_ICON_STYLE);
+    }
+
+    #[test]
+    fn write_icon_style_round_trips_through_the_quoted_value() {
+        let (a, _t) = fresh();
+        a.write_icon_style("nerd");
+        assert_eq!(a.read().icon_style, "nerd");
+        a.write_icon_style("unicode");
+        assert_eq!(a.read().icon_style, "unicode");
+    }
+
+    #[test]
+    fn write_icon_style_preserves_other_keys() {
+        let (a, _t) = fresh();
+        std::fs::write(a.file(), "clipboard_clear_secs = 45\n").unwrap();
+        a.write_icon_style("nerd");
+        let cfg = a.read();
+        assert_eq!(cfg.icon_style, "nerd");
+        assert_eq!(cfg.clipboard_clear_secs, 45);
     }
 
     #[test]

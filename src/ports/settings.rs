@@ -38,6 +38,11 @@ pub struct UserSettings {
     /// decrypt every record and serialize to JSON, so very large vaults
     /// can take well over a minute. Default `180` (3 min).
     pub list_items_timeout_secs: u64,
+
+    /// Which glyph set the UI draws its font-dependent icons from:
+    /// `"unicode"` (the font-safe default) or `"nerd"` (needs a patched
+    /// Nerd font). Any other value is treated as `"unicode"`.
+    pub icon_style: String,
 }
 
 /// Abstraction over a settings store.
@@ -75,6 +80,9 @@ pub trait SettingsPort {
     /// Persists the `bw list items` wall-clock budget
     /// (`list_items_timeout_secs`).
     fn write_list_items_timeout_secs(&self, secs: u64);
+
+    /// Persists the chosen icon set (`icon_style = "unicode" | "nerd"`).
+    fn write_icon_style(&self, style: &str);
 
     /// Persists the chosen theme preset as `name = "<preset>"` inside the
     /// `[theme]` section, preserving every other key (incl. per-color
