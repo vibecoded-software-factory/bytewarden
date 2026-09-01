@@ -1,9 +1,3 @@
-//! Clipboard / copy-to-clipboard flows.
-//!
-//! Clipboard writes are fast and stay synchronous on the render thread —
-//! only the TOTP path needs the worker (it shells out to `bw get totp`
-//! first, then writes the code).
-
 use crate::domain::identity::{build_full_name, identity_fields};
 use crate::domain::item::Item;
 use crate::ports::BwError;
@@ -12,12 +6,6 @@ use crate::tui::app::App;
 use crate::tui::reprompt::ProtectedAction;
 use crate::tui::worker::{InFlight, WorkerRequest};
 
-/// Performs the clipboard write and updates the action state.
-///
-/// Uses [`crate::ports::ClipboardPort::write_with_clear`] so the secret
-/// is wiped after `app.clipboard_clear_secs` seconds (default 30; `0`
-/// disables it). The clear is contingent on the clipboard still holding
-/// the value we wrote.
 fn write_clipboard(app: &mut App, text: String, success_msg: &str) {
     let ttl = app.clipboard_clear_secs;
     match app.clipboard.write_with_clear(&text, ttl) {
@@ -32,8 +20,6 @@ fn write_clipboard(app: &mut App, text: String, success_msg: &str) {
     }
 }
 
-/// Renders the success toast for a clipboard write — adds the auto-clear
-/// hint when a TTL is active.
 fn copied_toast(ttl: u64) -> String {
     if ttl == 0 {
         "Copied ✓".to_string()
@@ -42,12 +28,10 @@ fn copied_toast(ttl: u64) -> String {
     }
 }
 
-/// Copies a literal string with a custom toast.
 pub fn copy_raw(app: &mut App, text: String, msg: &str) {
     write_clipboard(app, text, msg);
 }
 
-/// Copies the selected item's username (no secret → no reprompt).
 pub fn copy_username_to_clipboard(app: &mut App) {
     let Some(item) = app.vault.selected_item() else {
         return;
@@ -62,12 +46,6 @@ pub fn copy_username_to_clipboard(app: &mut App) {
     write_clipboard(app, username, "Username copied ✓");
 }
 
-/// Copies the selected item's password.
-///
-/// If the item carries the Bitwarden `reprompt` flag the request is
-/// deferred behind a master-password popup; the popup re-enters this
-/// function once verification succeeds (verified for this single action,
-/// not cached).
 pub fn copy_password_to_clipboard(app: &mut App) {
     if app.vault.selected_item().is_none() {
         return;
@@ -88,11 +66,6 @@ pub fn copy_password_to_clipboard(app: &mut App) {
     write_clipboard(app, password, "Password copied ✓");
 }
 
-/// Copies the selected item's TOTP code, gated behind the reprompt popup
-/// for `reprompt`-flagged items (the code is a secret). The popup
-/// re-enters via [`ProtectedAction::CopyTotp`] once verification succeeds.
-/// This is the entry point the vault-level callers (right-click menu) use;
-/// the detail-row path reaches [`request_copy_totp`] through its own gate.
 pub fn copy_totp_to_clipboard(app: &mut App) {
     let Some(item) = app.vault.selected_item() else {
         return;
@@ -104,7 +77,6 @@ pub fn copy_totp_to_clipboard(app: &mut App) {
     request_copy_totp(app, item_id);
 }
 
-/// Fetches and copies the selected item's TOTP code (worker round-trip).
 pub fn request_copy_totp(app: &mut App, item_id: String) {
     app.submit(
         InFlight::CopyTotp,
@@ -113,7 +85,6 @@ pub fn request_copy_totp(app: &mut App, item_id: String) {
     );
 }
 
-/// `bw get totp` response — writes the code to the clipboard.
 pub fn handle_copy_totp(app: &mut App, r: Result<String, BwError>) {
     match r {
         Ok(v) => {
@@ -124,42 +95,31 @@ pub fn handle_copy_totp(app: &mut App, r: Result<String, BwError>) {
     }
 }
 
-/// What copying a given detail row does. One entry per row, in the exact
-/// order of [`crate::tui::detail_fields::build_detail_fields`], so the row
-/// cursor and the copied value can never drift apart — a test pins the
-/// two to the same length.
 enum CopyTarget {
-    /// The Type row and attachment rows — not copyable.
     Skip,
-    /// Routes to [`copy_username_to_clipboard`].
+
     Username,
-    /// Routes to [`copy_password_to_clipboard`] (reprompt-gated).
+
     Password,
-    /// Routes to [`request_copy_totp`] (worker round-trip).
+
     Totp,
-    /// A plain value copied verbatim, with its own toast label.
+
     Value { label: String, text: String },
 }
 
-/// Builds the ordered list of copy targets for `item`, mirroring
-/// [`crate::tui::detail_fields::build_detail_fields`] row-for-row. This is
-/// the single source of truth for "which value does the Nth detail row
-/// copy" — extracted from a hand-walked `idx += 1` chain that silently
-/// diverged from the renderer (it missed attachment rows entirely).
 fn detail_copy_targets(item: &Item) -> Vec<CopyTarget> {
     let val = |label: &str, text: String| CopyTarget::Value {
         label: label.to_string(),
         text,
     };
-    let mut t = vec![val("Name", item.name.clone()), CopyTarget::Skip]; // Name, Type
+    let mut t = vec![val("Name", item.name.clone()), CopyTarget::Skip];
 
     if let Some(login) = &item.login {
         if login.username.is_some() {
             t.push(CopyTarget::Username);
         }
-        t.push(CopyTarget::Password); // always present on a login
+        t.push(CopyTarget::Password);
         for uri in login.uris.iter().flatten().filter_map(|u| u.uri.as_ref()) {
-            // Copy the raw URI (the renderer appends a "(match: …)" hint).
             t.push(val("URL", uri.clone()));
         }
         if login.totp.is_some() {
@@ -232,8 +192,6 @@ fn detail_copy_targets(item: &Item) -> Vec<CopyTarget> {
         t.push(val("Notes", notes.to_string()));
     }
 
-    // One non-copyable row per attachment (the renderer shows these; the
-    // old walk forgot them, so their index copied nothing).
     if let Some(atts) = &item.attachments {
         for _ in atts {
             t.push(CopyTarget::Skip);
@@ -243,13 +201,6 @@ fn detail_copy_targets(item: &Item) -> Vec<CopyTarget> {
     t
 }
 
-/// Copies the field under the detail view's row cursor.
-///
-/// The row order comes from [`detail_copy_targets`] (which mirrors the
-/// renderer), so the cursor index can't select the wrong value. If the
-/// item carries the `reprompt` flag *and* the focused row is a hidden
-/// field (password / TOTP / hidden custom), the request is deferred
-/// behind the reverify popup. Non-secret rows are not gated.
 pub fn copy_selected_field(app: &mut App) {
     let item = match app.vault.selected_item() {
         Some(i) => i.clone(),
@@ -314,9 +265,6 @@ mod tests {
         }
     }
 
-    /// The copy targets must line up 1:1 with the rendered detail rows —
-    /// otherwise the row cursor copies the wrong value (the bug this
-    /// extraction fixed: the old walk forgot attachment rows).
     #[test]
     fn copy_targets_align_with_detail_rows() {
         let mut login = base("Login", 1);

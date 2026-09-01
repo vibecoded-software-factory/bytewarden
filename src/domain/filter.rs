@@ -1,36 +1,28 @@
-//! Vault list filters and "create item" type selector.
-
 use crate::domain::item::{
     ITEM_TYPE_CARD, ITEM_TYPE_IDENTITY, ITEM_TYPE_LOGIN, ITEM_TYPE_SECURE_NOTE, ITEM_TYPE_SSH_KEY,
     Item,
 };
 
-/// Categorical filter applied to the vault list.
-///
-/// `Trash` is special: items are not included in the regular vault listing,
-/// they live in a separate trash area fetched on demand.
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum ItemFilter {
-    /// All non-trashed items, regardless of type.
     All,
-    /// Items where `favorite == true`.
+
     Favorites,
-    /// Logins (`item_type == 1`).
+
     Login,
-    /// Cards (`item_type == 3`).
+
     Card,
-    /// Identities (`item_type == 4`).
+
     Identity,
-    /// Secure notes (`item_type == 2`).
+
     SecureNote,
-    /// SSH keys (`item_type == 5`).
+
     SshKey,
-    /// Trashed items — fetched separately via the vault port.
+
     Trash,
 }
 
 impl ItemFilter {
-    /// Returns the human-readable label for the filter.
     pub fn label(&self) -> &'static str {
         match self {
             ItemFilter::All => "All Items",
@@ -44,9 +36,6 @@ impl ItemFilter {
         }
     }
 
-    /// Returns the underlying [`Item::item_type`] discriminant if this filter
-    /// targets a single type, or `None` for the meta-filters
-    /// ([`Self::All`], [`Self::Favorites`], [`Self::Trash`]).
     pub fn type_id(&self) -> Option<u8> {
         match self {
             ItemFilter::Login => Some(ITEM_TYPE_LOGIN),
@@ -58,10 +47,6 @@ impl ItemFilter {
         }
     }
 
-    /// Returns `true` if the given item belongs to this filter.
-    ///
-    /// [`Self::Trash`] always returns `false` because trashed items are
-    /// fetched separately and never present in the in-memory vault list.
     pub fn matches(&self, item: &Item) -> bool {
         match self {
             ItemFilter::All => true,
@@ -72,7 +57,6 @@ impl ItemFilter {
     }
 }
 
-/// Display order for the filter sidebar.
 pub const ITEM_FILTERS: &[ItemFilter] = &[
     ItemFilter::All,
     ItemFilter::Favorites,
@@ -84,10 +68,6 @@ pub const ITEM_FILTERS: &[ItemFilter] = &[
     ItemFilter::Trash,
 ];
 
-/// Item types the user can create from the TUI.
-///
-/// Currently covers all of the Bitwarden item types except attachments
-/// (which are handled separately on existing items).
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum CreateItemType {
     Login,
@@ -98,7 +78,6 @@ pub enum CreateItemType {
 }
 
 impl CreateItemType {
-    /// Human-readable label shown in the type-picker.
     pub fn label(&self) -> &'static str {
         match self {
             CreateItemType::Login => "Login",
@@ -110,7 +89,6 @@ impl CreateItemType {
     }
 }
 
-/// Display order for the "create item" type-picker.
 pub const CREATE_ITEM_TYPES: &[CreateItemType] = &[
     CreateItemType::Login,
     CreateItemType::SecureNote,
@@ -177,8 +155,6 @@ mod tests {
 
     #[test]
     fn trash_never_matches_in_memory_items() {
-        // Trash is fetched separately — the in-memory list filter
-        // should never accept anything as "trash".
         assert!(!ItemFilter::Trash.matches(&item(1, true)));
     }
 

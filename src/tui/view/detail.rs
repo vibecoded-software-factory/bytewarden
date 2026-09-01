@@ -1,9 +1,3 @@
-//! Item-detail screen renderer (read-only and edit modes).
-//!
-//! The actual detail field list is built by
-//! [`crate::tui::detail_fields::build_detail_fields`] so other parts of
-//! the TUI (e.g. the edit-mode entry flow) walk the same field order.
-
 use ratatui::{
     Frame,
     layout::{Constraint, Layout, Rect},
@@ -22,9 +16,7 @@ use crate::tui::view::widgets::{
 };
 
 thread_local! {
-    /// Frame-local hit map for the detail/edit field cards — one `(rect,
-    /// field index)` per visible card, recorded from the exact layout rects
-    /// so a click focuses the card the user sees (no `/4` row arithmetic).
+
     static DETAIL_HITS: std::cell::RefCell<Vec<(Rect, usize)>> =
         const { std::cell::RefCell::new(Vec::new()) };
 }
@@ -35,8 +27,6 @@ fn register_field(rect: Rect, idx: usize) {
     }
 }
 
-/// The field index under `(column, row)`, if any — consumed by the mouse
-/// layer to focus (and, on a repeat click, reveal) the field card.
 pub fn detail_field_at(column: u16, row: u16) -> Option<usize> {
     DETAIL_HITS.with(|h| {
         h.borrow()
@@ -49,7 +39,6 @@ pub fn detail_field_at(column: u16, row: u16) -> Option<usize> {
     })
 }
 
-/// Renders the detail screen.
 pub fn draw(frame: &mut Frame, app: &mut App) {
     DETAIL_HITS.with(|h| h.borrow_mut().clear());
     let area = frame.area();
@@ -66,7 +55,6 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     ])
     .split(area);
 
-    // Header line — name, type, mode tag, action state.
     let (action_text, action_style) = action_text_style(app);
     let mode_tag = if app.edit.active {
         Span::styled(
@@ -109,10 +97,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
 
     if app.edit.active {
         render_edit_form(frame, app, chunks[1]);
-        // Edit mode hints stay short and load-bearing; the per-row
-        // structural shortcuts (Alt+N add field, Alt+R rename, Alt+T
-        // type cycle, Alt+U add URL, Alt+Del remove, F2 reveal) are
-        // documented in F1.
+
         let hints: &[(&str, &str)] = &[
             ("Tab/↑↓", "field"),
             ("←→", "cursor"),
@@ -180,7 +165,7 @@ fn render_edit_form(frame: &mut Frame, app: &App, area: Rect) {
         };
         let sel = i == app.edit.field_idx;
         let bcol = if sel { t.accent } else { t.inactive };
-        // Compose the hint: type tag for custom rows + reveal/hide/read-only.
+
         let custom_tag = match field.custom_type() {
             Some(0) => " [text]",
             Some(1) => " [hidden]",

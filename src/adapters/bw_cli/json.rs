@@ -1,11 +1,5 @@
-//! JSON helpers shared by the `bw` adapter.
-
 use serde_json::Value;
 
-/// Extracts a non-empty string field from a [`Value`].
-///
-/// Returns `None` when the key is absent, the value is not a string, or
-/// the string is empty.
 pub fn opt_str(val: &Value, key: &str) -> Option<String> {
     val[key]
         .as_str()

@@ -1,40 +1,15 @@
-//! Read-only detail-screen field model.
-//!
-//! Builds the ordered list of labelled rows the detail view renders for
-//! a given [`Item`]. The same list is needed by:
-//!
-//! * [`crate::tui::view::detail`] — to render the cards;
-//! * [`crate::tui::flows::items::enter_edit_mode`] — to map the
-//!   currently-focused detail row onto the matching field of the edit
-//!   form.
-//!
-//! Centralising the layout here ensures both consumers walk the rows
-//! in the same order; otherwise a future change in one place would
-//! silently desynchronise the cursor between detail and edit views.
-
 use crate::domain::UriMatch;
 use crate::domain::identity::{build_full_name, identity_fields};
 use crate::domain::item::{Attachment, Item, item_type_label};
 
-/// One row of the detail view.
 pub struct DetailField {
-    /// User-visible label (e.g. `"Username"`, `"Cardholder"`).
     pub label: String,
-    /// Either the raw value or a masked placeholder, depending on
-    /// `hidden` and the caller-supplied reveal flags.
+
     pub value: String,
-    /// `true` when the row is currently rendered as masked dots.
+
     pub hidden: bool,
 }
 
-/// Builds the list of detail rows for `item`.
-///
-/// * `show` — whether the user pressed F2 on a hidden row.
-/// * `reveal_idx` — the index of that row inside this list.
-///
-/// Together they decide which (if any) hidden row should be rendered
-/// in cleartext for this frame. Empty optional fields are skipped, so
-/// the resulting `Vec` may be shorter than the equivalent edit form.
 pub fn build_detail_fields(item: &Item, show: bool, reveal_idx: usize) -> Vec<DetailField> {
     let mut f: Vec<DetailField> = vec![
         DetailField {
@@ -70,9 +45,6 @@ pub fn build_detail_fields(item: &Item, show: bool, reveal_idx: usize) -> Vec<De
         });
         for uri_d in login.uris.iter().flatten() {
             if let Some(uri) = &uri_d.uri {
-                // When a non-default match type is set, append it in
-                // parentheses so the user sees autofill behaviour at a
-                // glance without opening the edit form.
                 let suffix = uri_d
                     .match_type
                     .and_then(UriMatch::from_u8)
@@ -125,8 +97,6 @@ pub fn build_detail_fields(item: &Item, show: bool, reveal_idx: usize) -> Vec<De
     }
 
     if let Some(ssh) = &item.ssh_key {
-        // Public key first (cleartext, longest line) then private (hidden,
-        // F2 to reveal) then fingerprint.
         if let Some(pk) = &ssh.public_key
             && !pk.is_empty()
         {
@@ -212,9 +182,6 @@ pub fn build_detail_fields(item: &Item, show: bool, reveal_idx: usize) -> Vec<De
         });
     }
 
-    // Attachments — one row per attachment, displayed as
-    // "<file_name>   (<sizeName>)". Empty list omits the section
-    // entirely so non-attachment items aren't cluttered.
     if let Some(atts) = &item.attachments {
         for att in atts {
             let size = att
@@ -233,23 +200,13 @@ pub fn build_detail_fields(item: &Item, show: bool, reveal_idx: usize) -> Vec<De
     f
 }
 
-/// Returns the attachment that matches the row at `detail_idx` in the
-/// list produced by [`build_detail_fields`], or `None` when the row
-/// isn't an attachment row (or the index is out of range).
-///
-/// This walks the same builder as the renderer to stay in sync — the
-/// alternative (counting attachment rows from the bottom) breaks
-/// silently as soon as new field types are added below them.
 pub fn attachment_at(item: &Item, detail_idx: usize) -> Option<&Attachment> {
     let rows = build_detail_fields(item, false, 0);
     let row = rows.get(detail_idx)?;
     if row.label != "Attachment" {
         return None;
     }
-    // The renderer emits attachment rows in the same order as
-    // `item.attachments`, after every other section. We count the
-    // attachment rows that precede `detail_idx` and use that as the
-    // index into `item.attachments`.
+
     let att_offset = rows[..detail_idx]
         .iter()
         .filter(|r| r.label == "Attachment")
@@ -257,8 +214,6 @@ pub fn attachment_at(item: &Item, detail_idx: usize) -> Option<&Attachment> {
     item.attachments.as_ref().and_then(|a| a.get(att_offset))
 }
 
-/// Pushes a [`DetailField`] from an `Option<String>`, skipping when
-/// `None` or empty.
 fn push_opt_field(
     fields: &mut Vec<DetailField>,
     label: &str,
@@ -333,7 +288,6 @@ mod tests {
         assert!(rows[pw_idx].value.starts_with("●"));
         assert!(!rows[pw_idx].value.contains("hunter2"));
 
-        // Revealed when show=true and reveal_idx points at the password row.
         let revealed = build_detail_fields(&item, true, pw_idx);
         assert!(!revealed[pw_idx].hidden);
         assert_eq!(revealed[pw_idx].value, "hunter2");
@@ -577,7 +531,7 @@ mod tests {
     #[test]
     fn attachment_at_returns_none_for_non_attachment_row() {
         let item = empty_item(2);
-        // Row 0 is "Name", row 1 is "Type" — neither is an attachment.
+
         assert!(attachment_at(&item, 0).is_none());
         assert!(attachment_at(&item, 1).is_none());
     }

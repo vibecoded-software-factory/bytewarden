@@ -1,10 +1,3 @@
-//! JSON-payload builders used by the create / edit flows.
-//!
-//! Building the payload via [`serde_json::Value`] is safer than
-//! `format!`-stringly-typed assembly: the library handles all escaping
-//! correctly, so user input cannot break the document or be used to
-//! inject extra fields.
-
 use serde_json::{Value, json};
 
 use crate::domain::UriMatch;
@@ -14,8 +7,6 @@ use crate::domain::item::{
 };
 use crate::tui::edit_field::{EditField, EditFieldKind, UriRole};
 
-/// Returns the value of the field whose `label` matches `label`, or an
-/// empty string if no such field exists.
 fn get<'a>(fields: &'a [EditField], label: &str) -> &'a str {
     fields
         .iter()
@@ -24,25 +15,12 @@ fn get<'a>(fields: &'a [EditField], label: &str) -> &'a str {
         .unwrap_or("")
 }
 
-/// Resolves an "URL Match" form-field value to the JSON value to write
-/// under `uris[0].match`. `Value::Null` means "use the account-wide
-/// default", which matches what bw does for an absent / null field.
 fn match_json(s: &str) -> Value {
     UriMatch::parse(s)
         .map(|m| json!(m as u8))
         .unwrap_or(Value::Null)
 }
 
-/// Reconstructs the `uris` JSON array from the [`EditField`] rows
-/// tagged with [`EditFieldKind::Uri`].
-///
-/// Rows are grouped by their slot `index`; each group emits one
-/// `{ uri, match }` object. Slots are sorted numerically so the
-/// resulting array preserves the form's visual order even if the user
-/// added rows out-of-order.
-///
-/// Returns an empty `Vec` when the form has no URI rows — the caller
-/// should treat that as "do not touch `uris`".
 fn build_uris_array(fields: &[EditField]) -> Vec<Value> {
     use std::collections::BTreeMap;
 
@@ -67,14 +45,6 @@ fn build_uris_array(fields: &[EditField]) -> Vec<Value> {
         .collect()
 }
 
-/// Builds the JSON payload for a "create item" call given the form
-/// values.
-///
-/// When the form carries an `Organization` row with a non-`None`
-/// `organization_id`, the payload also gets `organizationId` and
-/// `collectionIds` keys populated from the matching rows. The
-/// caller has already validated that `collectionIds` is non-empty
-/// for org items via [`crate::tui::flows::items::queue_create_item`].
 pub fn build_create_payload(item_type: &CreateItemType, fields: &[EditField]) -> String {
     let mut v: Value = match item_type {
         CreateItemType::Login => json!({
@@ -126,9 +96,7 @@ pub fn build_create_payload(item_type: &CreateItemType, fields: &[EditField]) ->
                 "country":    get(fields, "Country"),
             },
         }),
-        // `keyFingerprint` is intentionally absent — `bw` derives it
-        // from `privateKey` server-side and overwriting it would just
-        // be ignored.
+
         CreateItemType::SshKey => json!({
             "type": ITEM_TYPE_SSH_KEY,
             "name":  get(fields, "Name"),
@@ -140,10 +108,6 @@ pub fn build_create_payload(item_type: &CreateItemType, fields: &[EditField]) ->
         }),
     };
 
-    // When the form has an Organization row pointing at a real
-    // org, layer in `organizationId` + `collectionIds`. Personal
-    // (org_id = None) leaves both keys absent — bw treats absent
-    // organisation as personal-vault.
     if let Some(org_field) = fields.iter().find(|f| f.is_organization())
         && let Some(org_id) = org_field.organization_id.as_ref()
     {
@@ -159,9 +123,6 @@ pub fn build_create_payload(item_type: &CreateItemType, fields: &[EditField]) ->
     v.to_string()
 }
 
-/// Patches an existing item's JSON in place, copying values from the
-/// edit form. Unknown / unset fields are left untouched, so adapter-only
-/// keys (like `"organizationId"`) survive a round-trip.
 pub fn patch_edit_payload(base_json: &str, fields: &[EditField]) -> String {
     let Ok(mut val) = serde_json::from_str::<Value>(base_json) else {
         return base_json.to_string();
@@ -174,20 +135,11 @@ pub fn patch_edit_payload(base_json: &str, fields: &[EditField]) -> String {
     if let Some(v) = lookup("Notes") {
         val["notes"] = json!(v);
     }
-    // The "Folder" field already carries the resolved folder id (the
-    // flow translates the user-typed name → id before calling us).
-    // Empty value means "no folder" → write null.
+
     if let Some(v) = lookup("Folder") {
         val["folderId"] = if v.is_empty() { Value::Null } else { json!(v) };
     }
 
-    // The "Collections" row, when present, carries the picked
-    // collection UUIDs alongside its display string. Only org items
-    // have this row (the builder skips it for personal-vault items),
-    // so when we find one we trust the multi-select popup's
-    // validation that ≥1 UUID is in there. Personal items leave
-    // `collectionIds` untouched at whatever bw returned (typically
-    // an empty array).
     if let Some(coll_field) = fields.iter().find(|f| f.is_collections()) {
         val["collectionIds"] = json!(coll_field.collection_ids);
     }
@@ -199,14 +151,9 @@ pub fn patch_edit_payload(base_json: &str, fields: &[EditField]) -> String {
         if let Some(v) = lookup("Password") {
             val["login"]["password"] = json!(v);
         }
-        // Rebuild the entire `uris` array from the EditField rows
-        // tagged with `EditFieldKind::Uri`. Doing it as a full
-        // replace (rather than per-row patching) means add/remove
-        // multi-URI flows round-trip correctly via a single branch.
+
         let new_uris = build_uris_array(fields);
-        // Only replace when at least one URL row exists, so login
-        // items that the form never showed URIs for (edge case) don't
-        // get their `uris` blanked.
+
         if !new_uris.is_empty() {
             val["login"]["uris"] = Value::Array(new_uris);
         }
@@ -265,17 +212,8 @@ pub fn patch_edit_payload(base_json: &str, fields: &[EditField]) -> String {
         if let Some(v) = lookup("Public Key") {
             val["sshKey"]["publicKey"] = json!(v);
         }
-        // `Fingerprint` is read-only — `bw` recomputes it from the
-        // (possibly updated) private key, so we never write it here.
     }
 
-    // Custom fields — rebuild the array from the EditField rows
-    // tagged as Custom, **but** preserve any `linked` (type 3) entries
-    // verbatim from the base JSON. The TUI cannot edit linked fields
-    // (no UI to pick the target), so re-emitting them with
-    // `linkedId: null` from the form would silently drop the
-    // reference on every save. Linked fields go first so their
-    // ordering is stable across saves.
     let preserved_linked: Vec<Value> = val["fields"]
         .as_array()
         .map(|arr| {
@@ -291,9 +229,7 @@ pub fn patch_edit_payload(base_json: &str, fields: &[EditField]) -> String {
         .map(|f| {
             json!({
                 "name":     f.label,
-                // `value` lives in a `Zeroizing<String>` wrapper that
-                // doesn't implement `Serialize`; serialise the inner
-                // `&str` instead.
+
                 "value":    f.value(),
                 "type":     f.custom_type().unwrap_or(0),
                 "linkedId": Value::Null,
@@ -326,7 +262,7 @@ mod tests {
             ef("Notes", ""),
         ];
         let json = build_create_payload(&CreateItemType::Login, &fields);
-        // Round-trip: the resulting string must parse back into a Value.
+
         let parsed: Value = serde_json::from_str(&json).expect("must parse");
         assert_eq!(parsed["name"], "my \"site\"");
         assert_eq!(parsed["login"]["password"], "p\"a\"s");
@@ -356,7 +292,7 @@ mod tests {
         assert_eq!(parsed["type"], 5);
         assert_eq!(parsed["sshKey"]["privateKey"], fields[1].value());
         assert_eq!(parsed["sshKey"]["publicKey"], fields[2].value());
-        // bw computes the fingerprint server-side — we never send it.
+
         assert!(parsed["sshKey"].get("keyFingerprint").is_none());
     }
 
@@ -373,8 +309,7 @@ mod tests {
         assert_eq!(parsed["name"], "new");
         assert_eq!(parsed["sshKey"]["privateKey"], "new-priv");
         assert_eq!(parsed["sshKey"]["publicKey"], "new-pub");
-        // Fingerprint preserved verbatim — bw will recompute it on save
-        // but we don't blow it away locally first.
+
         assert_eq!(parsed["sshKey"]["keyFingerprint"], "SHA256:abc");
     }
 
@@ -411,8 +346,7 @@ mod tests {
     #[test]
     fn patch_login_url_match_round_trip() {
         let base = r#"{"type":1,"name":"s","login":{"username":"u","password":"p","uris":[{"uri":"https://x","match":3}]}}"#;
-        // Uses the post-multi-URI API — patcher now reads URL rows by
-        // their `kind`, not by label, so the constructor matters.
+
         let fields = vec![
             EditField::uri_url("URL", "https://y", 0),
             EditField::uri_match("URL Match", "Regex", 0),
@@ -429,8 +363,6 @@ mod tests {
 
     #[test]
     fn patch_writes_custom_fields_back() {
-        // Existing item has one custom field "API_KEY" — user edits it
-        // and adds a second.
         let base = r#"{"type":1,"name":"s","login":{"username":"u","password":"p"},"fields":[{"name":"API_KEY","value":"old","type":1,"linkedId":null}]}"#;
         let fields = vec![
             ef("Name", "s"),
@@ -451,8 +383,6 @@ mod tests {
 
     #[test]
     fn patch_drops_removed_custom_fields() {
-        // Item had two custom fields, user removed one — only the
-        // remaining field should be in the output.
         let base = r#"{"type":1,"name":"s","fields":[{"name":"A","value":"1","type":0},{"name":"B","value":"2","type":0}]}"#;
         let fields = vec![ef("Name", "s"), ef_custom("A", "1", 0)];
         let patched = patch_edit_payload(base, &fields);
@@ -473,11 +403,6 @@ mod tests {
 
     #[test]
     fn patch_preserves_linked_fields_verbatim() {
-        // Item came from the official GUI with one linked field
-        // (type=3, linkedId=42) and one regular text field. The TUI
-        // does not surface linked fields as editable, so the form
-        // only carries the regular one — the linked entry should
-        // survive the round-trip with its `linkedId` intact.
         let base = r#"{
             "type": 1,
             "name": "s",
@@ -491,11 +416,11 @@ mod tests {
         let parsed: Value = serde_json::from_str(&patched).unwrap();
         let arr = parsed["fields"].as_array().expect("fields array");
         assert_eq!(arr.len(), 2, "linked + regular both present");
-        // Linked fields go first.
+
         assert_eq!(arr[0]["name"], "Mirror");
         assert_eq!(arr[0]["type"], 3);
         assert_eq!(arr[0]["linkedId"], 42);
-        // Regular field reflects the user's edit.
+
         assert_eq!(arr[1]["name"], "Note");
         assert_eq!(arr[1]["value"], "hello updated");
         assert_eq!(arr[1]["type"], 0);
@@ -503,9 +428,6 @@ mod tests {
 
     #[test]
     fn patch_preserves_linked_fields_even_when_form_has_no_custom_rows() {
-        // User opens an item that only has a linked field, never adds
-        // any custom field of their own — the linked entry must still
-        // survive the save.
         let base = r#"{
             "type": 1,
             "name": "s",
@@ -554,7 +476,7 @@ mod tests {
     #[test]
     fn patch_drops_removed_uri_pair() {
         let base = r#"{"type":1,"name":"s","login":{"username":"u","password":"p","uris":[{"uri":"https://a","match":null},{"uri":"https://b","match":null}]}}"#;
-        // User removed slot 1 — only slot 0 should be saved.
+
         let fields = vec![
             ef("Name", "s"),
             ef("Username", "u"),
@@ -572,8 +494,7 @@ mod tests {
     #[test]
     fn patch_writes_folder_id_when_present() {
         let base = r#"{"type":1,"name":"s","folderId":null}"#;
-        // The flow has already resolved the typed folder name into
-        // its id before reaching the patcher.
+
         let fields = vec![ef("Name", "s"), ef("Folder", "abc-123-uuid")];
         let patched = patch_edit_payload(base, &fields);
         let parsed: Value = serde_json::from_str(&patched).unwrap();
@@ -582,8 +503,6 @@ mod tests {
 
     #[test]
     fn create_payload_omits_org_keys_for_personal() {
-        // No Organization row → personal-vault item, no
-        // organizationId / collectionIds in the payload.
         let fields = vec![ef("Name", "n"), ef("Notes", "")];
         let json = build_create_payload(&CreateItemType::SecureNote, &fields);
         let parsed: Value = serde_json::from_str(&json).unwrap();
@@ -593,7 +512,6 @@ mod tests {
 
     #[test]
     fn create_payload_omits_org_keys_when_org_row_is_personal() {
-        // Organization row exists but resolved to Personal (id=None).
         let fields = vec![
             ef("Name", "n"),
             ef("Notes", ""),
@@ -637,9 +555,6 @@ mod tests {
 
     #[test]
     fn patch_leaves_collection_ids_untouched_when_row_absent() {
-        // Personal items don't get a Collections row. Whatever bw
-        // returned for `collectionIds` (typically `[]`) must survive
-        // the save unchanged.
         let base = r#"{"type":1,"name":"s","collectionIds":[]}"#;
         let fields = vec![ef("Name", "s")];
         let patched = patch_edit_payload(base, &fields);

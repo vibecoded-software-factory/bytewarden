@@ -1,5 +1,3 @@
-//! Open / regenerate / copy / use flows for the password generator.
-
 use crate::ports::BwError;
 use crate::ports::GeneratorMode;
 use crate::tui::action::ActionState;
@@ -10,18 +8,11 @@ use crate::tui::generator::{
 use crate::tui::screens::Screen;
 use crate::tui::worker::{InFlight, WorkerRequest};
 
-/// Opens the generator screen in standalone mode (no return target).
-///
-/// The result box stays empty until the user explicitly presses Enter —
-/// auto-generating on open would surprise the user with an output they
-/// did not configure.
 pub fn open_standalone(app: &mut App) {
     app.generator = GeneratorState::default();
     app.screen = Screen::Generator;
 }
 
-/// Opens the generator screen with a return target pointing at one of
-/// the rows of the edit form. Pressing "Use" populates that row.
 pub fn open_for_edit_field(app: &mut App, idx: usize) {
     app.generator = GeneratorState {
         return_target: Some(ReturnTarget::EditField(idx)),
@@ -30,8 +21,6 @@ pub fn open_for_edit_field(app: &mut App, idx: usize) {
     app.screen = Screen::Generator;
 }
 
-/// Opens the generator screen with a return target pointing at one of
-/// the rows of the create form.
 pub fn open_for_create_field(app: &mut App, idx: usize) {
     app.generator = GeneratorState {
         return_target: Some(ReturnTarget::CreateField(idx)),
@@ -40,7 +29,6 @@ pub fn open_for_create_field(app: &mut App, idx: usize) {
     app.screen = Screen::Generator;
 }
 
-/// Sends a `bw generate` request to the worker with the current options.
 pub fn request_generate(app: &mut App) {
     let opts = app.generator.options.clone();
     app.submit(
@@ -50,14 +38,12 @@ pub fn request_generate(app: &mut App) {
     );
 }
 
-/// `bw generate` response.
 pub fn handle(app: &mut App, r: Result<String, BwError>) {
     match r {
         Ok(value) => {
             let cmd = describe_cmd(&app.generator.options);
             app.push_cmd(&cmd, true, "generated [hidden]");
-            // `result` is `Zeroizing<String>` so the buffer is scrubbed
-            // when overwritten or when the generator state drops.
+
             app.generator.result = zeroize::Zeroizing::new(value);
             app.set_action(ActionState::Done("Generated ✓".into()));
         }
@@ -65,10 +51,6 @@ pub fn handle(app: &mut App, r: Result<String, BwError>) {
     }
 }
 
-/// Copies the current result to the clipboard via the injected port.
-///
-/// Honors `app.clipboard_clear_secs` — a generated password is exactly
-/// the kind of secret that benefits from the timed wipe.
 pub fn copy_result(app: &mut App) {
     if app.generator.result.is_empty() {
         app.set_action(ActionState::Error("Nothing to copy yet.".into()));
@@ -93,10 +75,6 @@ pub fn copy_result(app: &mut App) {
     }
 }
 
-/// Writes the current result into the form field referenced by the
-/// stored [`ReturnTarget`] and switches back to that screen.
-///
-/// No-op when there's no return target (standalone mode) or no result.
 pub fn use_result(app: &mut App) {
     if app.generator.result.is_empty() {
         app.set_action(ActionState::Error("Nothing to use yet.".into()));
@@ -108,9 +86,7 @@ pub fn use_result(app: &mut App) {
         ));
         return;
     };
-    // `app.generator.result` is a `Zeroizing<String>` and the field's
-    // `LineEditor` scrubs its previous buffer on `set`, so the value
-    // stays protected end-to-end.
+
     let value = app.generator.result.clone();
     match target {
         ReturnTarget::EditField(idx) => {
@@ -130,8 +106,6 @@ pub fn use_result(app: &mut App) {
     app.set_action(ActionState::Done("Used ✓".into()));
 }
 
-/// Closes the generator and returns to the calling screen, discarding
-/// the in-flight result.
 pub fn cancel(app: &mut App) {
     match app.generator.return_target {
         Some(ReturnTarget::EditField(_)) => {
@@ -148,33 +122,21 @@ pub fn cancel(app: &mut App) {
     app.set_action(ActionState::Idle);
 }
 
-// ── Mode + focus navigation helpers ───────────────────────────────────────
-
-/// Switches between Password and Passphrase mode and snaps the focus
-/// back onto a valid control for the new mode.
-///
-/// Does *not* auto-generate — the user explicitly triggers generation
-/// with Enter once they're done configuring.
 pub fn toggle_mode(app: &mut App) {
     app.generator.options.mode = match app.generator.options.mode {
         GeneratorMode::Password => GeneratorMode::Passphrase,
         GeneratorMode::Passphrase => GeneratorMode::Password,
     };
-    // Pick the first non-Mode focus so the user is parked on a
-    // meaningful row (Mode itself is already correctly highlighted by
-    // virtue of `focus == Mode`, but we move on).
+
     app.generator.focus = focusable_for(app.generator.options.mode)
         .iter()
         .copied()
         .find(|f| *f != GeneratorFocus::Mode)
         .unwrap_or(GeneratorFocus::Mode);
-    // Stale result is cleared so the user does not see a value that
-    // no longer matches the new mode.
+
     app.generator.result.clear();
 }
 
-/// Cycles focus by `dir` (+1 down, -1 up) inside the focusable list
-/// for the active mode.
 pub fn focus_step(app: &mut App, dir: i32) {
     let list = focusable_for(app.generator.options.mode);
     if list.is_empty() {
@@ -185,8 +147,6 @@ pub fn focus_step(app: &mut App, dir: i32) {
     app.generator.focus = list[next];
 }
 
-/// Builds a redacted shell representation of the current generator
-/// invocation, for the cmd-log panel.
 fn describe_cmd(opts: &crate::ports::GeneratorOptions) -> String {
     let mut parts: Vec<String> = vec!["bw generate".into()];
     match opts.mode {

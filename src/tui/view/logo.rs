@@ -1,5 +1,3 @@
-//! Animated logo renderer (FIGlet text overlaid on the starfield).
-
 use figlet_rs::FIGfont;
 use ratatui::{
     Frame,
@@ -12,16 +10,10 @@ use ratatui::{
 use crate::tui::app::App;
 use crate::tui::view::starfield::{build_star_line, star_char_at};
 
-/// FIGlet font shipped inside the binary. The `slant.flf` file lives at
-/// `src/tui/assets/slant.flf` and is embedded at build time so the binary
-/// has no external file dependency.
 const SLANT_FONT: &str = include_str!("../assets/slant.flf");
 
-/// Crate version string for the centered subtitle — sourced from
-/// `Cargo.toml` so it can never drift from the actual build.
 const VERSION: &str = concat!("v", env!("CARGO_PKG_VERSION"));
 
-/// Renders the logo + version + surrounding starfield into `area`.
 pub fn render(frame: &mut Frame, app: &App, area: Rect) {
     let t = &app.theme;
     let w = area.width as usize;
@@ -31,8 +23,6 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
     let style_inactive = Style::default().fg(t.inactive);
     let style_accent = Style::default().fg(t.accent);
 
-    // Render the FIGlet text into two stacked words. Fall back to plain
-    // text if the font fails to load (highly unlikely with embedded data).
     let (fig_top, fig_bottom) = {
         let font = FIGfont::from_content(SLANT_FONT)
             .unwrap_or_else(|_| FIGfont::standard().expect("standard FIGfont must load"));
@@ -62,8 +52,6 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
     let r1: Vec<&str> = r1_owned.iter().map(String::as_str).collect();
     let r2: Vec<&str> = r2_owned.iter().map(String::as_str).collect();
 
-    // Vertical layout — first FIG word at row 1, second below it, then
-    // the version label centered in the leftover space.
     let r1_start = 1usize;
     let r2_start = r1_start + r1.len();
     let text_end = r2_start + r2.len();

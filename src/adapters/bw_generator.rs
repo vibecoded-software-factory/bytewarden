@@ -1,36 +1,19 @@
-//! [`crate::ports::PasswordGeneratorPort`] implementation that shells
-//! out to `bw generate`.
-//!
-//! Independent from [`crate::adapters::BwCliAdapter`] because password
-//! generation needs no session: it is a pure stateless operation, and
-//! keeping the responsibilities split lets either backend be replaced
-//! without touching the other.
-
 use crate::adapters::bw_cli::process::bw_run_timeout;
 use crate::ports::{BwError, GeneratorMode, GeneratorOptions, PasswordGeneratorPort};
 
-/// Bitwarden's hard minimum lengths, mirrored here so the adapter can
-/// clamp UI input before invoking the CLI.
 const MIN_PASSWORD_LENGTH: u8 = 5;
 const MIN_PASSPHRASE_WORDS: u8 = 3;
 
-/// Wall-clock budget for `bw generate`. Generation is local (no network),
-/// so it finishes in milliseconds — this is a panic-prevention floor so a
-/// wedged CLI can't block the worker thread indefinitely, matching the
-/// timeout discipline the rest of the `bw` surface already uses.
 const GENERATE_TIMEOUT_SECS: u64 = 10;
 
-/// Generator adapter — calls `bw generate <flags>` per request.
 #[derive(Debug, Default)]
 pub struct BwGeneratorAdapter;
 
 impl BwGeneratorAdapter {
-    /// Constructs a new adapter. Cheap; does not touch the CLI.
     pub fn new() -> Self {
         Self
     }
 
-    /// Builds the `bw generate` argument vector for the given options.
     fn build_args(opts: &GeneratorOptions) -> Vec<String> {
         let mut args: Vec<String> = vec!["generate".to_string()];
         match opts.mode {
@@ -75,9 +58,6 @@ impl BwGeneratorAdapter {
 
 impl PasswordGeneratorPort for BwGeneratorAdapter {
     fn generate(&self, opts: &GeneratorOptions) -> Result<String, BwError> {
-        // Validate up front: in password mode at least one character
-        // class must be enabled, otherwise `bw` returns an unhelpful
-        // error and we'd surface garbage.
         if opts.mode == GeneratorMode::Password
             && !(opts.uppercase || opts.lowercase || opts.numbers || opts.special)
         {
@@ -87,9 +67,7 @@ impl PasswordGeneratorPort for BwGeneratorAdapter {
         }
 
         let args = Self::build_args(opts);
-        // Route through the shared timeout runner so a hung `bw` can't
-        // freeze the worker (it also nulls stdin + prepends
-        // `--nointeraction`, consistent with every other invocation).
+
         let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
         let out = bw_run_timeout(&arg_refs, GENERATE_TIMEOUT_SECS)?;
 

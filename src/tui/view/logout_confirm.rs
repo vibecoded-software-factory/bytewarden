@@ -1,8 +1,3 @@
-//! Confirm-logout popup renderer.
-//!
-//! Drawn on top of the vault screen — same overlay pattern used by
-//! [`crate::tui::view::confirm`].
-
 use crossterm::event::KeyCode;
 use ratatui::{
     Frame,
@@ -14,7 +9,6 @@ use ratatui::{
 use crate::tui::app::App;
 use crate::tui::view::widgets::{ConfirmAction, ConfirmPopup, ConfirmTone, draw_confirm_popup};
 
-/// Renders the confirm-logout popup.
 pub fn draw_popup(frame: &mut Frame, area: Rect, app: &App) {
     let t = &app.theme;
     draw_confirm_popup(

@@ -1,12 +1,9 @@
-//! Key handler for the vault-import popup.
-
 use crossterm::event::{KeyCode, KeyEvent};
 
 use crate::tui::app::App;
 use crate::tui::flows::import::{cancel, commit, focus_step};
 use crate::tui::import::ImportFocus;
 
-/// Click: focus the field under the pointer.
 pub fn mouse(app: &mut App, col: u16, row: u16) {
     let Some(idx) = crate::tui::view::widgets::field_hit_at(col, row) else {
         return;
@@ -20,7 +17,6 @@ pub fn mouse(app: &mut App, col: u16, row: u16) {
     }
 }
 
-/// Dispatches a single key event on the import popup.
 pub fn handle(app: &mut App, key: KeyEvent) {
     match key.code {
         KeyCode::Esc => return cancel(app),
@@ -34,8 +30,6 @@ pub fn handle(app: &mut App, key: KeyEvent) {
         return;
     };
 
-    // The Format row is now a read-only dropdown — cycle with ← →
-    // and ignore everything else (including text input keys).
     if state.focus == ImportFocus::Format {
         match key.code {
             KeyCode::Left | KeyCode::Char('h') => state.cycle_format(-1),
@@ -45,6 +39,5 @@ pub fn handle(app: &mut App, key: KeyEvent) {
         return;
     }
 
-    // Path row — regular text input.
     crate::tui::input::common::route_line_editor(&mut state.path, key);
 }

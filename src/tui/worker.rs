@@ -1,32 +1,3 @@
-//! Worker thread that owns the vault + generator ports and serves
-//! requests serially over `mpsc`.
-//!
-//! ## Why a worker
-//!
-//! Every call into the `bw` CLI is a synchronous subprocess that can
-//! take from ~200 ms (Node cold-start on a local read) to tens of
-//! seconds (`sync` / `login` over the network). Running it on the
-//! render thread froze the UI for the whole duration — spinner static,
-//! keys queued, `Ctrl+C` delayed. The worker thread keeps the render
-//! loop responsive:
-//!
-//! * The render thread builds a [`WorkerRequest`], stashes a
-//!   [`InFlight`] ticket on [`crate::tui::App`], sends the request, and
-//!   immediately continues redrawing. The spinner ticks while it runs.
-//! * The worker pulls one request at a time, calls into the port(s),
-//!   ships a [`WorkerResponse`] back.
-//! * The render thread drains the response channel between frames and
-//!   routes each response via [`crate::tui::flows::apply_response`].
-//!
-//! Serial-by-construction: only one user request is in flight at a time
-//! (`App::in_flight` is an `Option`, not a `Vec`), and input is gated
-//! while it is `Some` (see `input::is_busy_blocked`). Multi-step flows
-//! (login → load → session-data, save = fetch → edit, …) chain by having
-//! a response handler queue the next request.
-//!
-//! The clipboard and settings ports stay synchronous on the render
-//! thread — they're fast and don't warrant the round-trip.
-
 use std::panic::AssertUnwindSafe;
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::thread::JoinHandle;
@@ -39,8 +10,6 @@ use crate::ports::{
     BwError, GeneratorOptions, ParallelSessionData, PasswordGeneratorPort, VaultPort,
 };
 
-/// Catches a panic inside a port call and turns it into an `Err` string
-/// so one bad call can't take down the worker thread.
 fn run_caught<T>(f: impl FnOnce() -> Result<T, BwError>) -> Result<T, BwError> {
     match std::panic::catch_unwind(AssertUnwindSafe(f)) {
         Ok(r) => r,
@@ -58,145 +27,166 @@ fn panic_payload_to_string(payload: Box<dyn std::any::Any + Send>) -> String {
     "<unknown panic payload>".to_string()
 }
 
-/// One unit of work for the worker. Each variant owns its arguments so
-/// nothing borrows from `App` across the thread boundary.
 pub enum WorkerRequest {
-    /// `bw status`.
     Status,
-    /// `bw login` (fresh master-password login).
+
     Login {
         email: String,
         password: Zeroizing<String>,
     },
-    /// `bw login` resuming a new-device verification with the e-mailed code.
+
     LoginOtp {
         email: String,
         password: Zeroizing<String>,
         otp: Zeroizing<String>,
     },
-    /// `bw login --method N` resuming a permanent-2FA challenge.
+
     LoginTwoFactor {
         email: String,
         password: Zeroizing<String>,
         code: Zeroizing<String>,
         method: TwoFactorMethod,
     },
-    /// `bw login --apikey` (leaves the vault Locked).
+
     LoginApiKey,
-    /// `bw login --sso` (leaves the vault Locked).
+
     LoginSso,
-    /// `bw unlock`.
-    Unlock { password: Zeroizing<String> },
-    /// `bw lock` — fire-and-forget (the render thread resets UI state
-    /// immediately; this just drops the worker's session key).
+
+    Unlock {
+        password: Zeroizing<String>,
+    },
+
     Lock,
-    /// `bw logout`.
+
     Logout,
-    /// `bw config server <url>`.
-    SetServer { url: String },
-    /// `bw list items`.
+
+    SetServer {
+        url: String,
+    },
+
     ListItems,
-    /// `bw list items --trash`.
+
     ListTrash,
-    /// `bw sync`.
+
     Sync,
-    /// `bw get totp <id>`.
-    GetTotp { item_id: String },
-    /// `bw get item <id>` (raw JSON, base for patching).
-    GetItemJson { item_id: String },
-    /// HaveIBeenPwned breach check for an item's password.
-    CheckExposed { item_id: String },
-    /// `bw create item`.
-    CreateItem { json: Zeroizing<String> },
-    /// `bw edit item`.
+
+    GetTotp {
+        item_id: String,
+    },
+
+    GetItemJson {
+        item_id: String,
+    },
+
+    CheckExposed {
+        item_id: String,
+    },
+
+    CreateItem {
+        json: Zeroizing<String>,
+    },
+
     EditItem {
         item_id: String,
         json: Zeroizing<String>,
     },
-    /// `bw delete item` (trash unless `permanent`).
-    DeleteItem { item_id: String, permanent: bool },
-    /// `bw restore item`.
-    RestoreItem { item_id: String },
-    /// `bw list folders`.
+
+    DeleteItem {
+        item_id: String,
+        permanent: bool,
+    },
+
+    RestoreItem {
+        item_id: String,
+    },
+
     ListFolders,
-    /// `bw create folder`.
-    CreateFolder { name: String },
-    /// `bw edit folder`.
-    EditFolder { folder_id: String, name: String },
-    /// `bw delete folder`.
-    DeleteFolder { folder_id: String },
-    /// `bw export`.
-    Export { format: String, path: String },
-    /// `bw import`.
-    Import { format: String, path: String },
-    /// `bw get fingerprint me`.
+
+    CreateFolder {
+        name: String,
+    },
+
+    EditFolder {
+        folder_id: String,
+        name: String,
+    },
+
+    DeleteFolder {
+        folder_id: String,
+    },
+
+    Export {
+        format: String,
+        path: String,
+    },
+
+    Import {
+        format: String,
+        path: String,
+    },
+
     GetFingerprint,
-    /// `bw move <id> <org> <collections>`.
+
     MoveItem {
         item_id: String,
         organization_id: String,
         collection_ids: Vec<String>,
     },
-    /// `bw create attachment`.
-    UploadAttachment { item_id: String, file_path: String },
-    /// `bw get attachment`.
+
+    UploadAttachment {
+        item_id: String,
+        file_path: String,
+    },
+
     DownloadAttachment {
         item_id: String,
         file_name: String,
         output_path: String,
     },
-    /// `bw delete attachment`.
+
     DeleteAttachment {
         item_id: String,
         attachment_id: String,
     },
-    /// `bw send create` (text).
+
     SendText {
         name: String,
         days: u8,
         content: String,
     },
-    /// `bw list organizations`.
+
     ListOrganizations,
-    /// `bw list collections`.
+
     ListCollections,
-    /// The four post-auth reads (folders/orgs/collections/import-formats)
-    /// in one trip — the adapter parallelises them internally.
+
     ParallelSessionData,
-    /// `bw generate`.
-    Generate { opts: GeneratorOptions },
-    /// Terminates the worker. Sent on drop of [`WorkerHandle`].
+
+    Generate {
+        opts: GeneratorOptions,
+    },
+
     Shutdown,
 }
 
-/// Result envelope for one [`WorkerRequest`]. Several mutating calls that
-/// only return success/failure share the [`WorkerResponse::Unit`]
-/// envelope; the [`InFlight`] ticket disambiguates which flow they
-/// belong to.
 pub enum WorkerResponse {
     Status(Result<VaultInfo, BwError>),
     Login(LoginOutcome),
-    /// unlock / login-otp / login-2fa → the new session key.
+
     SessionKey(Result<String, BwError>),
-    /// api-key / sso login (vault left Locked, no key yet).
+
     LoginLocked(Result<(), BwError>),
     Logout(Result<(), BwError>),
     SetServer(Result<(), BwError>),
     Items(Result<Vec<Item>, BwError>),
     Trash(Result<Vec<Item>, BwError>),
-    /// Shared envelope for mutating calls returning `()` — sync, delete
-    /// item, restore item, delete folder, export, import, move item,
-    /// delete/download attachment. Routed by [`InFlight`].
+
     Unit(Result<(), BwError>),
     Totp(Result<String, BwError>),
     ItemJson(Result<Zeroizing<String>, BwError>),
     Exposed(Result<u32, BwError>),
-    /// create_item / edit_item / upload_attachment → the updated item.
-    /// Boxed: `Item` is ~900 bytes and would bloat every response moved
-    /// across the channel (`clippy::large_enum_variant`). The dispatcher
-    /// unboxes before calling the handler.
+
     Item(Result<Box<Item>, BwError>),
-    /// create_folder / edit_folder → the folder.
+
     Folder(Result<Folder, BwError>),
     Folders(Result<Vec<Folder>, BwError>),
     Orgs(Result<Vec<Organization>, BwError>),
@@ -205,123 +195,128 @@ pub enum WorkerResponse {
     SendUrl(Result<String, BwError>),
     SessionData(ParallelSessionData),
     Generated(Result<String, BwError>),
-    /// `bw lock` finished — fire-and-forget, routed by variant and ignored.
+
     Locked,
 }
 
-/// Caller-side context for an in-flight request — stored on
-/// [`crate::tui::App::in_flight`] and consumed when the matching
-/// response arrives. Multi-step flows chain by queueing the next
-/// request (with a fresh ticket) from the response handler.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum InFlight {
-    /// Boot: `bw status`.
     BootStatus,
-    /// Boot resume: list items with the seeded session key.
+
     ResumeItems,
-    /// Boot resume: post-list parallel session data.
+
     ResumeSessionData,
-    /// Fresh master-password login.
+
     Login,
-    /// Unlock an already-authenticated (Locked) vault.
+
     Unlock,
-    /// Resume a new-device verification with the e-mailed code.
+
     LoginOtp,
-    /// Resume a permanent-2FA challenge.
+
     LoginTwoFactor,
-    /// `bw login --apikey`.
+
     LoginApiKey,
-    /// `bw login --sso`.
+
     LoginSso,
-    /// Post-login: load items.
+
     PostLoginItems,
-    /// Post-login: parallel session data.
+
     PostLoginSessionData,
-    /// Log out of the account.
+
     Logout,
-    /// Persist a server-URL change.
+
     SetServer,
-    /// Fetch the fingerprint phrase.
+
     Fingerprint,
-    /// User-initiated vault-list load (spinner → Idle).
+
     LoadItems,
-    /// Silent vault-list refresh (preserves the prior toast).
+
     ReloadItemsSilent,
-    /// Trash-list load.
+
     LoadTrash,
-    /// Vault sync.
+
     Sync,
-    /// Post-sync silent item reload.
+
     SyncReload,
-    /// Create a new item.
+
     CreateItem,
-    /// Save edit — step 1: fetch the item JSON to patch.
+
     SaveEditFetch,
-    /// Save edit — step 2: commit the patched JSON.
+
     SaveEditCommit,
-    /// Toggle favorite — step 1: fetch the item JSON.
-    ToggleFavoriteFetch { item_id: String },
-    /// Toggle favorite — step 2: commit the flipped JSON.
-    ToggleFavoriteCommit { new_favorite: bool },
-    /// Delete (trash or permanent) an item.
+
+    ToggleFavoriteFetch {
+        item_id: String,
+    },
+
+    ToggleFavoriteCommit {
+        new_favorite: bool,
+    },
+
     DeleteItem {
         permanent: bool,
         item_id: String,
         name: String,
     },
-    /// Post-delete silent trash reload.
+
     DeleteReloadTrash,
-    /// Restore a trashed item.
-    RestoreItem { item_id: String, name: String },
-    /// Post-restore silent item reload.
+
+    RestoreItem {
+        item_id: String,
+        name: String,
+    },
+
     RestoreReloadItems,
-    /// HIBP exposed-password check.
+
     CheckExposed,
-    /// Download an attachment.
+
     DownloadAttachment,
-    /// Delete an attachment — step 1: the delete call.
+
     DeleteAttachment,
-    /// Delete an attachment — step 2: refetch the item JSON to refresh it.
-    DeleteAttachmentRefresh { item_id: String },
-    /// Upload an attachment.
+
+    DeleteAttachmentRefresh {
+        item_id: String,
+    },
+
     UploadAttachment,
-    /// Copy a TOTP code (fetch → clipboard in the handler).
+
     CopyTotp,
-    /// Create a folder.
+
     CreateFolder,
-    /// Rename a folder.
+
     EditFolder,
-    /// Delete a folder (`name` carried for the success toast).
-    DeleteFolder { name: String },
-    /// Silent folder reload after a folder mutation.
+
+    DeleteFolder {
+        name: String,
+    },
+
     FolderReload,
-    /// Silent item reload after a folder delete (items lost their folder).
+
     FolderDeleteReloadItems,
-    /// Export the vault.
+
     Export,
-    /// Import into the vault.
+
     Import,
-    /// Post-import silent item reload.
+
     ImportReloadItems,
-    /// Post-import silent folder reload.
+
     ImportReloadFolders,
-    /// Create a text Send (URL copied in the handler).
+
     SendText,
-    /// Move an item into an organisation's collections.
+
     MoveItem,
-    /// Post-move silent item reload.
+
     MoveReloadItems,
-    /// Memberships popup — step 1: list organisations.
+
     MembershipsOrgs,
-    /// Memberships popup — step 2: list collections.
+
     MembershipsCollections,
-    /// Reprompt master-password reverify.
+
     RepromptUnlock,
-    /// Generate a password / passphrase.
+
     Generate,
 }
 
-/// Owning handle to the worker thread.
 pub struct WorkerHandle {
     tx: Option<Sender<WorkerRequest>>,
     rx: Option<Receiver<WorkerResponse>>,
@@ -329,7 +324,6 @@ pub struct WorkerHandle {
 }
 
 impl WorkerHandle {
-    /// Spawns the worker, moving the vault + generator ports onto it.
     pub fn spawn(
         mut vault: Box<dyn VaultPort + Send>,
         generator: Box<dyn PasswordGeneratorPort + Send>,
@@ -378,8 +372,6 @@ fn run_worker(
             WorkerRequest::Shutdown => break,
             WorkerRequest::Status => WorkerResponse::Status(run_caught(|| vault.status())),
             WorkerRequest::Login { email, password } => {
-                // `login` returns a non-`Result` outcome; guard it
-                // separately so a panic becomes a Failed outcome.
                 let outcome = match std::panic::catch_unwind(AssertUnwindSafe(|| {
                     vault.login(&email, &password)
                 })) {
@@ -500,8 +492,6 @@ fn run_worker(
                 WorkerResponse::Collections(run_caught(|| vault.list_collections()))
             }
             WorkerRequest::ParallelSessionData => {
-                // `parallel_session_data` returns its own bundle of
-                // `Result`s; on a panic synthesise an all-failed bundle.
                 let data = match std::panic::catch_unwind(AssertUnwindSafe(|| {
                     vault.parallel_session_data()
                 })) {
@@ -537,8 +527,6 @@ mod tests {
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    /// Port that panics on the first `status` call and returns Ok
-    /// thereafter. Every other method is a no-op.
     #[derive(Default)]
     struct PanicOnce {
         n: Arc<AtomicUsize>,

@@ -1,5 +1,3 @@
-//! Spinner + action-state line builders shared between several screens.
-
 use ratatui::{
     style::{Modifier, Style},
     text::{Line, Span},
@@ -8,18 +6,12 @@ use ratatui::{
 use crate::tui::action::ActionState;
 use crate::tui::app::App;
 
-/// Four-frame Braille spinner — a single spinning dot.
 const SPINNER: [&str; 4] = ["⠋", "⠙", "⠸", "⠴"];
 
-/// Returns the spinner glyph for the given tick — one frame per tick
-/// (~80 ms at the busy poll rate), so the dot spins at a brisk, modern
-/// pace.
 pub fn spinner_frame(tick: u8) -> &'static str {
     SPINNER[tick as usize % SPINNER.len()]
 }
 
-/// Builds a `Line` showing the current action state (spinner / ✓ / ✕).
-/// Returns `None` when the state is `Idle`.
 pub fn action_line(app: &App) -> Option<Line<'static>> {
     let sp = spinner_frame(app.action_tick);
     let t = &app.theme;
@@ -49,8 +41,6 @@ pub fn action_line(app: &App) -> Option<Line<'static>> {
     }
 }
 
-/// Returns a `(text, style)` tuple describing the current action state —
-/// used in the detail header.
 pub fn action_text_style(app: &App) -> (String, Style) {
     let sp = spinner_frame(app.action_tick);
     let t = &app.theme;

@@ -1,10 +1,3 @@
-//! Adapters — concrete implementations of the [`crate::ports`] traits.
-//!
-//! This is the only layer allowed to import OS-level dependencies
-//! (`std::process::Command`, the filesystem, environment variables).
-//! The rest of the crate talks to these adapters through the trait
-//! abstractions, so swapping or mocking them is straightforward.
-
 pub mod bw_cli;
 pub mod bw_generator;
 pub mod clipboard_system;

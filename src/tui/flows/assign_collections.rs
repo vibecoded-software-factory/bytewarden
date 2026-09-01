@@ -1,11 +1,3 @@
-//! Flow for the multi-select "assign collections" popup.
-//!
-//! Open path filters the global collection list to the org of the
-//! item currently in the edit form, snapshots the user's existing
-//! membership and parks the cursor on row 0. Commit validates the
-//! "≥1 selection" rule that bw enforces for org items and copies the
-//! chosen UUIDs back into the matching `EditField`.
-
 use crate::ports::BwError;
 use crate::tui::action::ActionState;
 use crate::tui::app::App;
@@ -13,19 +5,6 @@ use crate::tui::assign_collections::{AssignCollectionsPurpose, AssignCollections
 use crate::tui::screens::Screen;
 use crate::tui::worker::{InFlight, WorkerRequest};
 
-/// Opens the popup for the focused "Collections" row.
-///
-/// Supports two callers:
-/// * **Edit mode** (`app.edit.active == true`): drives
-///   `app.edit.fields[edit_field_idx]`. The org id comes from the
-///   underlying item.
-/// * **Create form** (`app.screen == Screen::Create`): drives
-///   `app.create.fields[create_field_idx]`. The org id comes from
-///   the sibling `Organization` row in the same form.
-///
-/// No-op + error toast when the focused row isn't a Collections row,
-/// when there's no resolvable org id, or when the org has no visible
-/// collections at all.
 pub fn open(app: &mut App) {
     let in_create = matches!(app.screen, Screen::Create);
     let in_edit = app.edit.active && matches!(app.screen, Screen::Detail);
@@ -37,7 +16,7 @@ pub fn open(app: &mut App) {
         let Some(field) = app.create.fields.get(app.create.field_idx) else {
             return;
         };
-        // Resolve org id from the sibling Organization row.
+
         let org = app
             .create
             .fields
@@ -79,7 +58,6 @@ pub fn open(app: &mut App) {
         return;
     };
 
-    // Filter to the org and sort by display name.
     let mut available: Vec<crate::domain::Collection> = app
         .collections
         .iter()
@@ -110,16 +88,6 @@ pub fn open(app: &mut App) {
     app.screen = Screen::AssignCollections;
 }
 
-/// Opens the popup in **move-to-org** mode for the currently
-/// selected detail-screen item.
-///
-/// Preconditions enforced inline (with friendly error toasts):
-/// * The item must be personal (already in an org → use the
-///   regular Collections row, not move).
-/// * The user must have exactly one organisation membership —
-///   the multi-org case requires picking the org first, which is
-///   not yet implemented (see audit roadmap).
-/// * That org must have at least one visible collection.
 pub fn open_for_move(app: &mut App) {
     if !matches!(app.screen, Screen::Detail) || app.edit.active {
         return;
@@ -127,11 +95,6 @@ pub fn open_for_move(app: &mut App) {
     open_for_move_from(app, Screen::Detail);
 }
 
-/// Whether the selected item can be moved into an organisation right now:
-/// it's personal (not already in an org), the user belongs to exactly one
-/// org, and that org has at least one visible collection. Used to decide
-/// whether to offer "Move" in the right-click menu without surfacing a
-/// toast for the cases the move flow would just reject.
 pub fn can_move_selected(app: &App) -> bool {
     let Some(item) = app.vault.selected_item() else {
         return false;
@@ -145,10 +108,6 @@ pub fn can_move_selected(app: &App) -> bool {
         .any(|c| c.organization_id.as_deref() == Some(org_id))
 }
 
-/// Core of the move flow, opened from `origin` (the detail screen via
-/// `open_for_move`, or the vault via the right-click menu). `origin` is
-/// where cancel returns the user. The personal / single-org /
-/// has-collections preconditions are enforced inline with friendly toasts.
 pub fn open_for_move_from(app: &mut App, origin: Screen) {
     let Some(item) = app.vault.selected_item() else {
         return;
@@ -201,8 +160,6 @@ pub fn open_for_move_from(app: &mut App, origin: Screen) {
     app.screen = Screen::AssignCollections;
 }
 
-/// Discards the popup and returns to whichever screen the user came
-/// from (edit-mode detail or the create form).
 pub fn cancel(app: &mut App) {
     let origin = app
         .assign_collections
@@ -213,20 +170,6 @@ pub fn cancel(app: &mut App) {
     app.screen = origin;
 }
 
-/// Validates and applies the popup selection. Bw requires org items
-/// to be in **at least one** collection — empty selection is
-/// rejected with an inline error strip so the user can fix it
-/// without losing their progress.
-///
-/// Branches on [`AssignCollectionsPurpose`]:
-/// * `UpdateField`: copy the chosen UUIDs into the matching
-///   `EditField`. The actual `bw edit` / `bw create` happens later
-///   via the regular Enter-to-save flow.
-/// * `MoveToOrg`: call `bw move` directly — the move is the
-///   commit. On success the in-memory item is dropped from
-///   `app.vault.items` (it now belongs to the org and would re-appear
-///   from the next sync); a silent refresh re-fetches the vault
-///   so the new state is visible immediately.
 pub fn commit(app: &mut App) {
     let Some(state) = app.assign_collections.as_mut() else {
         return;
@@ -278,8 +221,6 @@ pub fn commit(app: &mut App) {
     }
 }
 
-/// `bw move` response. On success the vault is reloaded silently so the
-/// `👥` indicator and collection rows light up.
 pub fn handle_move(app: &mut App, r: Result<(), BwError>) {
     match r {
         Ok(()) => {
@@ -297,7 +238,6 @@ pub fn handle_move(app: &mut App, r: Result<(), BwError>) {
     }
 }
 
-/// Silent post-move item reload.
 pub fn handle_move_reload(app: &mut App, r: Result<Vec<crate::domain::Item>, BwError>) {
     match r {
         Ok(items) => super::vault::set_items_keep_cursor(app, items),

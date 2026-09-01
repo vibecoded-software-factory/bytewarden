@@ -1,5 +1,3 @@
-//! Vault-export popup flow.
-
 use crate::ports::BwError;
 use crate::tui::action::ActionState;
 use crate::tui::app::App;
@@ -7,20 +5,16 @@ use crate::tui::export::{ExportFocus, ExportState};
 use crate::tui::screens::Screen;
 use crate::tui::worker::{InFlight, WorkerRequest};
 
-/// Opens the export popup with default values (JSON format, default
-/// download path).
 pub fn open(app: &mut App) {
     app.export = Some(ExportState::new());
     app.screen = Screen::Export;
 }
 
-/// Closes the popup and returns to the vault list.
 pub fn cancel(app: &mut App) {
     app.export = None;
     app.screen = Screen::Vault;
 }
 
-/// Cycles focus between the format picker and the path field.
 pub fn focus_step(app: &mut App, dir: i32) {
     let Some(state) = app.export.as_mut() else {
         return;
@@ -31,9 +25,6 @@ pub fn focus_step(app: &mut App, dir: i32) {
     };
 }
 
-/// Cycles the format forward and refreshes the default path so the
-/// extension matches the new format. No-op if the path field has
-/// been edited away from the default.
 pub fn cycle_format(app: &mut App) {
     let Some(state) = app.export.as_mut() else {
         return;
@@ -48,9 +39,7 @@ pub fn cycle_format(app: &mut App) {
     let dot = text.rfind('.');
     let looks_default = text.contains("bytewarden-export-");
     state.format = state.format.next();
-    // Only auto-refresh the path when the user hasn't edited it.
-    // Heuristic: keep the prefix `bytewarden-export-` and the unix
-    // timestamp; just swap the extension.
+
     if old_default_prefix
         && looks_default
         && let Some(dot) = dot
@@ -61,9 +50,6 @@ pub fn cycle_format(app: &mut App) {
     }
 }
 
-/// Runs `bw export` and reports the outcome as a toast. Closes the
-/// popup on success; keeps it open on failure so the user can fix
-/// the path and retry.
 pub fn commit(app: &mut App) {
     let Some(state) = app.export.as_ref() else {
         return;
@@ -74,9 +60,7 @@ pub fn commit(app: &mut App) {
         return;
     }
     let pb = std::path::PathBuf::from(&path);
-    // Refuse to overwrite — exports usually contain plaintext
-    // credentials and a silent overwrite of an unrelated file would
-    // be a nasty surprise.
+
     if pb.exists() {
         app.set_action(ActionState::Error(format!(
             "File already exists: {} — pick another name or remove it first.",
@@ -84,8 +68,7 @@ pub fn commit(app: &mut App) {
         )));
         return;
     }
-    // The destination directory must exist; bw is happy to create the
-    // file but not the directory tree above it.
+
     if let Some(parent) = pb.parent()
         && !parent.as_os_str().is_empty()
         && !parent.exists()
@@ -107,8 +90,6 @@ pub fn commit(app: &mut App) {
     );
 }
 
-/// `bw export` response. Closes the popup on success; keeps it open on
-/// failure so the user can fix the path and retry.
 pub fn handle(app: &mut App, r: Result<(), BwError>) {
     let (path, format) = match app.export.as_ref() {
         Some(s) => (s.path.text().trim().to_string(), s.format),
@@ -129,8 +110,6 @@ pub fn handle(app: &mut App, r: Result<(), BwError>) {
     }
 }
 
-/// Truncates a long path for the toast — keeps the start and the end
-/// so the user can see the filename.
 fn short_path(path: &str) -> String {
     if path.chars().count() <= 50 {
         return path.to_string();

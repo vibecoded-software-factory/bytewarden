@@ -1,5 +1,3 @@
-//! Confirm-delete-folder popup renderer.
-
 use crossterm::event::KeyCode;
 use ratatui::{
     Frame,
@@ -12,7 +10,6 @@ use crate::tui::app::App;
 use crate::tui::flows::folders::focused_folder;
 use crate::tui::view::widgets::{ConfirmAction, ConfirmPopup, ConfirmTone, draw_confirm_popup};
 
-/// Renders the confirm-delete-folder popup.
 pub fn draw_popup(frame: &mut Frame, area: Rect, app: &App) {
     let t = &app.theme;
     let folder_name = focused_folder(app)

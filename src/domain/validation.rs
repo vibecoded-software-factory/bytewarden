@@ -1,22 +1,3 @@
-//! Input validators used by the TUI flows.
-//!
-//! These are intentionally permissive — bytewarden is not a registration
-//! form and the underlying `bw` CLI will reject anything truly malformed
-//! anyway. The goal is to surface a clear error toast *before* the user
-//! waits for a network round-trip, not to enforce a schema.
-//!
-//! Every validator returns `Result<(), &'static str>` where the error
-//! string is meant for display in a feedback toast. Pure functions —
-//! they read no I/O — so they are tested in this module without
-//! plumbing fakes.
-
-/// Cheap shape check on an e-mail address. Accepts any string with at
-/// least one `@` followed by a domain that contains a `.`. Rejects
-/// empty input.
-///
-/// We do not validate against RFC 5321 — that would falsely reject
-/// real-world addresses. The goal is to catch the most common typos
-/// (missing `@`, missing TLD) before invoking `bw login`.
 pub fn validate_email(input: &str) -> Result<(), &'static str> {
     let s = input.trim();
     if s.is_empty() {
@@ -37,8 +18,6 @@ pub fn validate_email(input: &str) -> Result<(), &'static str> {
     Ok(())
 }
 
-/// Validates a Bitwarden server URL — must start with `http://` or
-/// `https://` and have at least one host character afterwards.
 pub fn validate_server_url(input: &str) -> Result<(), &'static str> {
     let s = input.trim();
     if s.is_empty() {
@@ -57,14 +36,6 @@ pub fn validate_server_url(input: &str) -> Result<(), &'static str> {
     Ok(())
 }
 
-/// Returns `Err` when `name` collides with an existing entry in
-/// `existing` (case-insensitive). Used by both folder-create and
-/// custom-field rename so the user sees a clear toast before the
-/// backend rejects the duplicate.
-///
-/// `current` is the name being replaced (when renaming) and is exempt
-/// from the collision check — passing the same value back is a no-op,
-/// not a duplicate.
 pub fn check_name_unique(
     name: &str,
     existing: impl IntoIterator<Item = impl AsRef<str>>,
@@ -94,7 +65,7 @@ mod tests {
     fn email_accepts_well_formed_addresses() {
         assert!(validate_email("alice@example.com").is_ok());
         assert!(validate_email("a.b+tag@sub.example.co.uk").is_ok());
-        // Trims surrounding whitespace before validating.
+
         assert!(validate_email("  alice@example.com  ").is_ok());
     }
 
@@ -110,8 +81,6 @@ mod tests {
 
     #[test]
     fn email_error_messages_are_specific() {
-        // The exact wording is part of the UX contract — tests catch
-        // drift in the toast text.
         assert_eq!(
             validate_email("alice").unwrap_err(),
             "Email is missing '@'."
@@ -135,7 +104,7 @@ mod tests {
         assert!(validate_server_url("http://localhost:8000").is_ok());
         assert!(validate_server_url("https://vault.bitwarden.com").is_ok());
         assert!(validate_server_url("https://my-vault.example.com").is_ok());
-        // Trims whitespace.
+
         assert!(validate_server_url("  https://x.y  ").is_ok());
     }
 
@@ -158,10 +127,9 @@ mod tests {
 
     #[test]
     fn name_unique_allows_renaming_to_same_value() {
-        // When renaming, the current name should NOT count as a clash.
         let existing = ["Work", "Personal"];
         assert!(check_name_unique("Work", existing, Some("Work")).is_ok());
-        // But colliding with a *different* sibling still fails.
+
         assert!(check_name_unique("Personal", existing, Some("Work")).is_err());
     }
 

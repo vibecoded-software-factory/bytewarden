@@ -1,36 +1,7 @@
-//! Theme system.
-//!
-//! Reads the optional `[theme]` section of `config.toml`. Every key is
-//! optional — only the entries present override the built-in defaults,
-//! so partial configs are valid.
-//!
-//! ```toml
-//! [theme]
-//! accent          = "#cba6f7"   # active borders, cursor, highlights
-//! inactive        = "#6c7086"   # inactive panel borders
-//! selected_bg     = "#313244"   # selected row background
-//! success         = "#a6e3a1"   # success messages
-//! error           = "#f38ba8"   # error messages
-//! dim             = "#585b70"   # secondary text, hints, counters
-//! foreground      = "#cdd6f4"   # main text (omit to inherit terminal fg)
-//! placeholder     = "#505578"   # empty-input "type here…" hints
-//! muted           = "#3c3e50"   # decorative separators / barely-visible borders
-//! star_dim        = "#262248"   # dimmest decorative star
-//! star_mid        = "#5a5494"   # mid-brightness star
-//! star_bright     = "#b9b2f8"   # rare bright star
-//! item_login      = "#89b4fa"
-//! item_card       = "#cba6f7"
-//! item_identity   = "#f9e2af"
-//! item_note       = "#a6e3a1"
-//! item_ssh        = "#b4befe"
-//! item_favorite   = "#f9e2af"
-//! ```
-
 use std::path::Path;
 
 use ratatui::style::{Color, Modifier, Style};
 
-/// Resolved color palette.
 #[derive(Debug, Clone)]
 pub struct Theme {
     pub accent: Color,
@@ -39,20 +10,17 @@ pub struct Theme {
     pub success: Color,
     pub error: Color,
     pub dim: Color,
-    /// Main body-text color. Defaults to [`Color::Reset`] so the TUI
-    /// inherits the terminal's foreground — the most portable choice.
-    /// Override to a hex value to lock a specific tone.
+
     pub foreground: Color,
-    /// "Type here…" placeholder hint inside empty input boxes.
+
     pub placeholder: Color,
-    /// Decorative separators and barely-visible borders (e.g. the bar
-    /// between command-log and content).
+
     pub muted: Color,
-    /// Dimmest decorative star in the splash / login background.
+
     pub star_dim: Color,
-    /// Mid-brightness decorative star.
+
     pub star_mid: Color,
-    /// Rare bright decorative star.
+
     pub star_bright: Color,
     pub item_login: Color,
     pub item_card: Color,
@@ -62,12 +30,6 @@ pub struct Theme {
     pub item_favorite: Color,
 }
 
-/// A named base palette — the raw colors a [`Preset`] is built from.
-///
-/// The core roles map straight onto the shared `Theme` fields;
-/// [`Theme::from_palette`] maps the remaining roles to bytewarden's own
-/// domain colors (the splash starfield + per-item-type accents), so every
-/// preset gets a coherent set for free.
 #[derive(Debug, Clone, Copy)]
 pub struct Palette {
     pub base: Color,
@@ -85,9 +47,6 @@ pub struct Palette {
     pub orange: Color,
 }
 
-/// A bundled, named theme. The default is [`Preset::DEFAULT`] (Nord).
-/// Selected via `name = "<preset>"` in the `[theme]` section of
-/// `config.toml`, or live from the in-app theme picker.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Preset {
     CatppuccinMocha,
@@ -110,7 +69,6 @@ pub enum Preset {
 }
 
 impl Preset {
-    /// Every bundled preset, in picker order (dark first, light last).
     pub const ALL: [Preset; 17] = [
         Preset::CatppuccinMocha,
         Preset::CatppuccinMacchiato,
@@ -131,10 +89,8 @@ impl Preset {
         Preset::SolarizedLight,
     ];
 
-    /// The default preset — used when the config names no preset.
     pub const DEFAULT: Preset = Preset::Nord;
 
-    /// The stable config key (lower-kebab) written to `config.toml`.
     pub fn name(self) -> &'static str {
         match self {
             Preset::CatppuccinMocha => "catppuccin-mocha",
@@ -157,7 +113,6 @@ impl Preset {
         }
     }
 
-    /// The human-readable label shown in the picker.
     pub fn label(self) -> &'static str {
         match self {
             Preset::CatppuccinMocha => "Catppuccin Mocha",
@@ -180,25 +135,21 @@ impl Preset {
         }
     }
 
-    /// Resolves a config `name` value (case-insensitive) to a preset.
     pub fn from_name(name: &str) -> Option<Preset> {
         let n = name.trim().to_ascii_lowercase();
         Self::ALL.into_iter().find(|p| p.name() == n)
     }
 
-    /// The next preset in [`Self::ALL`], wrapping — used by the picker.
     pub fn next(self) -> Preset {
         let i = Self::ALL.iter().position(|&p| p == self).unwrap_or(0);
         Self::ALL[(i + 1) % Self::ALL.len()]
     }
 
-    /// The previous preset in [`Self::ALL`], wrapping.
     pub fn prev(self) -> Preset {
         let i = Self::ALL.iter().position(|&p| p == self).unwrap_or(0);
         Self::ALL[(i + Self::ALL.len() - 1) % Self::ALL.len()]
     }
 
-    /// The raw base colors of this preset.
     pub fn palette(self) -> Palette {
         let h = parse_hex;
         match self {
@@ -462,32 +413,20 @@ impl Preset {
 }
 
 impl Theme {
-    /// Accent + bold — the emphasis / interaction style (focused panel
-    /// titles, the `▶` cursor, keybind letters, the active identity).
-    /// The one place that assembly lives, instead of inline everywhere.
     pub fn emphasis(&self) -> Style {
         Style::default()
             .fg(self.accent)
             .add_modifier(Modifier::BOLD)
     }
 
-    /// Error + bold — destructive headlines and danger badges.
     pub fn danger_title(&self) -> Style {
         Style::default().fg(self.error).add_modifier(Modifier::BOLD)
     }
 
-    /// Builds a full theme from a base [`Palette`]. The core roles map
-    /// from the palette; the bytewarden-specific fields (the splash
-    /// starfield + the per-item-type accent colors) are derived from the
-    /// palette roles so every preset gets a coherent set for free.
     pub fn from_palette(p: &Palette) -> Theme {
         Theme {
             accent: p.accent,
-            // Legibility hierarchy: `inactive` (unfocused borders) and
-            // `dim` (readable secondary text — counters, hints, timestamps)
-            // are lifted *out of the dark overlay band toward text* so
-            // they stay legible, instead of being painted the near-border
-            // gray. `muted` alone stays in the recessive band (chrome).
+
             inactive: mix(p.overlay, p.text, 0.6),
             selected_bg: p.surface,
             success: p.green,
@@ -496,14 +435,14 @@ impl Theme {
             foreground: p.text,
             placeholder: mix(p.overlay, p.text, 0.25),
             muted: p.muted,
-            // Starfield: a fade from the background up toward the accent.
+
             star_dim: mix(p.accent, p.base, 0.78),
             star_mid: mix(p.accent, p.base, 0.45),
             star_bright: mix(p.accent, p.text, 0.25),
             item_login: p.blue,
             item_card: p.magenta,
             item_identity: p.yellow,
-            // Teal, kept distinct from the green `success` color.
+
             item_note: p.cyan,
             item_ssh: p.accent,
             item_favorite: p.orange,
@@ -511,7 +450,6 @@ impl Theme {
     }
 }
 
-/// Decomposes a `Color` into RGB, treating non-RGB colors as black.
 fn rgb(c: Color) -> (u8, u8, u8) {
     match c {
         Color::Rgb(r, g, b) => (r, g, b),
@@ -519,8 +457,6 @@ fn rgb(c: Color) -> (u8, u8, u8) {
     }
 }
 
-/// Linearly blends `a` toward `b` by `t` (0.0 = all `a`, 1.0 = all `b`).
-/// Used to derive the starfield tints from palette roles.
 fn mix(a: Color, b: Color, t: f32) -> Color {
     let (ar, ag, ab) = rgb(a);
     let (br, bg, bb) = rgb(b);
@@ -530,30 +466,16 @@ fn mix(a: Color, b: Color, t: f32) -> Color {
 
 impl Default for Theme {
     fn default() -> Self {
-        // Built from the default preset ([`Preset::DEFAULT`] = Nord), but
-        // `foreground` stays `Reset` so text inherits the terminal until
-        // the user opts into a full preset (via `name = …` or the in-app
-        // picker).
         let mut t = Theme::from_palette(&Preset::DEFAULT.palette());
         t.foreground = Color::Reset;
         t
     }
 }
 
-/// Loads the theme from the `[theme]` section of `<config_dir>/config.toml`,
-/// then **adapts it to the terminal's color capability** (see
-/// [`ColorCaps`]) so a headless / low-color terminal gets a deterministic
-/// downgrade instead of whatever the emulator would approximate.
-///
-/// Returns the (adapted) [`Theme::default`] when the file or section is
-/// missing.
 pub fn load(config_dir: &Path) -> Theme {
     adapt(load_unadapted(config_dir), ColorCaps::detect())
 }
 
-/// The theme exactly as configured, before terminal-capability
-/// adaptation — kept separate so palette hex values stay exact for the
-/// picker preview and the tests.
 fn load_unadapted(config_dir: &Path) -> Theme {
     let file = config_dir.join("config.toml");
     match std::fs::read_to_string(&file) {
@@ -562,22 +484,16 @@ fn load_unadapted(config_dir: &Path) -> Theme {
     }
 }
 
-/// The terminal's color capability, detected once from the environment.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ColorCaps {
-    /// `NO_COLOR` set — collapse every hue to a grayscale tier so meaning
-    /// comes from brightness + bold/dim, never from a color the terminal
-    /// won't show.
     Mono,
-    /// No truecolor hint — quantize every RGB to the nearest xterm-256
-    /// index deterministically (instead of leaving it to the emulator).
+
     Indexed256,
-    /// `COLORTERM=truecolor|24bit` — pass RGB through untouched.
+
     True,
 }
 
 impl ColorCaps {
-    /// Detects the capability from `NO_COLOR` / `COLORTERM`.
     pub fn detect() -> ColorCaps {
         if std::env::var("NO_COLOR").is_ok_and(|v| !v.is_empty()) {
             return ColorCaps::Mono;
@@ -589,10 +505,6 @@ impl ColorCaps {
     }
 }
 
-/// Adapts every color of `theme` to `caps`. Applied at *application*
-/// time (boot + the live picker), never inside `from_palette`, so the
-/// palette values stay exact. `Color::Reset` and named colors pass
-/// through every mode (the inherit-terminal contract).
 pub fn adapt(theme: Theme, caps: ColorCaps) -> Theme {
     match caps {
         ColorCaps::True => theme,
@@ -601,8 +513,6 @@ pub fn adapt(theme: Theme, caps: ColorCaps) -> Theme {
     }
 }
 
-/// Applies `f` to **every** color field of the theme. Listed explicitly
-/// so a newly-added field can't silently skip adaptation.
 fn map_colors(t: Theme, f: fn(Color) -> Color) -> Theme {
     Theme {
         accent: f(t.accent),
@@ -626,8 +536,6 @@ fn map_colors(t: Theme, f: fn(Color) -> Color) -> Theme {
     }
 }
 
-/// NO_COLOR: luma-weighted brightness → one of four named gray tiers.
-/// Non-RGB colors (`Reset`, named) pass through unchanged.
 fn to_gray(c: Color) -> Color {
     let Color::Rgb(r, g, b) = c else {
         return c;
@@ -641,9 +549,6 @@ fn to_gray(c: Color) -> Color {
     }
 }
 
-/// Quantizes an RGB color to the nearest xterm-256 index — whichever of
-/// the 6×6×6 color cube (16–231) or the grayscale ramp (232–255) is
-/// closer in squared error. Non-RGB colors pass through unchanged.
 fn quantize_256(c: Color) -> Color {
     let Color::Rgb(r, g, b) = c else {
         return c;
@@ -667,7 +572,7 @@ fn quantize_256(c: Color) -> Color {
     let cube_idx = 16 + 36 * ri + 6 * gi + bi;
     let sq = |a: u8, x: u8| (a as i32 - x as i32).pow(2);
     let cube_err = sq(rl, r) + sq(gl, g) + sq(bl, b);
-    // Grayscale ramp: indices 232..=255 hold values 8, 18, …, 238.
+
     let avg = (r as i32 + g as i32 + b as i32) / 3;
     let gidx = (((avg - 8) as f32 / 10.0).round() as i32).clamp(0, 23);
     let gv = (8 + gidx * 10) as u8;
@@ -679,16 +584,11 @@ fn quantize_256(c: Color) -> Color {
     }
 }
 
-/// Returns the [`Preset`] named in the `[theme]` section of
-/// `<config_dir>/config.toml`, if it resolves. Used to preselect the
-/// in-app theme picker on the Settings screen.
 pub fn configured_preset(config_dir: &Path) -> Option<Preset> {
     let text = std::fs::read_to_string(config_dir.join("config.toml")).ok()?;
     theme_name(&text).as_deref().and_then(Preset::from_name)
 }
 
-/// Extracts the raw `name = "<preset>"` value from the `[theme]`
-/// section, if present. [`Preset::from_name`] validates it.
 fn theme_name(text: &str) -> Option<String> {
     let mut in_theme = false;
     for line in text.lines() {
@@ -728,11 +628,7 @@ fn theme_name(text: &str) -> Option<String> {
     None
 }
 
-/// Parses the `[theme]` section: a `name = "<preset>"` picks the base
-/// palette, then individual color keys override it.
 fn parse_theme_section(text: &str) -> Theme {
-    // `name` picks the base palette; per-key hex entries below override
-    // it. Two passes so an override wins regardless of line order.
     let mut t = match theme_name(text).as_deref().and_then(Preset::from_name) {
         Some(p) => Theme::from_palette(&p.palette()),
         None => Theme::default(),
@@ -757,8 +653,7 @@ fn parse_theme_section(text: &str) -> Theme {
         };
         let key = key.trim();
         let val = rest.trim();
-        // Support both quoted ("#rrggbb") and unquoted values; ignore
-        // inline comments after the value.
+
         let val = if val.starts_with('"') {
             val.trim_start_matches('"')
                 .split('"')
@@ -797,9 +692,6 @@ fn parse_theme_section(text: &str) -> Theme {
     t
 }
 
-/// Parses a hex color string like `"#cba6f7"` into [`Color::Rgb`].
-///
-/// Returns [`Color::Reset`] on parse error.
 fn parse_hex(s: &str) -> Color {
     let s = s.trim_start_matches('#');
     if s.len() != 6 {
@@ -827,18 +719,17 @@ mod tests {
         assert_eq!(to_gray(Color::Rgb(0, 0, 0)), Color::Black);
         assert_eq!(to_gray(Color::Rgb(160, 160, 160)), Color::Gray);
         assert_eq!(to_gray(Color::Rgb(90, 90, 90)), Color::DarkGray);
-        // Reset / named colors are never touched (the inherit contract).
+
         assert_eq!(to_gray(Color::Reset), Color::Reset);
     }
 
     #[test]
     fn quantize_256_picks_ramp_for_grays_and_cube_for_hues() {
-        // A neutral gray should land on the grayscale ramp (232..=255).
         match quantize_256(Color::Rgb(130, 130, 130)) {
             Color::Indexed(i) => assert!((232..=255).contains(&i), "expected ramp, got {i}"),
             other => panic!("expected Indexed, got {other:?}"),
         }
-        // A saturated hue should land on the 6×6×6 cube (16..=231).
+
         match quantize_256(Color::Rgb(255, 0, 0)) {
             Color::Indexed(i) => assert!((16..=231).contains(&i), "expected cube, got {i}"),
             other => panic!("expected Indexed, got {other:?}"),
@@ -850,7 +741,7 @@ mod tests {
     fn adapt_true_is_a_passthrough_and_reset_survives_every_mode() {
         let t = Theme::from_palette(&Preset::Nord.palette());
         assert_eq!(adapt(t.clone(), ColorCaps::True).accent, t.accent);
-        // `foreground: Reset` must survive mono + indexed adaptation.
+
         let mut r = t.clone();
         r.foreground = Color::Reset;
         assert_eq!(adapt(r.clone(), ColorCaps::Mono).foreground, Color::Reset);
@@ -886,8 +777,6 @@ mod tests {
 
     #[test]
     fn theme_default_uses_reset_for_foreground() {
-        // Foreground default inherits the terminal — important for
-        // light-bg terminals that the user might use.
         assert_eq!(Theme::default().foreground, Color::Reset);
     }
 
@@ -902,13 +791,12 @@ mod tests {
         let t = parse_theme_section(toml);
         assert_eq!(t.accent, Color::Rgb(0x11, 0x22, 0x33));
         assert_eq!(t.foreground, Color::Rgb(0x44, 0x55, 0x66));
-        // Unlisted keys keep the defaults.
+
         assert_eq!(t.success, Theme::default().success);
     }
 
     #[test]
     fn parse_section_ignores_keys_outside_theme_block() {
-        // The same key name outside [theme] should be ignored.
         let toml = "\
             accent = \"#112233\"\n\
             [other]\n\
@@ -931,15 +819,6 @@ mod tests {
         assert_eq!(t.accent, Theme::default().accent);
     }
 
-    // These two cover *file reading + parsing*, so they go through
-    // `load_unadapted` — the unadapted entry point that exists exactly
-    // so palette hex values stay exact for the picker preview and for
-    // tests. Asserting an `Rgb(..)` literal against `load` would make
-    // them depend on the ambient `$COLORTERM` / `$NO_COLOR`: truecolor
-    // passes the value through, anything else quantizes or greys it,
-    // and the test would pass on a developer's terminal while failing
-    // in CI. Adaptation has its own deterministic tests below.
-
     #[test]
     fn load_returns_default_when_file_missing() {
         let tmp = TempDir::new().unwrap();
@@ -959,10 +838,6 @@ mod tests {
         assert_eq!(theme.accent, Color::Rgb(0xab, 0xcd, 0xef));
     }
 
-    /// `load` is `load_unadapted` + capability adaptation. Pinning that
-    /// composition without re-asserting a concrete colour keeps the
-    /// contract covered in every terminal: whatever `ColorCaps::detect`
-    /// reports here, the two sides go through the same mapping.
     #[test]
     fn load_applies_capability_adaptation() {
         let tmp = TempDir::new().unwrap();
@@ -975,9 +850,6 @@ mod tests {
         assert_eq!(load(tmp.path()).accent, expected.accent);
     }
 
-    /// The concrete downgrade, asserted without touching the
-    /// environment: forcing each capability is what makes this
-    /// deterministic where the old `load` assertions were not.
     #[test]
     fn load_unadapted_survives_every_capability_mode() {
         let tmp = TempDir::new().unwrap();
@@ -1005,14 +877,12 @@ mod tests {
         );
     }
 
-    // ── Named presets ───────────────────────────────────────────
-
     #[test]
     fn named_preset_sets_the_base_palette() {
         let t = parse_theme_section("[theme]\nname = \"dracula\"\n");
         assert_eq!(t.accent, parse_hex("#bd93f9"));
         assert_eq!(t.error, parse_hex("#ff5555"));
-        // A preset sets an explicit foreground (unlike the bare default).
+
         assert_eq!(t.foreground, parse_hex("#f8f8f2"));
     }
 
@@ -1024,7 +894,6 @@ mod tests {
 
     #[test]
     fn explicit_keys_override_the_preset() {
-        // Override wins even though `name` is declared last.
         let toml = "[theme]\naccent = \"#000000\"\nname = \"dracula\"\n";
         let t = parse_theme_section(toml);
         assert_eq!(t.accent, Color::Rgb(0, 0, 0));
@@ -1044,17 +913,13 @@ mod tests {
             assert_eq!(Preset::from_name(p.name()), Some(p));
             let t = Theme::from_palette(&p.palette());
             assert_ne!(t.accent, Color::Reset);
-            // item_note (teal) must stay distinct from success (green).
+
             assert_ne!(t.item_note, t.success);
         }
     }
 
     #[test]
     fn dim_and_inactive_are_lifted_out_of_the_overlay_band() {
-        // The legibility hierarchy: readable secondary text (`dim`) and
-        // unfocused borders (`inactive`) must NOT be the raw dark overlay —
-        // they're blended toward `text` so they stay legible. Only `muted`
-        // stays in the recessive band.
         for p in Preset::ALL {
             let t = Theme::from_palette(&p.palette());
             assert_ne!(t.dim, p.palette().overlay, "dim not lifted: {}", p.name());
@@ -1070,12 +935,11 @@ mod tests {
 
     #[test]
     fn preset_next_prev_wrap() {
-        // Wraps around the ends of `ALL` (first ↔ last).
         let first = Preset::ALL[0];
         let last = Preset::ALL[Preset::ALL.len() - 1];
         assert_eq!(first.prev(), last);
         assert_eq!(last.next(), first);
-        // next/prev are inverses everywhere.
+
         for &p in Preset::ALL.iter() {
             assert_eq!(p.next().prev(), p);
         }

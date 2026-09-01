@@ -1,18 +1,3 @@
-//! Multi-step user flows that mutate [`crate::tui::App`] and talk to the
-//! ports via the worker thread.
-//!
-//! Each flow splits into two halves:
-//!
-//! * a `request_*` builder — validates input, stashes a
-//!   [`crate::tui::worker::InFlight`] ticket on `App`, sets a `Running`
-//!   toast, and sends a [`WorkerRequest`] on `app.worker_tx`;
-//! * a `handle_*` response handler — invoked by [`apply_response`] when
-//!   the matching [`WorkerResponse`] arrives; it mutates `App` and may
-//!   chain the next step by calling another `request_*`.
-//!
-//! Free functions take `&mut App` so they can be dispatched without
-//! method-resolution gymnastics.
-
 pub mod assign_collections;
 pub mod auth;
 pub mod copy;
@@ -32,23 +17,16 @@ pub mod vault;
 use crate::tui::app::App;
 use crate::tui::worker::{InFlight, WorkerResponse};
 
-/// `true` for responses that carry no [`InFlight`] ticket and are routed
-/// purely by variant (fire-and-forget). Today that's only `bw lock`,
-/// whose UI state was already reset on the render thread when the request
-/// was sent. Kept as a pure predicate so the routing is unit-testable.
 pub fn is_fire_and_forget(resp: &WorkerResponse) -> bool {
     matches!(resp, WorkerResponse::Locked)
 }
 
-/// Routes one worker response: fire-and-forget variants first, then the
-/// `(in_flight, response)` pair to the owning `handle_*`.
 pub fn apply_response(app: &mut App, resp: WorkerResponse) {
     if is_fire_and_forget(&resp) {
         return;
     }
     let ticket = app.in_flight.take();
     match (ticket, resp) {
-        // ── Boot / auth ───────────────────────────────────────────────
         (Some(InFlight::BootStatus), WorkerResponse::Status(r)) => auth::handle_boot_status(app, r),
         (Some(InFlight::ResumeItems), WorkerResponse::Items(r)) => {
             auth::handle_resume_items(app, r)
@@ -80,7 +58,6 @@ pub fn apply_response(app: &mut App, resp: WorkerResponse) {
             auth::handle_fingerprint(app, r)
         }
 
-        // ── Vault list ────────────────────────────────────────────────
         (Some(InFlight::LoadItems), WorkerResponse::Items(r)) => vault::handle_load_items(app, r),
         (Some(InFlight::ReloadItemsSilent), WorkerResponse::Items(r)) => {
             vault::handle_reload_items_silent(app, r)
@@ -89,7 +66,6 @@ pub fn apply_response(app: &mut App, resp: WorkerResponse) {
         (Some(InFlight::Sync), WorkerResponse::Unit(r)) => vault::handle_sync(app, r),
         (Some(InFlight::SyncReload), WorkerResponse::Items(r)) => vault::handle_sync_reload(app, r),
 
-        // ── Items CRUD ────────────────────────────────────────────────
         (Some(InFlight::CreateItem), WorkerResponse::Item(r)) => {
             items::handle_create(app, r.map(|b| *b))
         }
@@ -138,10 +114,8 @@ pub fn apply_response(app: &mut App, resp: WorkerResponse) {
             items::handle_upload_attachment(app, r.map(|b| *b))
         }
 
-        // ── Copy (TOTP) ───────────────────────────────────────────────
         (Some(InFlight::CopyTotp), WorkerResponse::Totp(r)) => copy::handle_copy_totp(app, r),
 
-        // ── Folders ───────────────────────────────────────────────────
         (Some(InFlight::CreateFolder), WorkerResponse::Folder(r)) => folders::handle_create(app, r),
         (Some(InFlight::EditFolder), WorkerResponse::Folder(r)) => folders::handle_edit(app, r),
         (Some(InFlight::DeleteFolder { name }), WorkerResponse::Unit(r)) => {
@@ -154,7 +128,6 @@ pub fn apply_response(app: &mut App, resp: WorkerResponse) {
             folders::handle_delete_reload_items(app, r)
         }
 
-        // ── Export / Import ───────────────────────────────────────────
         (Some(InFlight::Export), WorkerResponse::Unit(r)) => export::handle(app, r),
         (Some(InFlight::Import), WorkerResponse::Unit(r)) => import::handle(app, r),
         (Some(InFlight::ImportReloadItems), WorkerResponse::Items(r)) => {
@@ -164,10 +137,8 @@ pub fn apply_response(app: &mut App, resp: WorkerResponse) {
             import::handle_reload_folders(app, r)
         }
 
-        // ── Send ──────────────────────────────────────────────────────
         (Some(InFlight::SendText), WorkerResponse::SendUrl(r)) => send::handle(app, r),
 
-        // ── Assign collections / move ─────────────────────────────────
         (Some(InFlight::MoveItem), WorkerResponse::Unit(r)) => {
             assign_collections::handle_move(app, r)
         }
@@ -175,7 +146,6 @@ pub fn apply_response(app: &mut App, resp: WorkerResponse) {
             assign_collections::handle_move_reload(app, r)
         }
 
-        // ── Memberships ───────────────────────────────────────────────
         (Some(InFlight::MembershipsOrgs), WorkerResponse::Orgs(r)) => {
             memberships::handle_orgs(app, r)
         }
@@ -183,15 +153,12 @@ pub fn apply_response(app: &mut App, resp: WorkerResponse) {
             memberships::handle_collections(app, r)
         }
 
-        // ── Reprompt ──────────────────────────────────────────────────
         (Some(InFlight::RepromptUnlock), WorkerResponse::SessionKey(r)) => {
             reprompt::handle_unlock(app, r)
         }
 
-        // ── Generator ─────────────────────────────────────────────────
         (Some(InFlight::Generate), WorkerResponse::Generated(r)) => generator::handle(app, r),
 
-        // ── Programming-error surface ─────────────────────────────────
         (other, _resp) => {
             app.push_cmd(
                 "<worker>",

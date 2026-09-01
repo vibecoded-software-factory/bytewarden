@@ -1,10 +1,3 @@
-//! Authentication, lock and session-resume flows.
-//!
-//! Every `bw` call runs on the worker thread: a `request_*` builder
-//! sends a [`WorkerRequest`] and stashes an [`InFlight`] ticket; the
-//! matching `handle_*` runs when the response arrives and chains the
-//! next step (status → resume/login → load items → session data → vault).
-
 use crate::ports::BwError;
 use zeroize::Zeroizing;
 
@@ -17,19 +10,12 @@ use crate::tui::screens::{LoginField, Screen};
 use crate::tui::session_file;
 use crate::tui::worker::{InFlight, WorkerRequest};
 
-// ── Boot / resume ─────────────────────────────────────────────────────────
-
-/// Kicks off the boot sequence: `bw status` on the worker. The response
-/// handler routes to a resume, the locked login form, or fresh login.
 pub fn request_resume(app: &mut App) {
-    // The caller already set the "Checking session…" splash toast, so
-    // claim the slot silently rather than overriding it via `submit`.
     if app.begin(InFlight::BootStatus) {
         let _ = app.worker_tx.send(WorkerRequest::Status);
     }
 }
 
-/// Boot `bw status` response.
 pub fn handle_boot_status(app: &mut App, r: Result<VaultInfo, BwError>) {
     let info = match r {
         Ok(i) => i,
@@ -42,16 +28,6 @@ pub fn handle_boot_status(app: &mut App, r: Result<VaultInfo, BwError>) {
     };
     app.push_cmd("bw status", true, &format!("{:?}", info.status));
 
-    // Seed the Server field from the CLI's reported URL so the user can
-    // see (and edit) which backend they're hitting.
-    //
-    // `bw status` reports `serverUrl: null` on the official cloud, and
-    // the fallback below is deliberately `https://bitwarden.com`: that
-    // exact literal is `bw config server`'s sentinel for "official
-    // cloud", mapped back to `null` internally. Do **not** "correct" it
-    // to the web-vault URL — committing `https://vault.bitwarden.com`
-    // would configure a *self-hosted* server with that base instead of
-    // leaving the default alone.
     let server = info
         .server_url
         .clone()
@@ -61,11 +37,6 @@ pub fn handle_boot_status(app: &mut App, r: Result<VaultInfo, BwError>) {
 
     match info.status {
         VaultStatus::Unlocked => {
-            // The CLI reports an unlocked vault — that means a usable
-            // session key is present (the adapter sets `BW_SESSION` from
-            // it before spawning `bw status`). Resume by listing items;
-            // if the backend rejects the key we fall back to the login
-            // form in `handle_resume_items`.
             app.authenticated = true;
             if let Some(email) = info.user_email.clone()
                 && app.login.email_input.is_empty()
@@ -92,7 +63,6 @@ pub fn handle_boot_status(app: &mut App, r: Result<VaultInfo, BwError>) {
     }
 }
 
-/// Resume: items listed with the seeded session key.
 pub fn handle_resume_items(app: &mut App, r: Result<Vec<Item>, BwError>) {
     match r {
         Ok(items) => {
@@ -100,15 +70,12 @@ pub fn handle_resume_items(app: &mut App, r: Result<Vec<Item>, BwError>) {
             app.vault.items = items;
             app.vault.sort_items();
             app.push_cmd("bw list items", true, &format!("{count} items loaded"));
-            // Chained step — keep the "Resuming session…" toast.
+
             if app.begin(InFlight::ResumeSessionData) {
                 let _ = app.worker_tx.send(WorkerRequest::ParallelSessionData);
             }
         }
         Err(e) => {
-            // The session key was present but the backend rejected it
-            // (stale key, server changed, logged out elsewhere…). Fall
-            // back to the login form with a hint.
             app.push_cmd("bw list items", false, &e);
             apply_locked_state(app, None);
             app.screen = Screen::Login;
@@ -119,18 +86,12 @@ pub fn handle_resume_items(app: &mut App, r: Result<Vec<Item>, BwError>) {
     }
 }
 
-/// Resume: post-list secondary session data → vault.
 pub fn handle_resume_session_data(app: &mut App, data: ParallelSessionData) {
     apply_parallel_session_data(app, data);
     app.go_to_vault();
     app.set_action(ActionState::Idle);
 }
 
-/// Applies the four secondary post-auth reads (folders, orgs,
-/// collections, import-formats) fetched in one trip by
-/// [`crate::ports::VaultPort::parallel_session_data`]. Partial failures
-/// are surfaced through the same `cmd_log` lines the individual silent
-/// refreshes used to write.
 fn apply_parallel_session_data(app: &mut App, data: ParallelSessionData) {
     match data.folders {
         Ok(folders) => {
@@ -192,7 +153,6 @@ fn apply_parallel_session_data(app: &mut App, data: ParallelSessionData) {
     }
 }
 
-/// Applies a "locked-but-known-account" UI state.
 fn apply_locked_state(app: &mut App, user_email: Option<String>) {
     if let Some(email) = user_email
         && !email.is_empty()
@@ -203,10 +163,6 @@ fn apply_locked_state(app: &mut App, user_email: Option<String>) {
     app.login.active_field = LoginField::Password;
 }
 
-// ── Login / unlock ────────────────────────────────────────────────────────
-
-/// Validates the login form and dispatches the right worker request
-/// (unlock, fresh login, or resume an OTP / 2FA challenge).
 pub fn attempt_login(app: &mut App) {
     if app.login.password_input.is_empty() {
         app.login.login_error = true;
@@ -220,7 +176,6 @@ pub fn attempt_login(app: &mut App) {
     request_login(app);
 }
 
-/// Sends the appropriate login/unlock request to the worker.
 fn request_login(app: &mut App) {
     let email = app.login.email_input.text().to_string();
     let password = Zeroizing::new(app.login.password_input.text().to_string());
@@ -265,7 +220,6 @@ fn request_login(app: &mut App) {
     }
 }
 
-/// Fresh `bw login` outcome.
 pub fn handle_login(app: &mut App, outcome: LoginOutcome) {
     match outcome {
         LoginOutcome::Success(key) => {
@@ -305,7 +259,6 @@ pub fn handle_login(app: &mut App, outcome: LoginOutcome) {
     }
 }
 
-/// `bw unlock` response.
 pub fn handle_unlock(app: &mut App, r: Result<String, BwError>) {
     match r {
         Ok(key) => on_login_success(app, &key),
@@ -317,7 +270,6 @@ pub fn handle_unlock(app: &mut App, r: Result<String, BwError>) {
     }
 }
 
-/// `bw login` resuming a new-device verification OTP.
 pub fn handle_login_otp(app: &mut App, r: Result<String, BwError>) {
     let cmd = "bw login *** --raw  (otp via stdin)";
     match r {
@@ -332,7 +284,6 @@ pub fn handle_login_otp(app: &mut App, r: Result<String, BwError>) {
     }
 }
 
-/// `bw login --method N` resuming a permanent-2FA challenge.
 pub fn handle_login_two_factor(app: &mut App, r: Result<String, BwError>) {
     let cmd = format!(
         "bw login *** --method {} --raw  (code via stdin)",
@@ -350,7 +301,6 @@ pub fn handle_login_two_factor(app: &mut App, r: Result<String, BwError>) {
     }
 }
 
-/// Shared failure tail for an OTP / 2FA code rejection.
 fn fail_code(app: &mut App, cmd: &str, label: &str) {
     app.push_cmd(cmd, false, label);
     app.set_action(ActionState::Idle);
@@ -359,8 +309,6 @@ fn fail_code(app: &mut App, cmd: &str, label: &str) {
     app.login.login_error = true;
 }
 
-/// Common tail of every successful login / unlock path: caches the
-/// session key, persists it if opted in, then chains the vault load.
 fn on_login_success(app: &mut App, session_key: &str) {
     app.authenticated = true;
     app.session_marker = Some(Zeroizing::new(session_key.to_string()));
@@ -379,7 +327,6 @@ fn on_login_success(app: &mut App, session_key: &str) {
     );
 }
 
-/// Post-login: items loaded → fetch the secondary session data.
 pub fn handle_post_login_items(app: &mut App, r: Result<Vec<Item>, BwError>) {
     match r {
         Ok(items) => {
@@ -387,31 +334,24 @@ pub fn handle_post_login_items(app: &mut App, r: Result<Vec<Item>, BwError>) {
             app.vault.items = items;
             app.vault.sort_items();
             app.push_cmd("bw list items", true, &format!("{count} items loaded"));
-            // Chained step — keep the "Loading vault…" toast.
+
             if app.begin(InFlight::PostLoginSessionData) {
                 let _ = app.worker_tx.send(WorkerRequest::ParallelSessionData);
             }
         }
         Err(e) => {
-            // Login succeeded but the first list failed — land the user
-            // on the (empty) vault with the error surfaced rather than
-            // stranding them on the login screen.
             app.cmd_err("bw list items", &e, "Load failed");
             app.go_to_vault();
         }
     }
 }
 
-/// Post-login: secondary session data → vault.
 pub fn handle_post_login_session_data(app: &mut App, data: ParallelSessionData) {
     apply_parallel_session_data(app, data);
     app.set_action(ActionState::Done("Loaded ✓".into()));
     app.go_to_vault();
 }
 
-// ── API-key / SSO login (leave the vault Locked) ──────────────────────────
-
-/// Attempts a headless login using `BW_CLIENTID` / `BW_CLIENTSECRET`.
 pub fn api_key_login(app: &mut App) {
     if std::env::var("BW_CLIENTID").is_err() || std::env::var("BW_CLIENTSECRET").is_err() {
         app.set_action(ActionState::Error(
@@ -426,7 +366,6 @@ pub fn api_key_login(app: &mut App) {
     );
 }
 
-/// `bw login --apikey` response (vault left Locked).
 pub fn handle_api_key(app: &mut App, r: Result<(), BwError>) {
     match r {
         Ok(()) => {
@@ -441,7 +380,6 @@ pub fn handle_api_key(app: &mut App, r: Result<(), BwError>) {
     }
 }
 
-/// SSO login via `bw login --sso` (opens the browser on the worker).
 pub fn sso_login(app: &mut App) {
     app.submit(
         InFlight::LoginSso,
@@ -450,7 +388,6 @@ pub fn sso_login(app: &mut App) {
     );
 }
 
-/// `bw login --sso` response (vault left Locked).
 pub fn handle_sso(app: &mut App, r: Result<(), BwError>) {
     match r {
         Ok(()) => {
@@ -465,15 +402,9 @@ pub fn handle_sso(app: &mut App, r: Result<(), BwError>) {
     }
 }
 
-// ── Lock / logout / server / fingerprint ──────────────────────────────────
-
-/// Locks the vault and returns to the login screen. The UI state is
-/// reset immediately (secrets vanish at once) and `bw lock` is sent
-/// fire-and-forget so the worker drops its key in the background.
 pub fn lock_vault(app: &mut App) {
     let _ = app.worker_tx.send(WorkerRequest::Lock);
-    // Fire-and-forget: drop any in-flight ticket (and its watchdog timer)
-    // so a late response can't repopulate the list after we've cleared it.
+
     app.in_flight = None;
     app.request_started = None;
     session_file::clear();
@@ -490,13 +421,10 @@ pub fn lock_vault(app: &mut App) {
     app.set_action(ActionState::Done("Locked ✓".into()));
 }
 
-/// Opens the confirm-logout popup over the vault.
 pub fn open_confirm_logout(app: &mut App) {
     app.screen = Screen::ConfirmLogout;
 }
 
-/// Persists a new server URL via `bw config server <url>` when the Server
-/// field differs from the last committed value.
 pub fn commit_server_change(app: &mut App) {
     let url = app.login.server_input.text().trim().to_string();
     if url.is_empty() || url == app.login.server_committed {
@@ -514,7 +442,6 @@ pub fn commit_server_change(app: &mut App) {
     );
 }
 
-/// `bw config server` response.
 pub fn handle_set_server(app: &mut App, r: Result<(), BwError>) {
     let url = app.login.server_input.text().trim().to_string();
     match r {
@@ -535,12 +462,10 @@ pub fn handle_set_server(app: &mut App, r: Result<(), BwError>) {
     }
 }
 
-/// Logs out of the current account.
 pub fn logout(app: &mut App) {
     app.submit(InFlight::Logout, "Logging out…", WorkerRequest::Logout);
 }
 
-/// `bw logout` response.
 pub fn handle_logout(app: &mut App, r: Result<(), BwError>) {
     match r {
         Ok(()) => {
@@ -562,8 +487,7 @@ pub fn handle_logout(app: &mut App, r: Result<(), BwError>) {
             app.vault.search_query.clear();
             app.vault.selected_index = 0;
             app.vault.scroll_offset = 0;
-            // Wipe the command log: it can carry item names, folder ids,
-            // export/import paths and the user's e-mail.
+
             app.cmd_log.clear();
             app.screen = Screen::Login;
             app.login.active_field = LoginField::Email;
@@ -573,7 +497,6 @@ pub fn handle_logout(app: &mut App, r: Result<(), BwError>) {
     }
 }
 
-/// Fetches the current user's fingerprint phrase.
 pub fn show_fingerprint(app: &mut App) {
     app.submit(
         InFlight::Fingerprint,
@@ -582,7 +505,6 @@ pub fn show_fingerprint(app: &mut App) {
     );
 }
 
-/// `bw get fingerprint me` response.
 pub fn handle_fingerprint(app: &mut App, r: Result<String, BwError>) {
     match r {
         Ok(phrase) => {
@@ -593,8 +515,6 @@ pub fn handle_fingerprint(app: &mut App, r: Result<String, BwError>) {
     }
 }
 
-/// Locks the vault if the inactivity timer has elapsed. No-op while a
-/// request is in flight so an auto-lock can't race a pending response.
 pub fn check_auto_lock(app: &mut App) {
     if !app.auto_lock.enabled || app.is_busy() {
         return;

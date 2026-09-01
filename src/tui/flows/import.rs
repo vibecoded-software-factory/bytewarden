@@ -1,5 +1,3 @@
-//! Vault-import popup flow.
-
 use crate::ports::BwError;
 use crate::tui::action::ActionState;
 use crate::tui::app::App;
@@ -7,20 +5,16 @@ use crate::tui::import::{ImportFocus, ImportState};
 use crate::tui::screens::Screen;
 use crate::tui::worker::{InFlight, WorkerRequest};
 
-/// Opens the import popup, populating the format dropdown from the
-/// cached `bw import --formats` list (loaded once at login).
 pub fn open(app: &mut App) {
     app.import = Some(ImportState::new(&app.import_formats));
     app.screen = Screen::Import;
 }
 
-/// Closes the popup, returns to the vault list.
 pub fn cancel(app: &mut App) {
     app.import = None;
     app.screen = Screen::Vault;
 }
 
-/// Cycles focus between the format and path fields.
 pub fn focus_step(app: &mut App, _dir: i32) {
     let Some(state) = app.import.as_mut() else {
         return;
@@ -31,11 +25,6 @@ pub fn focus_step(app: &mut App, _dir: i32) {
     };
 }
 
-/// Runs `bw import` and reports the outcome. Closes the popup on
-/// success; keeps it open on failure (typo in format / wrong path).
-///
-/// After a successful import we silently refresh both the items and
-/// the folders lists so the new content shows up immediately.
 pub fn commit(app: &mut App) {
     let Some(state) = app.import.as_ref() else {
         return;
@@ -59,8 +48,6 @@ pub fn commit(app: &mut App) {
     );
 }
 
-/// `bw import` response. On success, closes the popup and silently
-/// reloads items then folders so the new content shows up.
 pub fn handle(app: &mut App, r: Result<(), BwError>) {
     let cmd = "bw import".to_string();
     match r {
@@ -69,7 +56,7 @@ pub fn handle(app: &mut App, r: Result<(), BwError>) {
             app.set_action(ActionState::Done("Import succeeded ✓".into()));
             app.import = None;
             app.screen = Screen::Vault;
-            // Fresh data — reload items then folders (both silent).
+
             if app.begin(InFlight::ImportReloadItems) {
                 let _ = app.worker_tx.send(WorkerRequest::ListItems);
             }
@@ -78,7 +65,6 @@ pub fn handle(app: &mut App, r: Result<(), BwError>) {
     }
 }
 
-/// Silent post-import item reload → chains the folder reload.
 pub fn handle_reload_items(app: &mut App, r: Result<Vec<crate::domain::Item>, BwError>) {
     match r {
         Ok(items) => super::vault::set_items_keep_cursor(app, items),
@@ -89,7 +75,6 @@ pub fn handle_reload_items(app: &mut App, r: Result<Vec<crate::domain::Item>, Bw
     }
 }
 
-/// Silent post-import folder reload.
 pub fn handle_reload_folders(app: &mut App, r: Result<Vec<crate::domain::Folder>, BwError>) {
     super::folders::handle_reload(app, r);
 }

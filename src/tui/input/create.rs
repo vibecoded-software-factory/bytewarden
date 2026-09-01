@@ -1,5 +1,3 @@
-//! Key handler for the "create item" screen (type-picker + form).
-
 use crossterm::event::{KeyCode, KeyEvent};
 
 use crate::domain::filter::CREATE_ITEM_TYPES;
@@ -8,8 +6,6 @@ use crate::tui::flows::{assign_collections, generator, items};
 use crate::tui::input::is_alt;
 use crate::tui::input::nav::{nav_clamp, nav_wrap, text_input};
 
-/// Click: in the type-picker step, pick the clicked type (select +
-/// advance to the form); in the form step, focus the clicked field.
 pub fn mouse(app: &mut App, col: u16, row: u16) {
     let Some(idx) = crate::tui::view::create::create_hit_at(col, row) else {
         return;
@@ -24,7 +20,6 @@ pub fn mouse(app: &mut App, col: u16, row: u16) {
     }
 }
 
-/// Dispatches a single key event on the create screen.
 pub fn handle(app: &mut App, key: KeyEvent) {
     if app.create.choosing_type {
         let n = CREATE_ITEM_TYPES.len();
@@ -42,8 +37,6 @@ pub fn handle(app: &mut App, key: KeyEvent) {
 
     let n = app.create.fields.len();
 
-    // Alt+G opens the generator pre-targeted at the focused row when
-    // it is a hidden (i.e. password-like) field.
     if key.code == KeyCode::Char('g')
         && is_alt(&key)
         && app
@@ -56,14 +49,10 @@ pub fn handle(app: &mut App, key: KeyEvent) {
         return;
     }
 
-    // Alt+L on the Collections row opens the multi-select popup.
-    // Alt+L anywhere else is a no-op (the flow surfaces a friendly
-    // "move to the Collections row first" toast).
     if key.code == KeyCode::Char('l') && is_alt(&key) {
         return assign_collections::open(app);
     }
 
-    // Left/Right cycle the Organization picker when it has focus.
     let on_org = app
         .create
         .fields

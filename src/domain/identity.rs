@@ -1,16 +1,5 @@
-//! Helpers for [`crate::domain::item::IdentityData`].
-
 use crate::domain::item::IdentityData;
 
-/// Joins the four name parts with single spaces, skipping empties.
-///
-/// # Examples
-///
-/// ```
-/// use bytewarden::domain::identity::build_full_name;
-/// let s = build_full_name(Some("Mr"), Some("John"), None, Some("Doe"));
-/// assert_eq!(s, "Mr John Doe");
-/// ```
 pub fn build_full_name(
     title: Option<&str>,
     first: Option<&str>,
@@ -24,11 +13,6 @@ pub fn build_full_name(
         .join(" ")
 }
 
-/// Returns the (label, value) tuples for the secondary identity fields.
-///
-/// The order here drives the order they appear in the detail view and the
-/// edit form. Name parts are intentionally absent — they are rendered as a
-/// single composed "Full Name" line via [`build_full_name`].
 pub fn identity_fields(id: &IdentityData) -> Vec<(&'static str, &Option<String>)> {
     vec![
         ("Email", &id.email),
