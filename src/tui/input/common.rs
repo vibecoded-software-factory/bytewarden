@@ -1,28 +1,15 @@
-//! Shared input mechanics — the routines every per-screen handler
-//! delegates to instead of re-implementing.
-//!
-//! Living here is what keeps behaviour identical across surfaces: the
-//! cursor arithmetic and readline word ops are written once in
-//! [`route_line_editor`], so a `Ctrl+W` deletes a word the same way in
-//! every popup input.
-
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use crate::domain::LineEditor;
 
-/// Routes one key event into a [`LineEditor`], returning `true` when the
-/// text changed (so a caller behind a filter can rebuild it). Modifier
-/// combinations are matched first so they never fall through to plain
-/// insertion:
-///
-/// * `Ctrl+W` delete word · `Ctrl+U` kill to start
-/// * `Ctrl+A` / `Ctrl+E` line start / end
-/// * `Ctrl+←` / `Ctrl+→` word left / right
-/// * Backspace / Delete, printable insert, plain arrows, Home / End
-///
-/// A printable char is inserted only when neither `Ctrl` nor `Alt` is
-/// held (those tiers are reserved for actions), so this is safe to call
-/// as the fallback arm of any handler.
+#[inline]
+pub fn types_a_char(key: &KeyEvent) -> bool {
+    matches!(key.code, KeyCode::Char(_))
+        && !key
+            .modifiers
+            .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
+}
+
 pub fn route_line_editor(editor: &mut LineEditor, key: KeyEvent) -> bool {
     let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
     match key.code {
@@ -46,11 +33,7 @@ pub fn route_line_editor(editor: &mut LineEditor, key: KeyEvent) -> bool {
             editor.delete();
             return true;
         }
-        KeyCode::Char(c)
-            if !key
-                .modifiers
-                .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
-        {
+        KeyCode::Char(c) if types_a_char(&key) => {
             editor.insert(c);
             return true;
         }
@@ -63,20 +46,6 @@ pub fn route_line_editor(editor: &mut LineEditor, key: KeyEvent) -> bool {
     false
 }
 
-/// Routes one key into a search box's [`LineEditor`], returning `true`
-/// when the query changed (so the caller rebuilds its filter).
-///
-/// A search box is a typing surface layered over a list, so it can't
-/// simply forward every key: the ones the list owns — `↑`/`↓`,
-/// `PgUp`/`PgDn`, `Enter`, `Tab`/`BackTab` and `Esc` — have to reach the
-/// list. This declines exactly those and forwards the rest to
-/// [`route_line_editor`], which makes it safe to use as a handler's
-/// fallback arm without shadowing navigation.
-///
-/// Everything else *types*, bare `j`/`k` included: the gradient reserves
-/// bare letters for actions only on surfaces that don't type, and a
-/// search box types. Arrow-key list navigation is what a search box
-/// gives up its letters for.
 pub fn search_key(editor: &mut LineEditor, key: KeyEvent) -> bool {
     match key.code {
         KeyCode::Up
@@ -134,9 +103,42 @@ mod tests {
     }
 
     #[test]
+    fn types_a_char_rejects_ctrl_and_alt_chords() {
+        assert!(!types_a_char(&ctrl(KeyCode::Char('w'))));
+        assert!(!types_a_char(&ctrl(KeyCode::Char('u'))));
+        assert!(!types_a_char(&KeyEvent::new(
+            KeyCode::Char('c'),
+            KeyModifiers::ALT
+        )));
+    }
+
+    #[test]
+    fn types_a_char_accepts_plain_and_shifted_characters() {
+        assert!(types_a_char(&key(KeyCode::Char('-'))));
+        assert!(types_a_char(&key(KeyCode::Char('w'))));
+
+        assert!(types_a_char(&KeyEvent::new(
+            KeyCode::Char('_'),
+            KeyModifiers::SHIFT
+        )));
+    }
+
+    #[test]
+    fn types_a_char_is_false_for_non_character_keys() {
+        for code in [
+            KeyCode::Backspace,
+            KeyCode::Enter,
+            KeyCode::Left,
+            KeyCode::Esc,
+        ] {
+            assert!(!types_a_char(&key(code)), "{code:?} is not typed text");
+        }
+    }
+
+    #[test]
     fn ctrl_chars_do_not_insert_letters() {
         let mut e = LineEditor::new();
-        // Ctrl+A is a cursor move, not an 'a' insertion.
+
         assert!(!route_line_editor(&mut e, ctrl(KeyCode::Char('a'))));
         assert_eq!(e.text(), "");
     }

@@ -1,5 +1,3 @@
-//! Key handler for the vault list (and the `Help` overlay, by go-back).
-
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use crate::tui::app::App;
@@ -7,13 +5,10 @@ use crate::tui::flows::{
     auth, copy, export, folders, generator, import, items, memberships, send, vault,
 };
 use crate::tui::input::common;
-use crate::tui::input::is_alt;
+use crate::tui::input::{is_alt, is_bare_action};
 use crate::tui::screens::{Focus, Screen};
 
-/// Dispatches a single key event on the vault screen.
 pub fn handle(app: &mut App, key: KeyEvent) {
-    // Number keys 0-4 jump between panels (disabled while typing in the
-    // search box).
     if key.modifiers == KeyModifiers::NONE && app.focus != Focus::Search {
         match key.code {
             KeyCode::Char('0') => {
@@ -40,7 +35,6 @@ pub fn handle(app: &mut App, key: KeyEvent) {
         }
     }
 
-    // Global vault shortcuts.
     if key.code == KeyCode::Char('s') && is_alt(&key) && !app.vault.is_trash_view() {
         vault::request_sync(app);
         return;
@@ -93,30 +87,22 @@ pub fn handle(app: &mut App, key: KeyEvent) {
             KeyCode::Char('k') | KeyCode::Up | KeyCode::PageUp => folders::move_up(app),
             KeyCode::Enter => folders::apply_filter(app),
             KeyCode::Tab | KeyCode::Esc => app.cycle_focus(),
-            // Folder CRUD — bare letters act on the focused Folders panel
-            // (the gradient); the `Alt+` form still works as a transition
-            // alias since it hits the same arm.
-            KeyCode::Char('n') => folders::open_create(app),
-            KeyCode::Char('r') => folders::open_rename(app),
-            KeyCode::Char('d') => folders::open_confirm_delete(app),
+
+            KeyCode::Char('n') if is_bare_action(&key) => folders::open_create(app),
+            KeyCode::Char('r') if is_bare_action(&key) => folders::open_rename(app),
+            KeyCode::Char('d') if is_bare_action(&key) => folders::open_confirm_delete(app),
             _ => {}
         },
 
         Focus::Items => match key.code {
             KeyCode::Char('j') | KeyCode::Down | KeyCode::PageDown => app.vault.filter_move_down(),
             KeyCode::Char('k') | KeyCode::Up | KeyCode::PageUp => app.vault.filter_move_up(),
-            // Switching to Trash fetches the trash list on demand;
-            // `apply_filter` runs (and applies the filter) in the guard.
+
             KeyCode::Enter if app.apply_filter() => vault::request_load_trash(app),
             KeyCode::Tab | KeyCode::Esc => app.cycle_focus(),
             _ => {}
         },
 
-        // The Search box is a typing surface: only the keys the list
-        // owns are intercepted here (arrows / paging / Enter / Tab /
-        // Esc). Everything else — bare letters included — goes to the
-        // shared `search_key`, which is why `j`/`k` type instead of
-        // navigating and why the readline word ops work in the query.
         Focus::Search => match key.code {
             KeyCode::Esc => app.clear_search(),
             KeyCode::Tab => app.cycle_focus(),
@@ -143,11 +129,9 @@ pub fn handle(app: &mut App, key: KeyEvent) {
             KeyCode::PageUp => app.vault.move_up_page(),
             KeyCode::Enter | KeyCode::Char('l') => app.go_to_detail(),
             KeyCode::Tab => app.cycle_focus(),
-            // Alt+letter still runs the row actions (transition alias);
-            // the Alt globals were already handled above.
+
             _ if is_alt(&key) => handle_alt_shortcuts(app, key),
-            // Bare letters act on the focused row (the gradient). The
-            // List panel never typed, so this is purely additive.
+
             KeyCode::Char(c) if key.modifiers == KeyModifiers::NONE => list_row_action(app, c),
             _ => {}
         },
@@ -163,12 +147,6 @@ pub fn handle(app: &mut App, key: KeyEvent) {
     }
 }
 
-/// Bare-letter row actions on the focused vault List (the gradient):
-/// the frequent, safe operations on the highlighted item. `j`/`k`/`l`
-/// (navigate / open) and `0`–`4` (focus) are handled by the caller
-/// before this runs, so they never reach here. Destructive `d` always
-/// goes through the confirm popup (which offers permanent-delete via
-/// `D` when not already in trash).
 fn list_row_action(app: &mut App, c: char) {
     let trash = app.vault.is_trash_view();
     match c {
@@ -184,8 +162,6 @@ fn list_row_action(app: &mut App, c: char) {
     }
 }
 
-/// Opens the highlighted item's detail screen straight in edit mode —
-/// the list-level `e` shortcut. No-op when the list is empty.
 fn list_edit(app: &mut App) {
     if app.vault.selected_item().is_some() {
         app.go_to_detail();
@@ -193,7 +169,6 @@ fn list_edit(app: &mut App) {
     }
 }
 
-/// Alt+key vault actions shared between the Search and List panels.
 fn handle_alt_shortcuts(app: &mut App, key: KeyEvent) {
     match key.code {
         KeyCode::Char('q') => auth::lock_vault(app),
