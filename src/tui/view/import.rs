@@ -1,5 +1,3 @@
-//! Vault-import popup renderer.
-
 use ratatui::{
     Frame,
     layout::Rect,
@@ -11,13 +9,12 @@ use ratatui::{
 use crate::tui::app::App;
 use crate::tui::import::ImportFocus;
 use crate::tui::view::widgets::{
-    center_rect, editor_line_hinted, register_field_hit, rounded_block,
+    center_rect, editor_line_hinted, legend_line, register_field_hit, rounded_block,
 };
 
 const FORMAT_HINT_FOCUSED: &str = "  (← → to cycle)";
 const FORMAT_HINT_BLURRED: &str = "  (Tab to focus, ← → to cycle)";
 
-/// Renders the import popup.
 pub fn draw_popup(frame: &mut Frame, area: Rect, app: &App) {
     let Some(state) = &app.import else {
         return;
@@ -46,15 +43,11 @@ pub fn draw_popup(frame: &mut Frame, area: Rect, app: &App) {
     ])
     .split(inner);
 
-    // Clickable field regions: Format (label + dropdown) and Path (label
-    // + input). The mouse handler maps 0 → Format, 1 → Path.
     register_field_hit(chunks[1], 0);
     register_field_hit(chunks[2], 0);
     register_field_hit(chunks[3], 1);
     register_field_hit(chunks[4], 1);
 
-    // Format field — read-only dropdown, cycled with ← → when
-    // focused.
     let fmt_focus = state.focus == ImportFocus::Format;
     frame.render_widget(
         Paragraph::new(Line::from(vec![
@@ -89,7 +82,6 @@ pub fn draw_popup(frame: &mut Frame, area: Rect, app: &App) {
         chunks[2],
     );
 
-    // Path field
     frame.render_widget(
         Paragraph::new(Line::from(vec![
             Span::styled(" Input path", Style::default().fg(t.dim)),
@@ -118,14 +110,17 @@ pub fn draw_popup(frame: &mut Frame, area: Rect, app: &App) {
         chunks[4],
     );
 
-    // Hints + warning
-    frame.render_widget(
-        Paragraph::new(Line::from(Span::styled(
-            " Tab switch field · Enter import · Esc cancel",
-            Style::default().fg(t.dim),
-        ))),
-        chunks[5],
+    let mut hints = legend_line(
+        &[
+            ("Tab", "switch field"),
+            ("Enter", "import"),
+            ("Esc", "cancel"),
+        ],
+        chunks[5].width.saturating_sub(1),
+        t,
     );
+    hints.spans.insert(0, Span::raw(" "));
+    frame.render_widget(Paragraph::new(hints), chunks[5]);
     frame.render_widget(
         Paragraph::new(Line::from(Span::styled(
             " Imported items are added to your vault — duplicates are not deduped.",

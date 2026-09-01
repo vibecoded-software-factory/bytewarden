@@ -1,5 +1,3 @@
-//! Multi-select popup view: pick the collections the item belongs to.
-
 use ratatui::{
     Frame,
     layout::Rect,
@@ -9,12 +7,10 @@ use ratatui::{
 };
 
 use crate::tui::app::App;
-use crate::tui::view::widgets::{center_rect, draw_scrollbar};
+use crate::tui::view::widgets::{center_rect, draw_scrollbar, legend_line};
 
 thread_local! {
-    /// Frame-local hit map for the collections list — one `(rect, index)`
-    /// per visible row, recorded as the list draws (accounting for its
-    /// scroll offset) so a click toggles the row the pointer is over.
+
     static COLLECTION_HITS: std::cell::RefCell<Vec<(Rect, usize)>> =
         const { std::cell::RefCell::new(Vec::new()) };
 }
@@ -25,8 +21,6 @@ fn register_hit(rect: Rect, idx: usize) {
     }
 }
 
-/// The collection-row index under `(column, row)`, if any — consumed by the
-/// mouse layer to toggle that collection on a click.
 pub fn collection_row_at(column: u16, row: u16) -> Option<usize> {
     COLLECTION_HITS.with(|h| {
         h.borrow()
@@ -39,7 +33,6 @@ pub fn collection_row_at(column: u16, row: u16) -> Option<usize> {
     })
 }
 
-/// Renders the popup. No-op when no popup is in flight.
 pub fn draw_popup(frame: &mut Frame, area: Rect, app: &App) {
     COLLECTION_HITS.with(|h| h.borrow_mut().clear());
     let Some(state) = &app.assign_collections else {
@@ -59,11 +52,11 @@ pub fn draw_popup(frame: &mut Frame, area: Rect, app: &App) {
     frame.render_widget(outer, popup);
 
     let chunks = ratatui::layout::Layout::vertical([
-        ratatui::layout::Constraint::Length(1), // padding
-        ratatui::layout::Constraint::Length(1), // header
-        ratatui::layout::Constraint::Min(0),    // list
-        ratatui::layout::Constraint::Length(1), // feedback
-        ratatui::layout::Constraint::Length(1), // hint
+        ratatui::layout::Constraint::Length(1),
+        ratatui::layout::Constraint::Length(1),
+        ratatui::layout::Constraint::Min(0),
+        ratatui::layout::Constraint::Length(1),
+        ratatui::layout::Constraint::Length(1),
     ])
     .split(inner);
 
@@ -80,8 +73,6 @@ pub fn draw_popup(frame: &mut Frame, area: Rect, app: &App) {
     );
 
     if state.available.is_empty() {
-        // Personal item or org with no visible collections — surface
-        // the empty state instead of an empty list.
         frame.render_widget(
             Paragraph::new(Line::from(vec![Span::styled(
                 " No collections available for this organisation.",
@@ -105,8 +96,7 @@ pub fn draw_popup(frame: &mut Frame, area: Rect, app: &App) {
                 )]))
             })
             .collect();
-        // Reserve a one-column gutter for the scrollbar when the list
-        // overflows, so the track never overwrites a collection name.
+
         let overflow = state.available.len() > chunks[2].height as usize;
         let list_area = if overflow {
             Rect {
@@ -122,8 +112,7 @@ pub fn draw_popup(frame: &mut Frame, area: Rect, app: &App) {
             .highlight_style(Style::default().bg(t.selected_bg))
             .highlight_symbol("▸ ");
         frame.render_stateful_widget(list, list_area, &mut ls);
-        // Register each visible row from the list's realised scroll offset,
-        // so a click maps to the right `available` index even when scrolled.
+
         let offset = ls.offset();
         for vis in 0..list_area.height {
             let idx = offset + vis as usize;
@@ -156,11 +145,16 @@ pub fn draw_popup(frame: &mut Frame, area: Rect, app: &App) {
         );
     }
 
-    frame.render_widget(
-        Paragraph::new(Line::from(Span::styled(
-            " j/k or ↑↓ to navigate · Space to toggle · Enter to apply · Esc to cancel",
-            Style::default().fg(t.dim).add_modifier(Modifier::ITALIC),
-        ))),
-        chunks[4],
+    let mut hints = legend_line(
+        &[
+            ("j/k ↑↓", "navigate"),
+            ("Space", "toggle"),
+            ("Enter", "apply"),
+            ("Esc", "cancel"),
+        ],
+        chunks[4].width.saturating_sub(1),
+        t,
     );
+    hints.spans.insert(0, Span::raw(" "));
+    frame.render_widget(Paragraph::new(hints), chunks[4]);
 }

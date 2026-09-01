@@ -1,11 +1,3 @@
-//! Master-password reverify popup.
-//!
-//! Drawn over whichever screen the user came from when they triggered
-//! a reprompt-protected action. Always renders the password as
-//! `●` characters — there is no F2-style reveal here, since the
-//! point of the popup is the user re-typing a value they already
-//! know.
-
 use ratatui::{
     Frame,
     layout::Rect,
@@ -16,9 +8,8 @@ use ratatui::{
 
 use crate::tui::app::App;
 use crate::tui::reprompt::ProtectedAction;
-use crate::tui::view::widgets::{center_rect, editor_spans_masked, rounded_block};
+use crate::tui::view::widgets::{center_rect, editor_spans_masked, legend_line, rounded_block};
 
-/// Renders the popup. No-op when no reprompt is in flight.
 pub fn draw_popup(frame: &mut Frame, area: Rect, app: &App) {
     let Some(state) = &app.reprompt else {
         return;
@@ -37,12 +28,12 @@ pub fn draw_popup(frame: &mut Frame, area: Rect, app: &App) {
     frame.render_widget(outer, popup);
 
     let chunks = ratatui::layout::Layout::vertical([
-        ratatui::layout::Constraint::Length(1), // padding
-        ratatui::layout::Constraint::Length(1), // explanation label
-        ratatui::layout::Constraint::Length(1), // input label
-        ratatui::layout::Constraint::Length(3), // input
-        ratatui::layout::Constraint::Length(1), // feedback strip
-        ratatui::layout::Constraint::Length(1), // hint
+        ratatui::layout::Constraint::Length(1),
+        ratatui::layout::Constraint::Length(1),
+        ratatui::layout::Constraint::Length(1),
+        ratatui::layout::Constraint::Length(3),
+        ratatui::layout::Constraint::Length(1),
+        ratatui::layout::Constraint::Length(1),
     ])
     .split(inner);
 
@@ -69,8 +60,6 @@ pub fn draw_popup(frame: &mut Frame, area: Rect, app: &App) {
         chunks[2],
     );
 
-    // Always rendered masked — the popup never reveals the typed
-    // password, even with F2.
     let line = if state.input.is_empty() {
         let mut spans = editor_spans_masked(&state.input, true, t);
         spans.push(Span::styled(
@@ -102,11 +91,11 @@ pub fn draw_popup(frame: &mut Frame, area: Rect, app: &App) {
         );
     }
 
-    frame.render_widget(
-        Paragraph::new(Line::from(Span::styled(
-            " Enter to verify · Esc to cancel",
-            Style::default().fg(t.dim).add_modifier(Modifier::ITALIC),
-        ))),
-        chunks[5],
+    let mut hints = legend_line(
+        &[("Enter", "verify"), ("Esc", "cancel")],
+        chunks[5].width.saturating_sub(1),
+        t,
     );
+    hints.spans.insert(0, Span::raw(" "));
+    frame.render_widget(Paragraph::new(hints), chunks[5]);
 }
