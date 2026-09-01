@@ -1,11 +1,9 @@
-//! Vault list screen renderer (sidebar + search + list + cmd-log).
-
 use ratatui::{
     Frame,
     layout::{Constraint, Layout},
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, BorderType, Borders, Cell, List, ListItem, ListState, Paragraph, Row},
+    widgets::{Cell, List, ListItem, ListState, Paragraph, Row},
 };
 
 use crate::domain::filter::{ITEM_FILTERS, ItemFilter};
@@ -15,31 +13,23 @@ use crate::tui::app::App;
 use crate::tui::screens::Focus;
 use crate::tui::view::action::action_line;
 use crate::tui::view::widgets::{
-    self, cmdlog_height, empty_state_lines, favorite_star, focus_border, focus_color,
-    render_cmd_bar_with_help, titled_block,
+    self, cmdlog_height, draw_scrollbar, empty_state_lines, favorite_star, focus_color,
+    render_cmd_bar_with_help, titled_block, titled_block_styled,
 };
 
 thread_local! {
-    /// The vault `Table`'s real first-visible-row index after the last
-    /// render. The table auto-scrolls to keep the selection visible via
-    /// its own `TableState`, so this — not `app.vault.scroll_offset` —
-    /// is what maps a clicked row back to its item.
+
     static VAULT_LIST_OFFSET: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
-/// The vault list's actual top-visible row index from the last frame.
 pub fn vault_list_offset() -> usize {
     VAULT_LIST_OFFSET.with(|o| o.get())
 }
 
-/// Renders the vault screen.
 pub fn draw(frame: &mut Frame, app: &mut App) {
     let t = &app.theme;
     let area = frame.area();
 
-    // Command-log height: 6 rows (2 border + 4 visible entries). The log
-    // is a full-width row at the bottom (spanning sidebar + main), above
-    // the hint bar.
     let cmd_h = cmdlog_height(area.height);
     let outer = Layout::vertical([
         Constraint::Min(0),
@@ -49,10 +39,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     .split(area);
     let body = Layout::horizontal([Constraint::Percentage(26), Constraint::Percentage(74)])
         .split(outer[0]);
-    // Folders is sized to its content (small box at the top); the Items
-    // filter fills the rest of the column, its border reaching the bottom
-    // with the list top-aligned, so there's no dead gutter below the
-    // sidebar.
+
     let folder_rows = 3 + app.folders.len() + app.collections.len();
     let folders_h = (folder_rows as u16 + 2).clamp(5, 14);
     let sidebar = Layout::vertical([
@@ -78,27 +65,19 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     app.mouse_areas.list = Some(main[1]);
     app.mouse_areas.cmdlog = Some(outer[1]);
 
-    // Wheel targets (position-aware): the item list, the filter sidebar and the
-    // command log each scroll their own state.
     use crate::tui::view::widgets::{ScrollTarget, register_scroll};
     register_scroll(main[1], ScrollTarget::Vault);
+    register_scroll(sidebar[1], ScrollTarget::Folders);
     register_scroll(sidebar[2], ScrollTarget::Filters);
     register_scroll(outer[1], ScrollTarget::CmdLog);
 
-    let _ = t; // some helpers re-borrow theme; suppress unused-warning in slim builds
+    let _ = t;
 }
 
 fn render_hint_bar(frame: &mut Frame, app: &App, bar: ratatui::layout::Rect) {
     let t = &app.theme;
-    // Per-focus hints — kept intentionally short. Anything not here
-    // (Alt+S sync, Alt+G gen, Alt+E export, Alt+M import, Alt+W send,
-    //  Alt+B memberships, Alt+I fingerprint, Alt+L lock, Alt+O logout,
-    //  Alt+F favorite, Alt+U username, Alt+R restore in trash, …) is
-    // discoverable via F1 — which is anchored at the right of the bar
-    // and never truncated.
+
     let hints_pairs: &[(&str, &str)] = match app.focus {
-        // On Search the box owns typing, so ↑↓ navigate (not j/k), and
-        // row actions ride on `Alt+` (the gradient's text-field rule).
         Focus::Search => {
             if app.vault.is_trash_view() {
                 &[("Esc", "clear"), ("↑↓", "nav"), ("Enter", "open")]
@@ -113,7 +92,7 @@ fn render_hint_bar(frame: &mut Frame, app: &App, bar: ratatui::layout::Rect) {
             }
         }
         Focus::Items => &[("j/k", "filter"), ("Enter", "apply"), ("Tab", "next")],
-        // Bare letters act on the focused Folders panel.
+
         Focus::Folders => &[
             ("j/k", "folder"),
             ("Enter", "apply"),
@@ -121,7 +100,7 @@ fn render_hint_bar(frame: &mut Frame, app: &App, bar: ratatui::layout::Rect) {
             ("r", "rename"),
         ],
         Focus::CmdLog => &[("j/k", "scroll"), ("Tab", "next")],
-        // Bare letters act on the focused row (the gradient).
+
         Focus::List | Focus::Status => {
             if app.vault.is_trash_view() {
                 &[("j/k", "nav"), ("Enter", "open"), ("r", "restore")]
@@ -142,12 +121,12 @@ fn render_status(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     let t = &app.theme;
     let sf = app.focus == Focus::Status;
     let (title_style, status_line) = if app.worker_dead {
-        // Persistent condition badge — unlike the sticky error toast
-        // (which the next keypress clears) this stays as long as the
-        // condition holds, because the worker is dead until restart.
         (
             t.danger_title(),
-            Line::from(Span::styled("⚠ WORKER DEAD", t.danger_title())),
+            Line::from(Span::styled(
+                format!("{} WORKER DEAD", app.icons.warning()),
+                t.danger_title(),
+            )),
         )
     } else {
         match &app.action_state {
@@ -165,14 +144,15 @@ fn render_status(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
             ),
         }
     };
+
     frame.render_widget(
-        Paragraph::new(status_line).block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_type(BorderType::Rounded)
-                .title(Span::styled("─[0]-Status", title_style))
-                .border_style(Style::default().fg(focus_color(sf, t.accent, t.inactive))),
-        ),
+        Paragraph::new(status_line).block(titled_block_styled(
+            "─[0]-Status",
+            title_style,
+            "",
+            sf,
+            t,
+        )),
         area,
     );
 }
@@ -183,26 +163,16 @@ fn render_vaults(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     let t = &app.theme;
     let ff = app.focus == Focus::Folders;
 
-    // Build the rows: "All folders", "(No folder)", separator,
-    // folders prefixed `📁`, collections prefixed `👥`. Folders and
-    // collections share the same scrolling list — the icon prefix
-    // tells the user which they're picking. An item can only belong
-    // to one folder but several collections, so collection rows
-    // commonly overlap with folder rows in terms of which items
-    // they surface.
     let mut rows: Vec<ListItem> = Vec::with_capacity(row_count(&app.folders, &app.collections) + 1);
 
-    // Row 0 — All folders.
     let all_active = matches!(app.vault.active_folder, FolderFilter::All);
     rows.push(folder_row(
-        "  📁 All folders",
+        &format!("  {} All folders", app.icons.folder()),
         all_active,
         app.vault.items.len(),
         t,
     ));
 
-    // Row 1 — (No folder). Count is precomputed in
-    // `Vault::rebuild_sidebar_counts` to avoid an O(items) scan per frame.
     let none_active = matches!(app.vault.active_folder, FolderFilter::NoFolder);
     rows.push(folder_row(
         "    (No folder)",
@@ -211,13 +181,8 @@ fn render_vaults(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         t,
     ));
 
-    // Muted rule before the named folder/collection rows — an explicit
-    // group divider rather than a blank gap.
     rows.push(separator_row(area.width, t));
 
-    // One row per folder (alphabetised at load time). Per-folder
-    // count comes from the precomputed map — see
-    // `Vault::rebuild_sidebar_counts`.
     for folder in &app.folders {
         let active =
             matches!(&app.vault.active_folder, FolderFilter::Folder(id) if id == &folder.id);
@@ -228,17 +193,13 @@ fn render_vaults(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
             .copied()
             .unwrap_or(0);
         rows.push(folder_row(
-            &format!("  📁 {}", folder.name),
+            &format!("  {} {}", app.icons.folder(), folder.name),
             active,
             count,
             t,
         ));
     }
 
-    // One row per collection — labelled `Org / Name` so members of
-    // multiple organisations can tell sibling collections apart.
-    // Personal-only accounts skip this section entirely. Same
-    // precomputed-count rationale as the folder rows above.
     for collection in &app.collections {
         let active = matches!(&app.vault.active_folder, FolderFilter::Collection(id) if id == &collection.id);
         let count = app
@@ -252,15 +213,14 @@ fn render_vaults(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
             .as_deref()
             .and_then(|id| app.organizations.iter().find(|o| o.id == id))
             .map(|o| o.name.as_str());
+        let mark = app.icons.collection();
         let label = match org_name {
-            Some(org) => format!("  👥 {org} / {}", collection.name),
-            None => format!("  👥 {}", collection.name),
+            Some(org) => format!("  {mark} {org} / {}", collection.name),
+            None => format!("  {mark} {}", collection.name),
         };
         rows.push(folder_row(&label, active, count, t));
     }
 
-    // The visual selection index has to skip the separator row at
-    // position 2 so it lines up with the underlying logical index.
     let display_sel = if app.vault.folder_selected >= 2 {
         app.vault.folder_selected + 1
     } else {
@@ -272,6 +232,7 @@ fn render_vaults(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     let total = row_count(&app.folders, &app.collections);
     let indicator = format!("{} of {}", app.vault.folder_selected + 1, total);
 
+    let display_rows = rows.len();
     frame.render_stateful_widget(
         List::new(rows)
             .block(titled_block("─[1]-Folders", &indicator, ff, t))
@@ -280,13 +241,10 @@ fn render_vaults(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         area,
         &mut state,
     );
+
+    draw_scrollbar(frame, area, display_rows, display_sel, t);
 }
 
-/// A muted dotted rule spanning the panel, used as a group divider in
-/// the sidebar lists (before the named folders, before Trash) — an
-/// explicit separator instead of a blank gap. `width` is the panel's
-/// outer width; the rule insets by the 2-cell highlight-symbol gutter
-/// every row reserves so it lines up with the row content.
 fn separator_row<'a>(width: u16, t: &crate::tui::theme::Theme) -> ListItem<'a> {
     let w = (width as usize).saturating_sub(4);
     ListItem::new(Line::from(Span::styled(
@@ -330,10 +288,7 @@ fn render_filters(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
                 ItemFilter::Trash => t.error,
                 ItemFilter::All => t.foreground,
             };
-            // Item-type markers come from the active icon set (font-safe
-            // Unicode by default; Nerd when configured + supported). All and
-            // Favorites keep font-safe literals; a single space holds the
-            // glyph column for All so labels stay aligned.
+
             let icon = match f {
                 ItemFilter::All => " ",
                 ItemFilter::Favorites => "★",
@@ -357,11 +312,9 @@ fn render_filters(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         })
         .collect();
 
-    // Inject a visual separator immediately before the Trash entry.
     let mut filter_items_with_sep: Vec<ListItem> = Vec::with_capacity(filter_items.len() + 1);
     for (i, item) in filter_items.into_iter().enumerate() {
         if i == ITEM_FILTERS.len() - 1 {
-            // Muted rule before the Trash entry — an explicit divider.
             filter_items_with_sep.push(separator_row(area.width, t));
         }
         filter_items_with_sep.push(item);
@@ -369,7 +322,7 @@ fn render_filters(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
 
     let mut state = ListState::default();
     let display_sel = if app.vault.filter_selected == ITEM_FILTERS.len() - 1 {
-        app.vault.filter_selected + 1 // skip the separator row
+        app.vault.filter_selected + 1
     } else {
         app.vault.filter_selected
     };
@@ -380,6 +333,7 @@ fn render_filters(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         ITEM_FILTERS.len()
     );
 
+    let display_rows = filter_items_with_sep.len();
     frame.render_stateful_widget(
         List::new(filter_items_with_sep)
             .block(titled_block("─[2]-Items", &indicator, itf, t))
@@ -388,14 +342,14 @@ fn render_filters(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         area,
         &mut state,
     );
+
+    draw_scrollbar(frame, area, display_rows, display_sel, t);
 }
 
 fn render_search(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     let t = &app.theme;
     let sf = app.focus == Focus::Search;
-    // Leading magnifying-glass affordance — a one-column left margin off
-    // the border, and coloured to match the text of the current state
-    // (not accent), so it reads as part of the field rather than a badge.
+
     let line = if sf {
         let mut spans = vec![Span::styled(
             format!(" {} ", app.icons.search()),
@@ -420,35 +374,18 @@ fn render_search(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
             Span::styled("type to filter…", Style::default().fg(t.placeholder)),
         ])
     };
+
     frame.render_widget(
-        Paragraph::new(line).block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_type(BorderType::Rounded)
-                .title(Span::styled(
-                    "─[/]-Search",
-                    Style::default().fg(focus_color(sf, t.accent, t.inactive)),
-                ))
-                .border_style(focus_border(sf, t.accent)),
-        ),
+        Paragraph::new(line).block(titled_block("─[/]-Search", "", sf, t)),
         area,
     );
 }
 
-/// Compact type label for the vault list. Identical to
-/// [`item_type_label`] except "Secure Note" is shortened to "Note" so
-/// the type column stays narrow; the detail screen still shows the full
-/// name.
-/// Compact type tags for the list column. The long names ("Secure
-/// Note", "Identity", "SSH Key") are abbreviated so the fixed type
-/// column stays as narrow as `[Login]` instead of widening every row to
-/// fit the longest label. The detail screen shows the full type via
-/// [`item_type_label`].
 fn list_type_label(item_type: u8) -> &'static str {
     match item_type {
-        2 => "Note",  // Secure Note
-        4 => "Ident", // Identity
-        5 => "SSH",   // SSH Key
+        2 => "Note",
+        4 => "Ident",
+        5 => "SSH",
         other => item_type_label(other),
     }
 }
@@ -458,23 +395,14 @@ fn render_list(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     let lf = app.focus == Focus::List;
     let filtered = app.vault.filtered_items();
 
-    // Only reserve an indicator column when at least one *visible* item
-    // actually carries that indicator. A personal-only account (no
-    // organisations) never pays for the 👥 column, and a view with no
-    // favourites or reprompt-protected items collapses those too — so
-    // the [Type]/name columns shift left instead of leaving a dead
-    // gutter. The reservation is per-view (not per-row) so alignment
-    // stays stable within the list.
     let (mut any_fav, mut any_reprompt, mut any_org) = (false, false, false);
-    // Type column sized to the widest *visible* "[label]" instead of a
-    // fixed pad — an all-[Login] view gets a 7-wide column, not 11, so
-    // names start that much earlier.
+
     let mut type_w = 0usize;
     for it in filtered.iter() {
         any_fav |= it.favorite;
         any_reprompt |= it.needs_reprompt();
         any_org |= it.organization_id.is_some();
-        type_w = type_w.max(list_type_label(it.item_type).len() + 2); // + "[]"
+        type_w = type_w.max(list_type_label(it.item_type).len() + 2);
     }
     let ind_w = (any_fav as u16) * 2 + (any_reprompt as u16) * 2 + (any_org as u16) * 2;
     let type_w = type_w.clamp(6, 14) as u16;
@@ -490,14 +418,7 @@ fn render_list(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
                 5 => t.item_ssh,
                 _ => t.dim,
             };
-            // First cell = indicators + type tag. Indicators (★ / 🔒 /
-            // 👥) are each 2 cells wide and only present when the column
-            // is reserved; the type tag follows. The table left-aligns
-            // the cell inside its fixed `ind_w + type_w` width, so the
-            // name column lines up across rows without manual padding.
-            // "Secure Note" is shortened to "Note" in `list_type_label`
-            // so the common rows stay narrow; the detail view shows the
-            // full type.
+
             let mut spans: Vec<Span> = Vec::with_capacity(4);
             if any_fav {
                 spans.push(if item.favorite {
@@ -508,14 +429,20 @@ fn render_list(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
             }
             if any_reprompt {
                 spans.push(if item.needs_reprompt() {
-                    Span::styled("🔒", Style::default().fg(t.error))
+                    Span::styled(
+                        format!("{} ", app.icons.locked()),
+                        Style::default().fg(t.error),
+                    )
                 } else {
                     Span::raw("  ")
                 });
             }
             if any_org {
                 spans.push(if item.organization_id.is_some() {
-                    Span::styled("👥", Style::default().fg(t.accent))
+                    Span::styled(
+                        format!("{} ", app.icons.collection()),
+                        Style::default().fg(t.accent),
+                    )
                 } else {
                     Span::raw("  ")
                 });
@@ -538,7 +465,7 @@ fn render_list(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     } else {
         "0 of 0".into()
     };
-    // Empty states teach: name the keys that would fill the panel.
+
     let empty = if !app.vault.search_query.is_empty() {
         empty_state_lines("No items match", &["Esc clears the search"], t)
     } else if app.vault.is_trash_view() {
@@ -569,41 +496,37 @@ fn render_list(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
             empty,
         },
     );
-    // Capture the table's real post-render offset so a click maps to the
-    // right item even when the auto-scroll has moved past `scroll_offset`.
+
     VAULT_LIST_OFFSET.with(|o| o.set(offset));
 }
 
 fn render_cmd_log(frame: &mut Frame, app: &App, area: ratatui::layout::Rect, cmd_h: u16) {
     let t = &app.theme;
     let clf = app.focus == Focus::CmdLog;
-    let color = focus_color(clf, t.accent, t.inactive);
     let visible = (cmd_h as usize).saturating_sub(2);
     let total = app.cmd_log.entries.len();
-    // Entry-based scroll-back with a `↑N` tag — the shared command-log
-    // convention. One line per entry:
-    // `✓ <cmd>  →  <detail>` (was a two-line `$ cmd` / `icon detail`).
+
     let scroll = app.cmd_log.scroll.min(total.saturating_sub(visible));
-    let scroll_tag = if scroll == 0 {
+
+    let counter = if total == 0 {
         String::new()
     } else {
-        format!("  ↑{scroll}")
+        format!("{} of {}", total - scroll, total)
     };
-    let title = format!("─[4]-Command Log{scroll_tag}");
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_type(BorderType::Rounded)
-        .title(Span::styled(title, Style::default().fg(color)))
-        .border_style(Style::default().fg(color));
+    let block = titled_block("─[4]-Command Log", &counter, clf, t);
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
     if total == 0 {
         frame.render_widget(
-            Paragraph::new(Line::from(Span::styled(
-                "  no commands yet",
-                Style::default().fg(t.dim),
-            ))),
+            Paragraph::new(empty_state_lines(
+                "No commands yet",
+                &[
+                    "every bw call lands here — session keys redacted",
+                    "Alt+S runs one · j/k scrolls this panel",
+                ],
+                t,
+            )),
             inner,
         );
         return;
@@ -623,4 +546,6 @@ fn render_cmd_log(frame: &mut Frame, app: &App, area: ratatui::layout::Rect, cmd
         })
         .collect();
     frame.render_widget(Paragraph::new(lines), inner);
+
+    draw_scrollbar(frame, area, total, end.saturating_sub(1), t);
 }
