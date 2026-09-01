@@ -1,6 +1,3 @@
-//! Memberships popup flow — fetches organisations + collections and
-//! parks them on the App for the read-only popup view to render.
-
 use crate::domain::{Collection, Organization};
 use crate::ports::BwError;
 use crate::tui::action::ActionState;
@@ -8,16 +5,20 @@ use crate::tui::app::App;
 use crate::tui::screens::Screen;
 use crate::tui::worker::{InFlight, WorkerRequest};
 
-/// Cached snapshot of the user's organisation memberships, fetched
-/// when the popup is opened.
 #[derive(Debug, Clone, Default)]
 pub struct MembershipState {
     pub organizations: Vec<Organization>,
     pub collections: Vec<Collection>,
+
+    pub cursor: usize,
 }
 
-/// Opens the memberships popup — fetches organisations, then collections
-/// (two worker round-trips). The popup is shown once both arrive.
+impl MembershipState {
+    pub fn selectable_len(&self) -> usize {
+        self.collections.len()
+    }
+}
+
 pub fn open(app: &mut App) {
     app.submit(
         InFlight::MembershipsOrgs,
@@ -26,8 +27,6 @@ pub fn open(app: &mut App) {
     );
 }
 
-/// `bw list organizations` response — stashes the orgs and fetches the
-/// collections.
 pub fn handle_orgs(app: &mut App, r: Result<Vec<Organization>, BwError>) {
     match r {
         Ok(orgs) => {
@@ -39,9 +38,9 @@ pub fn handle_orgs(app: &mut App, r: Result<Vec<Organization>, BwError>) {
             app.memberships = Some(MembershipState {
                 organizations: orgs,
                 collections: Vec::new(),
+                cursor: 0,
             });
-            // Chained step — keep the "Loading memberships…" toast, so
-            // claim the slot silently rather than through `submit`.
+
             if app.begin(InFlight::MembershipsCollections) {
                 let _ = app.worker_tx.send(WorkerRequest::ListCollections);
             }
@@ -53,12 +52,9 @@ pub fn handle_orgs(app: &mut App, r: Result<Vec<Organization>, BwError>) {
     }
 }
 
-/// `bw list collections` response — completes the popup and shows it.
 pub fn handle_collections(app: &mut App, r: Result<Vec<Collection>, BwError>) {
     match r {
         Ok(mut cs) => {
-            // Sort by `Org / Name` so the per-org slices render in a
-            // stable order without a per-frame re-sort.
             cs.sort_by(|a, b| {
                 a.organization_id
                     .as_deref()
@@ -94,8 +90,14 @@ pub fn handle_collections(app: &mut App, r: Result<Vec<Collection>, BwError>) {
     }
 }
 
-/// Closes the popup and returns to the vault list.
 pub fn close(app: &mut App) {
     app.memberships = None;
     app.screen = Screen::Vault;
+}
+
+pub fn move_cursor(app: &mut App, delta: i8) {
+    if let Some(state) = app.memberships.as_mut() {
+        let len = state.selectable_len();
+        crate::tui::input::nav::nav_clamp(&mut state.cursor, len, delta);
+    }
 }
