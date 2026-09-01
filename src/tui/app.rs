@@ -1,21 +1,3 @@
-//! [`App`] — the global state container for the TUI.
-//!
-//! `App` holds:
-//!
-//! * Navigation state (current screen, focus).
-//! * The vault list ([`crate::tui::vault::Vault`]: items + trash + the
-//!   search/filter caches + the list cursor and its invalidation
-//!   contract) and the session reference data (folders, collections…).
-//! * Per-screen form state, each in its own sub-struct (login, edit,
-//!   create, settings overlay) plus the popup states.
-//! * The worker channels + the in-flight ticket ([`crate::tui::worker`]).
-//! * The injected synchronous ports (clipboard, settings).
-//!
-//! The struct is intentionally large but only ~30 cheap small-value
-//! fields. Behaviour is implemented in [`crate::tui::flows`] and the
-//! input/view layers; methods on `App` itself are deliberately limited
-//! to thin getters/mutators.
-
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
@@ -42,21 +24,14 @@ use crate::tui::vault::Vault;
 use crate::tui::view::icons::{self, IconSet};
 use crate::tui::worker::{InFlight, WorkerRequest, WorkerResponse};
 
-/// Per-page step size when paging through the vault list.
 pub const PAGE_STEP: usize = 10;
 
-/// Visible vault-list rows used to compute scroll behaviour.
 pub const VAULT_VIEWPORT_ROWS: usize = 20;
 
-/// `On`/`Off` label for a boolean settings value.
 fn on_off(b: bool) -> String {
     if b { "On".into() } else { "Off".into() }
 }
 
-/// Redacts a cached session key from a command string before it's logged.
-/// The `bw` argv never carries the key (it's passed via env), so this is
-/// defense-in-depth. Pure helper so the redaction is unit-testable
-/// without constructing an [`App`].
 pub(crate) fn redact_cmd(cmd: &str, marker: Option<&str>) -> String {
     match marker {
         Some(key) if !key.is_empty() => cmd.replace(key, "***"),
@@ -64,234 +39,107 @@ pub(crate) fn redact_cmd(cmd: &str, marker: Option<&str>) -> String {
     }
 }
 
-/// Global TUI state.
 pub struct App {
-    // ── Screen / focus ────────────────────────────────────────────────────
     pub screen: Screen,
     pub should_quit: bool,
     pub focus: Focus,
 
-    // ── Vault list ────────────────────────────────────────────────────────
-    /// The vault's item data + search/filter caches + list-navigation
-    /// cursor, with its own invalidation contract. See
-    /// [`crate::tui::vault::Vault`].
     pub vault: Vault,
 
-    // ── Session reference data ────────────────────────────────────────────
-    /// All folders visible in the current session (sorted alphabetically
-    /// by name). Refreshed via the worker on login / after folder edits.
     pub folders: Vec<Folder>,
-    /// All collections visible in the current session, across every
-    /// organisation the user is a member of. Sorted by `Org / Name`.
-    /// Personal-only accounts keep this empty. Used by the Folders
-    /// sidebar (rendered after the folder rows) and by the
-    /// memberships popup.
+
     pub collections: Vec<crate::domain::Collection>,
-    /// Bitwarden organisations the user is a member of, used to
-    /// render `"Org / Collection"` labels in the sidebar and the
-    /// memberships popup.
+
     pub organizations: Vec<crate::domain::Organization>,
-    /// Cache of `bw import --formats` output, populated once at
-    /// login and consumed by the import popup's dropdown. Empty when
-    /// the call fails or hasn't been made yet — the popup falls back
-    /// to a hard-coded `bitwardenjson` so it still works.
+
     pub import_formats: Vec<String>,
 
-    // ── Login form ────────────────────────────────────────────────────────
-    /// The login screen's form state — buffers, focus, toggles and the
-    /// transient 2FA / device-verification flags. See
-    /// [`crate::tui::login_form::LoginForm`].
     pub login: LoginForm,
-    /// Whether the `bw` CLI is logged into an account (vault Locked or
-    /// Unlocked) vs fully signed out. Tracked on `App` (not `LoginForm`)
-    /// because it outlives the login screen: the vault now lives on the
-    /// worker thread, so the login flow can't call `status()`
-    /// synchronously to decide unlock-vs-login. Set from the
-    /// boot-status / login response handlers; cleared on logout.
+
     pub authenticated: bool,
 
-    // ── Detail / edit / create ────────────────────────────────────────────
     pub show_password: bool,
     pub detail_field: usize,
 
-    // ── Command log ───────────────────────────────────────────────────────
-    /// The redacted `bw` command backlog + its scroll. See
-    /// [`crate::tui::cmd_log::CmdLog`].
     pub cmd_log: CmdLog,
 
-    // ── Action / worker state ─────────────────────────────────────────────
     pub action_state: ActionState,
     pub action_tick: u8,
-    /// Context for the single user request currently being served by the
-    /// worker thread. `Some` ⇒ busy; input is gated and a new request
-    /// must not be queued until the matching response clears it. Multi-step
-    /// flows chain by setting a fresh ticket from a response handler.
-    /// Claim it through [`Self::submit`] / [`Self::begin`], never by
-    /// assigning directly — that's what stamps the watchdog timer and
-    /// enforces the single-in-flight + worker-dead guards.
+
     pub in_flight: Option<InFlight>,
-    /// When the current in-flight request was claimed. Drives the
-    /// [`Self::watchdog_release_stuck_request`] backstop so a lost ticket
-    /// (worker died mid-call, response dropped) can't gate input forever.
+
     pub request_started: Option<Instant>,
-    /// Latched once the worker response channel closes — every worker
-    /// thread is gone, so no response will ever arrive. [`Self::begin`]
-    /// refuses while set and a persistent error is shown.
+
     pub worker_dead: bool,
-    /// Configurable `bw list items` wall-clock budget (seconds). Shared
-    /// with the worker's `bw` adapter behind an [`Arc<AtomicU64>`]: the
-    /// Settings overlay writes to it and the adapter reads it on the next
-    /// list, so a change takes effect without a restart. Also sizes the
-    /// watchdog so a legitimately slow load isn't mistaken for a lost
-    /// ticket.
+
     pub list_items_timeout: Arc<AtomicU64>,
 
-    // ── Auto-lock ─────────────────────────────────────────────────────────
-    /// The inactivity auto-lock timer. See
-    /// [`crate::tui::auto_lock::AutoLock`].
     pub auto_lock: AutoLock,
 
-    // ── Clipboard auto-clear ──────────────────────────────────────────────
-    /// Seconds after which a copied secret is wiped from the system
-    /// clipboard. `0` disables the feature; default is `30` (matches
-    /// the Bitwarden GUI). Seeded from the settings port at boot and
-    /// editable live from the Settings overlay; read at each copy, so a
-    /// change takes effect on the next copy without a restart.
     pub clipboard_clear_secs: u64,
 
-    // ── Mouse hit-testing ─────────────────────────────────────────────────
     pub mouse_areas: MouseAreas,
     pub last_click: Option<(u16, u16)>,
 
-    // ── Edit / create forms ───────────────────────────────────────────────
-    /// The edit-item form (Detail screen's editable mode). See
-    /// [`crate::tui::item_forms::EditForm`].
     pub edit: EditForm,
-    /// The create-item form. See [`crate::tui::item_forms::CreateForm`].
+
     pub create: CreateForm,
 
-    // ── Generator state ───────────────────────────────────────────────────
     pub generator: GeneratorState,
 
-    // ── Rename-field popup state ──────────────────────────────────────────
-    /// Buffer for the in-flight custom-field rename. Carries the new
-    /// label, the cursor position, and the index of the edit-form row
-    /// being renamed. `None` outside the popup.
     pub rename_field: Option<crate::tui::flows::items::RenameFieldState>,
 
-    // ── Folder name popup state (Create / Rename) ─────────────────────────
-    /// Buffer for the in-flight folder-name popup. `None` outside the
-    /// popup.
     pub folder_name: Option<crate::tui::flows::folders::FolderNameState>,
 
-    // ── Export popup state ────────────────────────────────────────────────
-    /// Buffer for the in-flight export popup. `None` outside the popup.
     pub export: Option<crate::tui::export::ExportState>,
 
-    // ── Import popup state ────────────────────────────────────────────────
-    /// Buffer for the in-flight import popup. `None` outside the popup.
     pub import: Option<crate::tui::import::ImportState>,
 
-    // ── Attachment-upload popup state ─────────────────────────────────────
-    /// Buffer for the in-flight attachment-upload popup.
     pub attachment_upload: Option<crate::tui::flows::items::AttachmentUploadState>,
 
-    // ── Attachment-download popup state ───────────────────────────────────
-    /// Buffer for the in-flight attachment-download popup.
     pub attachment_download: Option<crate::tui::flows::items::AttachmentDownloadState>,
 
-    // ── Confirm-delete-attachment popup state ─────────────────────────────
-    /// Buffer for the in-flight delete-attachment confirmation popup.
     pub attachment_delete: Option<crate::tui::flows::items::AttachmentDeleteState>,
 
-    // ── Send-create popup state ───────────────────────────────────────────
-    /// Buffer for the in-flight send-create popup.
     pub send_create: Option<crate::tui::send::SendCreateState>,
 
-    // ── Memberships popup state ───────────────────────────────────────────
-    /// Snapshot for the read-only memberships popup. `None` outside
-    /// the popup.
     pub memberships: Option<crate::tui::flows::memberships::MembershipState>,
 
-    // ── Assign-collections popup state ───────────────────────────────────
-    /// Buffer for the in-flight collections multi-select popup.
-    /// `None` outside the popup. Used by the edit-mode "Collections"
-    /// row to choose which of the item's owning org's collections it
-    /// belongs to.
     pub assign_collections: Option<crate::tui::assign_collections::AssignCollectionsState>,
 
-    // ── Reprompt popup state ──────────────────────────────────────────────
-    /// Buffer for the in-flight master-password reverify popup. `None`
-    /// outside the popup.
     pub reprompt: Option<crate::tui::reprompt::RepromptState>,
 
-    // ── Command palette state ─────────────────────────────────────────────
-    /// Buffer for the in-flight command palette (`Ctrl+P`). `None`
-    /// outside the palette.
     pub palette: Option<crate::tui::flows::palette::PaletteState>,
 
-    /// State for the per-item action menu opened by right-clicking a
-    /// vault row (`Screen::ItemActions`). `None` when the menu is closed.
     pub item_actions: Option<crate::tui::item_actions::ItemActionsState>,
 
-    /// Transient flag set by [`crate::tui::flows::reprompt::run_protected_action`]
-    /// just before re-entering the protected flow. Consumed by the
-    /// reprompt guards in `flows::copy` so the deferred action runs
-    /// straight through without re-opening the popup it just came
-    /// from. Always cleared inside the same call stack.
     pub reprompt_verified: bool,
 
-    // ── Help popup state ──────────────────────────────────────────────────
-    /// Screen the user was on when they opened the help popup. The help
-    /// renderer reads this to draw the correct background and to scope
-    /// the shortcut list to the screen the user is actually looking at.
-    /// `None` when help is not active.
     pub help_from: Option<Screen>,
-    /// `(vertical, horizontal)` scroll offset for the help popup, in
-    /// rows / columns. Reset to `(0, 0)` whenever the popup is opened.
-    /// Clamped by the renderer once it knows the inner viewport size,
-    /// so the input handler can increment freely without bookkeeping.
+
     pub help_scroll: (u16, u16),
 
-    // ── Theme ─────────────────────────────────────────────────────────────
     pub theme: Theme,
 
-    // ── Icons / glyph capability ──────────────────────────────────────────
-    /// The terminal's glyph capability, detected once at boot.
     pub glyphs: GlyphCaps,
-    /// The `icon_style` setting as configured (`"unicode"` / `"nerd"`).
+
     pub icon_style: String,
-    /// The effective icon set — the setting resolved against [`Self::glyphs`]
-    /// (a bare console is forced to Unicode). Read by the view layer.
+
     pub icons: IconSet,
 
-    // ── Settings overlay (F10) ─────────────────────────────────────────────
-    /// The Settings overlay's transient state. See
-    /// [`crate::tui::settings_overlay::SettingsOverlay`].
     pub settings_ui: SettingsOverlay,
 
-    // ── Worker channels ───────────────────────────────────────────────────
-    /// Send a [`WorkerRequest`] to the thread that owns the vault +
-    /// generator ports.
     pub worker_tx: Sender<WorkerRequest>,
-    /// Drain [`WorkerResponse`]s from the worker between frames.
+
     pub worker_rx: Receiver<WorkerResponse>,
-    /// Cached session key for command-log redaction. The vault now lives
-    /// on the worker thread, so `push_cmd` can no longer call
-    /// `session_key()`; instead we cache the key here from the login /
-    /// unlock response handlers and clear it on lock / logout. The `bw`
-    /// argv never contains the key (it's passed via env), so this is
-    /// defense-in-depth. Zeroized on drop / overwrite.
+
     pub session_marker: Option<Zeroizing<String>>,
 
-    // ── Injected ports (synchronous, stay on the render thread) ───────────
     pub clipboard: Box<dyn ClipboardPort>,
     pub settings: Box<dyn SettingsPort>,
 }
 
 impl App {
-    /// Constructs the initial state, reading user preferences via the
-    /// settings port.
     pub fn new(
         worker_tx: Sender<WorkerRequest>,
         worker_rx: Receiver<WorkerResponse>,
@@ -304,7 +152,7 @@ impl App {
         let theme = theme::load(&settings.config_dir());
         let glyphs = GlyphCaps::detect();
         let icons = icons::resolve_icons(&cfg.icon_style, glyphs);
-        // Preselect the picker on the configured preset, else Nord.
+
         let settings_theme_idx = theme::configured_preset(&settings.config_dir())
             .or(Some(theme::Preset::DEFAULT))
             .and_then(|p| theme::Preset::ALL.iter().position(|&q| q == p))
@@ -372,27 +220,10 @@ impl App {
         }
     }
 
-    /// Whether a worker request is currently in flight. While `true`,
-    /// input handlers gate most keys so a second request can't be queued.
     pub fn is_busy(&self) -> bool {
         self.in_flight.is_some()
     }
 
-    // ── Worker request lifecycle ──────────────────────────────────────────
-
-    /// Claims the in-flight slot for `slot` and stamps the watchdog timer,
-    /// returning `true`. Refuses (returns `false`, leaving any current
-    /// request untouched) when the worker is dead or a request is already
-    /// in flight.
-    ///
-    /// Input is already gated while busy (`input::busy_blocks`), but
-    /// `begin` is the belt-and-suspenders guard against a *programmatic*
-    /// double-send (e.g. an auto-refresh racing a user action) silently
-    /// overwriting `in_flight` and desynchronising the ticket ↔ response
-    /// ordering. Every `request_*` flow claims the slot through this
-    /// (usually via [`Self::submit`]) rather than assigning `in_flight`
-    /// directly. Use bare `begin` only for a *silent* request that must
-    /// not set a `Running` toast (the post-mutation reloads).
     pub fn begin(&mut self, slot: InFlight) -> bool {
         if self.worker_dead {
             self.set_action(ActionState::Error(
@@ -409,12 +240,6 @@ impl App {
         true
     }
 
-    /// Starts a worker request end-to-end: claims the slot ([`Self::begin`]),
-    /// shows the `Running` toast, and sends on the worker lane. A failed
-    /// send (worker gone) releases the slot and routes through
-    /// [`Self::on_worker_dead`] instead of leaving the UI busy forever.
-    /// Returns whether the request was dispatched — the shared body of
-    /// every non-silent `request_*` flow.
     pub fn submit(&mut self, slot: InFlight, label: &str, req: WorkerRequest) -> bool {
         if !self.begin(slot) {
             return false;
@@ -428,10 +253,6 @@ impl App {
         true
     }
 
-    /// Unwedges the UI after the worker response channel closed — every
-    /// worker thread is gone, so no response will ever arrive. Releases the
-    /// in-flight slot (otherwise `busy_blocks` swallows keys forever) and
-    /// surfaces a persistent error, once.
     pub fn on_worker_dead(&mut self) {
         if self.worker_dead {
             return;
@@ -445,11 +266,6 @@ impl App {
         self.push_cmd("worker", false, "response channel closed — worker died");
     }
 
-    /// Watchdog for a lost in-flight ticket: every `bw` call has a per-op
-    /// timeout, so a claimed slot must resolve within the largest plausible
-    /// budget. If it doesn't (worker died mid-call, response dropped),
-    /// release the slot so the UI doesn't stay busy forever. Called once
-    /// per run-loop tick.
     pub fn watchdog_release_stuck_request(&mut self) {
         let Some(started) = self.request_started else {
             return;
@@ -457,11 +273,7 @@ impl App {
         if self.in_flight.is_none() {
             return;
         }
-        // Above every fixed per-op timeout — the largest is the SSO
-        // login budget (180 s, human-scale: the user is typing into
-        // their identity provider's page) — and above the configurable
-        // list budget, plus generous slack. It only ever fires on a
-        // genuinely lost ticket, not a slow-but-live call.
+
         let budget = self
             .list_items_timeout
             .load(Ordering::Relaxed)
@@ -477,9 +289,6 @@ impl App {
         }
     }
 
-    /// Opens the Settings overlay over the current screen. Stashes the
-    /// originating screen and the active theme (so `Esc`/`F10` can restore
-    /// it), and starts focus on the section sidebar.
     pub fn open_settings(&mut self) {
         self.settings_ui.from = self.screen.clone();
         self.settings_ui.theme_before = self.theme.clone();
@@ -489,9 +298,6 @@ impl App {
         self.screen = Screen::Settings;
     }
 
-    /// Current display value of a settings row (right-aligned in the
-    /// panel). Bools read `On`/`Off`; durations read their unit; a
-    /// clipboard window of `0` reads `Off`.
     pub fn settings_row_value(&self, row: SettingRow) -> String {
         match row {
             SettingRow::AutoLock => on_off(self.auto_lock.enabled),
@@ -518,10 +324,6 @@ impl App {
         }
     }
 
-    /// Applies a `←/→` change to a settings row and persists it
-    /// immediately (atomic write). Bools toggle on either arrow; numbers
-    /// step by a per-row increment, clamped to a sane range. `forward`
-    /// is `true` for `→` / `l`, `false` for `←` / `h`.
     pub fn settings_adjust(&mut self, row: SettingRow, forward: bool) {
         let step = |cur: u64, by: i64, lo: u64, hi: u64| -> u64 {
             (cur as i64 + if forward { by } else { -by }).clamp(lo as i64, hi as i64) as u64
@@ -546,14 +348,11 @@ impl App {
             }
             SettingRow::ListTimeout => {
                 let secs = step(self.list_items_timeout.load(Ordering::Relaxed), 30, 30, 900);
-                // Store to the shared handle so the worker's adapter picks
-                // up the new budget on its next list — then persist it.
+
                 self.list_items_timeout.store(secs, Ordering::Relaxed);
                 self.settings.write_list_items_timeout_secs(secs);
             }
             SettingRow::IconStyle => {
-                // Two-state; either arrow flips it. Re-resolve immediately so
-                // the change shows without a restart, then persist.
                 self.icon_style = if self.icon_style.eq_ignore_ascii_case("nerd") {
                     "unicode".to_string()
                 } else {
@@ -565,8 +364,6 @@ impl App {
         }
     }
 
-    /// Applies the highlighted preset to [`Self::theme`] as a live
-    /// preview — no persistence. Called whenever the picker moves.
     pub fn settings_preview_theme(&mut self) {
         if let Some(&p) = theme::Preset::ALL.get(self.settings_ui.theme_idx) {
             self.theme = theme::adapt(
@@ -576,8 +373,6 @@ impl App {
         }
     }
 
-    /// Confirms the highlighted preset: applies it, persists
-    /// `name = "<preset>"` to `config.toml`, and closes the overlay.
     pub fn settings_confirm_theme(&mut self) {
         if let Some(&p) = theme::Preset::ALL.get(self.settings_ui.theme_idx) {
             self.theme = theme::adapt(
@@ -591,8 +386,6 @@ impl App {
         self.screen = self.settings_ui.from.clone();
     }
 
-    /// Cancels the Settings overlay: restores the theme that was active
-    /// when it opened (dropping any live preview) and closes it.
     pub fn settings_cancel(&mut self) {
         self.theme = self.settings_ui.theme_before.clone();
         self.screen = self.settings_ui.from.clone();
@@ -623,9 +416,6 @@ impl App {
                 }
             }
             Screen::Help => {
-                // Closing help returns the user to whichever screen they
-                // were on when they opened it — never silently teleport
-                // them to the vault.
                 self.screen = self.help_from.take().unwrap_or(Screen::Vault);
             }
             Screen::Create | Screen::ConfirmDelete => {
@@ -634,8 +424,6 @@ impl App {
             _ => {}
         }
     }
-
-    // ── Focus cycling ─────────────────────────────────────────────────────
 
     pub fn cycle_focus(&mut self) {
         self.focus = match self.focus {
@@ -658,11 +446,6 @@ impl App {
         };
     }
 
-    // ── Filter / search (cross into focus) ────────────────────────────────
-
-    /// Activates the highlighted filter. Returns `true` when the new
-    /// filter is [`ItemFilter::Trash`] so the caller can kick off the
-    /// trash load on the worker (the trash list is fetched on demand).
     pub fn apply_filter(&mut self) -> bool {
         self.vault.active_filter = ITEM_FILTERS[self.vault.filter_selected].clone();
         self.vault.selected_index = 0;
@@ -680,26 +463,9 @@ impl App {
         self.vault.rebuild_filtered_cache();
     }
 
-    // ── Command log + action state ────────────────────────────────────────
-
-    /// Appends a redacted command + its result to the log.
-    ///
-    /// When `BYTEWARDEN_DEBUG=1` is set the same redacted line is also
-    /// appended to `~/.bytewarden.log` for offline troubleshooting —
-    /// see [`crate::tui::debug_log`]. The check is cheap when the env
-    /// var is unset, so leaving it off costs nothing. The capping +
-    /// scroll bookkeeping lives on [`CmdLog::push`].
     pub fn push_cmd(&mut self, cmd: &str, ok: bool, detail: &(impl std::fmt::Display + ?Sized)) {
-        // `detail` is `&dyn Display` so a typed `BwError`, a `&str`
-        // literal and a `&format!(…)` result all pass without the caller
-        // stringifying first — the classified error carries its own
-        // message. (`dyn` rather than a generic so an unsized `&str`
-        // coerces cleanly and existing `&e` call sites stay unchanged.)
         let detail = detail.to_string();
-        // The vault lives on the worker thread, so we can't call
-        // `session_key()` here. Redact against the cached `session_marker`
-        // (set from the login / unlock response handlers). The `bw` argv
-        // never carries the key anyway — this is defense-in-depth.
+
         let redacted = redact_cmd(cmd, self.session_marker.as_deref().map(|s| s.as_str()));
         crate::tui::debug_log::append(&redacted, ok, &detail);
         self.cmd_log.push(CmdEntry {
@@ -717,23 +483,12 @@ impl App {
         self.action_tick = self.action_tick.wrapping_add(1);
     }
 
-    /// Logs a failed `bw` command and surfaces the error in the feedback
-    /// strip.
     pub fn cmd_err(&mut self, cmd: &str, e: &(impl std::fmt::Display + ?Sized), label: &str) {
-        // Accepts a typed `BwError` (or any `Display`) by reference — the
-        // existing `&e` call sites stay unchanged. Rendered once for both
-        // the command log and the feedback strip.
         let e = e.to_string();
         self.push_cmd(cmd, false, &e);
         self.set_action(ActionState::Error(format!("{label}: {e}")));
     }
 
-    // ── Login form plumbing (settings-backed) ─────────────────────────────
-
-    /// Persists the e-mail when the "save e-mail" box is ticked — call
-    /// after editing the Email field so a typed address survives a
-    /// relaunch (the side effect the old `insert_char`/`delete_char_*`
-    /// carried inline).
     pub fn persist_email_if_saving(&mut self) {
         if self.login.active_field == LoginField::Email && self.login.save_email {
             let e = self.login.email_input.text().to_string();
@@ -751,10 +506,6 @@ impl App {
         }
     }
 
-    /// Flips `keep_session`, persists the new value, and immediately
-    /// clears any on-disk session file when turning the option off so
-    /// the user's choice takes effect right away (instead of waiting
-    /// for the parent shell to die).
     pub fn toggle_keep_session(&mut self) {
         self.login.keep_session = !self.login.keep_session;
         self.settings.write_keep_session(self.login.keep_session);
@@ -763,10 +514,6 @@ impl App {
         }
     }
 
-    /// Number of detail-screen rows for the currently selected item.
-    ///
-    /// Delegates to the shared [`crate::tui::detail_fields`] builder so
-    /// the count never diverges from what the renderer actually shows.
     pub fn detail_field_count(&self) -> usize {
         let Some(item) = self.vault.selected_item() else {
             return 0;
@@ -775,17 +522,6 @@ impl App {
     }
 }
 
-/// Pure helper extracted from [`crate::tui::vault::Vault::rebuild_filtered_cache`] so the
-/// filtering+ranking logic can be tested in isolation (without
-/// instantiating an `App` plus four trait-object adapters).
-///
-/// Returns the indices into `source` (and the parallel `lowered`) that
-/// match the active filter, folder filter and search query, sorted
-/// by fuzzy score descending when a query is active and in original
-/// order otherwise.
-///
-/// The trash bucket bypasses the folder filter — trashed items often
-/// lost their folder context, so we deliberately surface every one.
 pub fn compute_filtered_indices(
     source: &[Item],
     lowered: &[crate::domain::LoweredItem],
@@ -811,18 +547,11 @@ pub fn compute_filtered_indices(
 
     if !search_query.is_empty() {
         let query = search_query.to_lowercase();
-        // The `url:` prefix narrows the search to login URIs only —
-        // useful for "what credentials do I have for github.com?"
-        // queries, the same use case `bw list items --url <url>`
-        // covers from the CLI. The substring is matched
-        // case-insensitively against each lowered URI; matches keep
-        // the items in their pre-search order (no fuzzy ranking,
-        // because URLs aren't free-form names where ordering
-        // matters).
+
         if let Some(rest) = query.strip_prefix("url:") {
             let needle = rest.trim();
             if needle.is_empty() {
-                return indices; // bare "url:" matches everything.
+                return indices;
             }
             indices.retain(|&i| {
                 lowered
@@ -880,10 +609,6 @@ mod tests {
         }
     }
 
-    /// Builds an `App` wired to live-but-inert channels. Returns the
-    /// worker-request receiver (so a request `submit`s to a connected
-    /// channel) and the response sender (kept alive so `App::worker_rx`
-    /// stays connected) — hold both for the duration of the test.
     fn fresh_app() -> (App, Receiver<WorkerRequest>, Sender<WorkerResponse>) {
         let (worker_tx, req_rx) = channel::<WorkerRequest>();
         let (resp_tx, worker_rx) = channel::<WorkerResponse>();
@@ -902,8 +627,7 @@ mod tests {
         let (mut app, _req_rx, _resp_tx) = fresh_app();
         assert!(app.begin(InFlight::LoadItems));
         assert!(app.is_busy());
-        // A second claim is refused while one is in flight, and the
-        // original ticket survives (no silent clobber).
+
         assert!(!app.begin(InFlight::Sync));
         assert_eq!(app.in_flight, Some(InFlight::LoadItems));
     }
@@ -926,10 +650,10 @@ mod tests {
 
         let (mut app, _req_rx, _resp_tx) = fresh_app();
         app.screen = Screen::ConfirmLogout;
-        // Draw so the confirm popup registers its centered-modal rect.
+
         let mut term = Terminal::new(TestBackend::new(80, 24)).unwrap();
         term.draw(|f| crate::tui::view::draw(f, &mut app)).unwrap();
-        // Click the top-left corner — well outside the centered popup.
+
         crate::tui::input::mouse::handle(
             &mut app,
             MouseEvent {
@@ -957,7 +681,7 @@ mod tests {
         app.screen = Screen::Vault;
         let mut term = Terminal::new(TestBackend::new(90, 24)).unwrap();
         term.draw(|f| crate::tui::view::draw(f, &mut app)).unwrap();
-        // Locate the `F1 help · F10 settings` anchor in the buffer, click `F1`.
+
         let buf = term.backend().buffer();
         let mut text = String::new();
         for y in 0..buf.area().height {
@@ -972,8 +696,6 @@ mod tests {
             .lines()
             .enumerate()
             .find_map(|(y, line)| {
-                // `find` gives a byte index; the hint has multi-byte glyphs, so
-                // count chars up to the match for the real column.
                 line.find("F1 help")
                     .map(|b| (line[..b].chars().count() as u16, y as u16))
             })
@@ -1009,8 +731,7 @@ mod tests {
         app.detail_field = 0;
         let mut term = Terminal::new(TestBackend::new(90, 40)).unwrap();
         term.draw(|f| crate::tui::view::draw(f, &mut app)).unwrap();
-        // The "Username" card is not the first field (Name/Type precede it);
-        // clicking its label must focus that field, whatever its row.
+
         let buf = term.backend().buffer();
         let mut text = String::new();
         for y in 0..buf.area().height {
@@ -1056,8 +777,7 @@ mod tests {
         app.login.active_field = LoginField::Server;
         let mut term = Terminal::new(TestBackend::new(90, 30)).unwrap();
         term.draw(|f| crate::tui::view::draw(f, &mut app)).unwrap();
-        // Locate the "Master Password:" label and click it — the mouse should
-        // focus the password field regardless of the exact form geometry.
+
         let buf = term.backend().buffer();
         let mut text = String::new();
         for y in 0..buf.area().height {
@@ -1106,8 +826,7 @@ mod tests {
         );
         let mut term = Terminal::new(TestBackend::new(90, 24)).unwrap();
         term.draw(|f| crate::tui::view::draw(f, &mut app)).unwrap();
-        // Find the "Security" sidebar row (the panel title is "Theme" on section
-        // 0, so "Security" only appears as a sidebar entry).
+
         let buf = term.backend().buffer();
         let mut text = String::new();
         for y in 0..buf.area().height {
@@ -1148,14 +867,14 @@ mod tests {
         assert!(app.is_busy());
         assert!(matches!(app.action_state, ActionState::Running(_)));
         assert!(app.request_started.is_some());
-        // The request actually reached the worker channel.
+
         assert!(matches!(req_rx.try_recv(), Ok(WorkerRequest::Sync)));
     }
 
     #[test]
     fn submit_on_dead_channel_marks_worker_dead() {
         let (mut app, req_rx, _resp_tx) = fresh_app();
-        drop(req_rx); // the worker is gone — the send will fail
+        drop(req_rx);
         assert!(!app.submit(InFlight::Sync, "Syncing…", WorkerRequest::Sync));
         assert!(app.worker_dead);
         assert!(app.in_flight.is_none());
@@ -1165,7 +884,7 @@ mod tests {
     fn watchdog_leaves_a_fresh_request_alone() {
         let (mut app, _req_rx, _resp_tx) = fresh_app();
         app.submit(InFlight::Sync, "Syncing…", WorkerRequest::Sync);
-        // Just claimed — nowhere near the budget, so the slot stays.
+
         app.watchdog_release_stuck_request();
         assert!(app.is_busy());
     }
@@ -1176,24 +895,536 @@ mod tests {
         let (mut app, _req_rx, _resp_tx) = fresh_app();
         app.screen = Screen::Vault;
         palette::open(&mut app);
-        // Vault context with no selected item → the app-wide commands only.
+
         let total = app.palette.as_ref().unwrap().all.len();
         assert!(total >= 11, "expected the app-wide commands, got {total}");
         assert_eq!(app.screen, Screen::CommandPalette);
 
-        // Typing narrows the filtered set by label substring.
         app.palette.as_mut().unwrap().query.insert_str("sync");
         palette::rebuild_filter(&mut app);
         assert_eq!(app.palette.as_ref().unwrap().filtered.len(), 1);
 
-        // Selection clamps within the filtered list.
         palette::move_selection(&mut app, 10);
         assert_eq!(app.palette.as_ref().unwrap().selected, 0);
 
-        // Cancel restores the origin screen and drops the state.
         palette::cancel(&mut app);
         assert!(app.palette.is_none());
         assert_eq!(app.screen, Screen::Vault);
+    }
+
+    #[test]
+    fn the_settings_panel_describes_the_focused_row() {
+        use crate::tui::screens::Screen;
+        use crate::tui::settings_overlay::{SettingsFocus, SettingsSection};
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
+
+        let (mut app, _req_rx, _resp_tx) = fresh_app();
+        app.screen = Screen::Vault;
+        app.open_settings();
+        let mut term = Terminal::new(TestBackend::new(100, 30)).unwrap();
+        let render = |app: &mut App, term: &mut Terminal<TestBackend>| -> String {
+            term.draw(|f| crate::tui::view::draw(f, app)).unwrap();
+            let buf = term.backend().buffer();
+            let mut text = String::new();
+            for y in 0..buf.area().height {
+                for x in 0..buf.area().width {
+                    if let Some(c) = buf.cell((x, y)) {
+                        text.push_str(c.symbol());
+                    }
+                }
+                text.push('\n');
+            }
+            text
+        };
+
+        let security = SettingsSection::ALL
+            .iter()
+            .position(|s| *s == SettingsSection::Security)
+            .expect("a Security section");
+        app.settings_ui.section = security;
+        app.settings_ui.focus = SettingsFocus::Panel;
+        app.settings_ui.row = 0;
+        let rows = SettingsSection::Security.rows();
+        assert!(render(&mut app, &mut term).contains(rows[0].hint()));
+
+        app.settings_ui.row = 1;
+        let moved = render(&mut app, &mut term);
+        assert!(moved.contains(rows[1].hint()), "it tracks the selection");
+        assert!(
+            !moved.contains(rows[0].hint()),
+            "and drops the previous one"
+        );
+
+        app.settings_ui.section = SettingsSection::ALL
+            .iter()
+            .position(|s| *s == SettingsSection::Theme)
+            .expect("a Theme section");
+        let theme_panel = render(&mut app, &mut term);
+        for row in SettingsSection::Security.rows() {
+            assert!(!theme_panel.contains(row.hint()), "no stale description");
+        }
+        assert!(theme_panel.contains("apply+save"), "the legend survives");
+    }
+
+    #[test]
+    fn indicator_markers_keep_the_type_column_aligned() {
+        use crate::tui::screens::Screen;
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
+
+        let (mut app, _req_rx, _resp_tx) = fresh_app();
+
+        let mut guarded = login_item("a", "Guarded", "a@example.com");
+        guarded.reprompt = 1;
+        app.vault.items = vec![guarded, login_item("b", "Plain", "b@example.com")];
+        app.vault.rebuild_caches();
+        app.screen = Screen::Vault;
+
+        let mut term = Terminal::new(TestBackend::new(100, 30)).unwrap();
+        term.draw(|f| crate::tui::view::draw(f, &mut app)).unwrap();
+        let buf = term.backend().buffer();
+        let mut rows: Vec<String> = Vec::new();
+        for y in 0..buf.area().height {
+            let mut line = String::new();
+            for x in 0..buf.area().width {
+                if let Some(c) = buf.cell((x, y)) {
+                    line.push_str(c.symbol());
+                }
+            }
+            rows.push(line);
+        }
+
+        let col_of = |name: &str| -> usize {
+            let row = rows
+                .iter()
+                .find(|r| r.contains(name))
+                .unwrap_or_else(|| panic!("{name} is rendered"));
+            row.find("[Login]")
+                .map(|b| row[..b].chars().count())
+                .unwrap_or_else(|| panic!("{name} has a type tag"))
+        };
+        assert_eq!(
+            col_of("Guarded"),
+            col_of("Plain"),
+            "the type tag must start at the same column with and without an indicator"
+        );
+    }
+
+    #[test]
+    fn the_hint_bar_writes_shortcuts_in_the_host_convention() {
+        use crate::tui::keyboard::{self, Keyboard};
+        use crate::tui::screens::{Focus, Screen};
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
+
+        let (mut app, _req_rx, _resp_tx) = fresh_app();
+        app.screen = Screen::Vault;
+        app.focus = Focus::Search;
+        let mut term = Terminal::new(TestBackend::new(100, 30)).unwrap();
+        term.draw(|f| crate::tui::view::draw(f, &mut app)).unwrap();
+        let buf = term.backend().buffer();
+        let mut text = String::new();
+        for y in 0..buf.area().height {
+            for x in 0..buf.area().width {
+                if let Some(c) = buf.cell((x, y)) {
+                    text.push_str(c.symbol());
+                }
+            }
+            text.push('\n');
+        }
+
+        let expected = keyboard::label("Alt+N").into_owned();
+        assert!(
+            text.contains(&expected),
+            "the hint bar should print {expected:?}"
+        );
+        match keyboard::host() {
+            Keyboard::Mac => {
+                assert_eq!(expected, "⌥N");
+                assert!(!text.contains("Alt+N"), "the PC spelling must not leak");
+            }
+            Keyboard::Pc => assert_eq!(expected, "Alt+N"),
+        }
+    }
+
+    #[test]
+    fn the_palette_reaches_the_form_verbs_that_only_have_an_alt_chord() {
+        use crate::tui::flows::palette::palette_commands;
+        use crate::tui::screens::Screen;
+
+        let labels = |app: &App| -> Vec<&'static str> {
+            palette_commands(app).into_iter().map(|c| c.label).collect()
+        };
+
+        let (mut app, _req_rx, _resp_tx) = fresh_app();
+        app.vault.items = vec![login_item("a", "Acct", "user@example.com")];
+        app.vault.rebuild_caches();
+
+        app.screen = Screen::Detail;
+        crate::tui::flows::items::enter_edit_mode(&mut app);
+        assert!(app.edit.active);
+        let edit = labels(&app);
+        for expected in [
+            "Add custom field",
+            "Add URL row",
+            "Rename custom field",
+            "Cycle field type",
+            "Assign collections",
+            "Remove field / URL row",
+        ] {
+            assert!(edit.contains(&expected), "edit mode is missing {expected}");
+        }
+        assert!(!edit.contains(&"Lock vault"), "a form owns its screen");
+        assert!(!edit.contains(&"Sync vault"), "a form owns its screen");
+
+        let name_idx = app
+            .edit
+            .fields
+            .iter()
+            .position(|f| f.label == "Name")
+            .expect("every item has a Name row");
+        app.edit.field_idx = name_idx;
+        assert!(!labels(&app).contains(&"Generate into this field"));
+        let pw_idx = app
+            .edit
+            .fields
+            .iter()
+            .position(|f| f.hidden)
+            .expect("a login has a hidden row");
+        app.edit.field_idx = pw_idx;
+        assert!(labels(&app).contains(&"Generate into this field"));
+
+        app.edit.active = false;
+        app.screen = Screen::Generator;
+        app.generator = crate::tui::generator::GeneratorState::default();
+        let standalone = labels(&app);
+        assert!(standalone.contains(&"Copy result"));
+        assert!(!standalone.contains(&"Use result in form"));
+        app.generator.return_target = Some(crate::tui::generator::ReturnTarget::EditField(0));
+        assert!(labels(&app).contains(&"Use result in form"));
+    }
+
+    #[test]
+    fn a_click_while_busy_is_swallowed_like_a_key() {
+        use crate::tui::screens::Screen;
+        use crate::tui::worker::InFlight;
+        use crossterm::event::{Event, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
+
+        let (mut app, _req_rx, _resp_tx) = fresh_app();
+        app.vault.items = vec![
+            login_item("a", "Alpha", "a@example.com"),
+            login_item("b", "Bravo", "b@example.com"),
+        ];
+        app.vault.rebuild_caches();
+        app.screen = Screen::Vault;
+
+        let mut term = Terminal::new(TestBackend::new(90, 30)).unwrap();
+        term.draw(|f| crate::tui::view::draw(f, &mut app)).unwrap();
+
+        let buf = term.backend().buffer();
+        let mut text = String::new();
+        for y in 0..buf.area().height {
+            for x in 0..buf.area().width {
+                if let Some(c) = buf.cell((x, y)) {
+                    text.push_str(c.symbol());
+                }
+            }
+            text.push('\n');
+        }
+        let (col, row) = text
+            .lines()
+            .enumerate()
+            .find_map(|(y, line)| {
+                line.find("Bravo")
+                    .map(|b| (line[..b].chars().count() as u16, y as u16))
+            })
+            .expect("the second row is rendered");
+        let click = Event::Mouse(MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: col,
+            row,
+            modifiers: KeyModifiers::NONE,
+        });
+
+        assert!(app.begin(InFlight::Sync), "claim the in-flight slot");
+        crate::tui::input::handle_events(&mut app, click.clone());
+        assert_eq!(app.vault.selected_index, 0, "a click while busy is inert");
+
+        app.in_flight = None;
+        crate::tui::input::handle_events(&mut app, click);
+        assert_eq!(app.vault.selected_index, 1, "and lands once idle");
+    }
+
+    #[test]
+    fn settings_overlay_is_centered_and_bounded_at_both_extremes() {
+        use crate::tui::screens::Screen;
+        use crate::tui::view::widgets::active_modal_rect;
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
+
+        let rect_for = |w: u16, h: u16| {
+            let (mut app, _req_rx, _resp_tx) = fresh_app();
+            app.screen = Screen::Vault;
+            app.open_settings();
+            let mut term = Terminal::new(TestBackend::new(w, h)).unwrap();
+            term.draw(|f| crate::tui::view::draw(f, &mut app)).unwrap();
+            active_modal_rect().expect("settings registers its modal rect")
+        };
+
+        for (w, h) in [(80u16, 24u16), (200, 60), (62, 20)] {
+            let r = rect_for(w, h);
+            assert!(
+                r.width <= w && r.height <= h,
+                "{w}x{h}: overflows the frame"
+            );
+            assert!(
+                r.x + r.width <= w && r.y + r.height <= h,
+                "{w}x{h}: runs off the frame"
+            );
+
+            let (left, right) = (r.x, w - (r.x + r.width));
+            assert!(left.abs_diff(right) <= 1, "{w}x{h}: not centered");
+        }
+
+        assert_eq!(rect_for(200, 60).width, 72);
+
+        assert_eq!(rect_for(62, 20).width, 56);
+    }
+
+    #[test]
+    fn sidebar_lists_cue_their_overflow() {
+        use crate::domain::Folder;
+        use crate::tui::screens::Screen;
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
+
+        let render = |app: &mut App, w: u16, h: u16| -> String {
+            let mut term = Terminal::new(TestBackend::new(w, h)).unwrap();
+            term.draw(|f| crate::tui::view::draw(f, app)).unwrap();
+            let buf = term.backend().buffer();
+            let mut text = String::new();
+            for y in 0..buf.area().height {
+                for x in 0..buf.area().width {
+                    if let Some(c) = buf.cell((x, y)) {
+                        text.push_str(c.symbol());
+                    }
+                }
+                text.push('\n');
+            }
+            text
+        };
+
+        let (mut app, _req_rx, _resp_tx) = fresh_app();
+        app.screen = Screen::Vault;
+        app.folders = (0..3)
+            .map(|i| Folder {
+                id: format!("f{i}"),
+                name: format!("Folder-{i}"),
+            })
+            .collect();
+        assert!(!render(&mut app, 90, 40).contains('█'), "nothing overflows");
+
+        app.folders = (0..30)
+            .map(|i| Folder {
+                id: format!("f{i}"),
+                name: format!("Folder-{i:02}"),
+            })
+            .collect();
+        assert!(
+            render(&mut app, 90, 40).contains('█'),
+            "an overflowing Folders sidebar draws its scrollbar"
+        );
+    }
+
+    #[test]
+    fn command_log_teaches_when_empty_and_cues_its_overflow() {
+        use crate::tui::screens::Screen;
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
+
+        let (mut app, _req_rx, _resp_tx) = fresh_app();
+        app.screen = Screen::Vault;
+        let mut term = Terminal::new(TestBackend::new(90, 30)).unwrap();
+        let render = |app: &mut App, term: &mut Terminal<TestBackend>| -> String {
+            term.draw(|f| crate::tui::view::draw(f, app)).unwrap();
+            let buf = term.backend().buffer();
+            let mut text = String::new();
+            for y in 0..buf.area().height {
+                for x in 0..buf.area().width {
+                    if let Some(c) = buf.cell((x, y)) {
+                        text.push_str(c.symbol());
+                    }
+                }
+                text.push('\n');
+            }
+            text
+        };
+
+        let empty = render(&mut app, &mut term);
+        assert!(empty.contains("No commands yet"), "headline");
+
+        let sync_key = crate::tui::keyboard::label("Alt+S").into_owned();
+        assert!(
+            empty.contains(&sync_key),
+            "the empty state names a key ({sync_key})"
+        );
+        assert!(!empty.contains("no commands yet"), "the bare line is gone");
+
+        assert!(!empty.contains('█'), "nothing overflows yet");
+
+        for i in 0..40 {
+            app.push_cmd(&format!("bw cmd {i}"), true, "ok");
+        }
+        assert!(
+            render(&mut app, &mut term).contains('█'),
+            "an overflowing command log draws its scrollbar"
+        );
+    }
+
+    #[test]
+    fn command_log_reports_its_scrollback_in_the_shared_counter() {
+        use crate::tui::screens::Screen;
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
+
+        let (mut app, _req_rx, _resp_tx) = fresh_app();
+        app.screen = Screen::Vault;
+        for i in 0..12 {
+            app.push_cmd(&format!("bw cmd {i}"), true, "ok");
+        }
+        let mut term = Terminal::new(TestBackend::new(90, 30)).unwrap();
+        let render = |app: &mut App, term: &mut Terminal<TestBackend>| -> String {
+            term.draw(|f| crate::tui::view::draw(f, app)).unwrap();
+            let buf = term.backend().buffer();
+            let mut text = String::new();
+            for y in 0..buf.area().height {
+                for x in 0..buf.area().width {
+                    if let Some(c) = buf.cell((x, y)) {
+                        text.push_str(c.symbol());
+                    }
+                }
+                text.push('\n');
+            }
+            text
+        };
+
+        assert!(render(&mut app, &mut term).contains("12 of 12"));
+
+        app.cmd_log.scroll_up(3);
+        let scrolled = render(&mut app, &mut term);
+        assert!(
+            scrolled.contains("9 of 12"),
+            "counter tracks the scrollback"
+        );
+        assert!(!scrolled.contains("↑3"), "the faked in-title tag is gone");
+    }
+
+    #[test]
+    fn memberships_scrolls_instead_of_losing_rows_past_the_fold() {
+        use crate::domain::{Collection, Organization};
+        use crate::tui::flows::memberships::{MembershipState, move_cursor};
+        use crate::tui::screens::Screen;
+        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
+
+        const N: usize = 40;
+        let (mut app, _req_rx, _resp_tx) = fresh_app();
+        app.memberships = Some(MembershipState {
+            organizations: vec![Organization {
+                id: "o1".into(),
+                name: "Acme".into(),
+            }],
+            collections: (0..N)
+                .map(|i| Collection {
+                    id: format!("c{i}"),
+                    name: format!("Collection-{i:02}"),
+                    organization_id: Some("o1".into()),
+                })
+                .collect(),
+            cursor: 0,
+        });
+        app.screen = Screen::Memberships;
+
+        let mut term = Terminal::new(TestBackend::new(90, 30)).unwrap();
+        let render = |app: &mut App, term: &mut Terminal<TestBackend>| -> String {
+            term.draw(|f| crate::tui::view::draw(f, app)).unwrap();
+            let buf = term.backend().buffer();
+            let mut text = String::new();
+            for y in 0..buf.area().height {
+                for x in 0..buf.area().width {
+                    if let Some(c) = buf.cell((x, y)) {
+                        text.push_str(c.symbol());
+                    }
+                }
+                text.push('\n');
+            }
+            text
+        };
+
+        let last = format!("Collection-{:02}", N - 1);
+        let first = "Collection-00";
+        let top = render(&mut app, &mut term);
+        assert!(top.contains(first), "the list starts at the top");
+        assert!(
+            !top.contains(&last),
+            "the tail is past the fold before scrolling"
+        );
+
+        crate::tui::input::memberships::handle(
+            &mut app,
+            KeyEvent::new(KeyCode::End, KeyModifiers::NONE),
+        );
+        let bottom = render(&mut app, &mut term);
+        assert!(bottom.contains(&last), "the tail is reachable by scrolling");
+
+        assert_eq!(app.memberships.as_ref().unwrap().cursor, N - 1);
+        move_cursor(&mut app, 1);
+        assert_eq!(app.memberships.as_ref().unwrap().cursor, N - 1);
+        for _ in 0..N + 5 {
+            move_cursor(&mut app, -1);
+        }
+        assert_eq!(app.memberships.as_ref().unwrap().cursor, 0);
+    }
+
+    #[test]
+    fn palette_rows_mirror_their_keybinding_guards() {
+        use crate::tui::flows::palette::palette_commands;
+        let (mut app, _req_rx, _resp_tx) = fresh_app();
+        let labels = |app: &App| -> Vec<&'static str> {
+            palette_commands(app).into_iter().map(|c| c.label).collect()
+        };
+
+        app.vault.items = vec![item("a", "GitHub", 1, None)];
+        app.vault.rebuild_caches();
+        let vault = labels(&app);
+        for expected in ["New item", "Sync vault", "Copy password", "Delete item"] {
+            assert!(
+                vault.contains(&expected),
+                "vault view is missing {expected}"
+            );
+        }
+        assert!(!vault.contains(&"Restore item"), "restore is trash-only");
+
+        app.vault.active_filter = ItemFilter::Trash;
+        app.vault.trashed_items = vec![item("b", "Old", 1, None)];
+        app.vault.rebuild_caches();
+        let trash = labels(&app);
+        for refused in ["New item", "Sync vault", "Copy password", "Edit item"] {
+            assert!(!trash.contains(&refused), "{refused} is refused in trash");
+        }
+
+        assert!(trash.contains(&"Restore item"));
+        assert!(trash.contains(&"Delete item"));
+
+        app.vault.trashed_items.clear();
+        app.vault.rebuild_caches();
+        let empty = labels(&app);
+        assert!(!empty.contains(&"Restore item"));
+        assert!(!empty.contains(&"Delete item"));
     }
 
     #[test]
@@ -1205,9 +1436,9 @@ mod tests {
             item("c", "C", 1, None),
         ];
         app.vault.rebuild_caches();
-        app.vault.selected_index = 1; // "b"
+        app.vault.selected_index = 1;
         assert_eq!(app.vault.selected_item_id().as_deref(), Some("b"));
-        // The list comes back reordered — the cursor must follow "b".
+
         app.vault.items = vec![
             item("c", "C", 1, None),
             item("b", "B", 1, None),
@@ -1226,8 +1457,8 @@ mod tests {
         let (mut app, _req_rx, _resp_tx) = fresh_app();
         app.vault.items = vec![item("a", "A", 1, None), item("b", "B", 1, None)];
         app.vault.rebuild_caches();
-        app.vault.selected_index = 1; // "b"
-        // "b" deleted elsewhere — the list is now shorter.
+        app.vault.selected_index = 1;
+
         app.vault.items = vec![item("a", "A", 1, None)];
         app.vault.rebuild_caches();
         app.vault.reanchor_selection(Some("b"));
@@ -1250,16 +1481,12 @@ mod tests {
         app.vault.search_query.set("alpha");
         app.vault.rebuild_caches();
 
-        // The filtered list is much shorter than `items` — that gap is
-        // exactly what a raw `items.len()` clamp used to miss.
         assert_eq!(app.vault.filtered_items().len(), 2);
-        app.vault.selected_index = 1; // "alpha two", the last visible row
+        app.vault.selected_index = 1;
         assert_eq!(app.vault.selected_item_id().as_deref(), Some("a2"));
 
         items::handle_delete(&mut app, false, "a2".into(), "alpha two".into(), Ok(()));
 
-        // One match left, so the cursor must come back to it instead of
-        // dangling one past the end of the filtered list.
         assert_eq!(app.vault.filtered_items().len(), 1);
         assert_eq!(app.vault.selected_index, 0);
         assert_eq!(app.vault.selected_item_id().as_deref(), Some("a1"));
@@ -1281,12 +1508,10 @@ mod tests {
 
         items::handle_delete(&mut app, true, "a1".into(), "alpha one".into(), Ok(()));
 
-        // Empty filtered view: the cursor parks at 0 and resolves to
-        // nothing, rather than pointing at a row the user can't see.
         assert!(app.vault.filtered_items().is_empty());
         assert_eq!(app.vault.selected_index, 0);
         assert!(app.vault.selected_item().is_none());
-        // The other items are untouched — only the filter hides them.
+
         assert_eq!(app.vault.items.len(), 2);
     }
 
@@ -1329,7 +1554,6 @@ mod tests {
     fn item_actions_reflect_the_item_and_view() {
         use crate::tui::item_actions::{ItemAction, actions_for};
 
-        // A login with username, password and TOTP offers all three copies.
         let mut full = login_item("a", "Acct", "user@example.com");
         {
             let l = full.login.as_mut().unwrap();
@@ -1343,24 +1567,21 @@ mod tests {
         assert!(acts.contains(&ItemAction::Edit));
         assert!(acts.contains(&ItemAction::ToggleFavorite));
         assert!(acts.contains(&ItemAction::Delete));
-        // Move is hidden unless the caller says the item can move.
+
         assert!(!acts.contains(&ItemAction::Move));
         assert!(actions_for(&full, false, true).contains(&ItemAction::Move));
 
-        // A note (no login) offers no copy actions.
         let note = item("n", "Note", 2, None);
         let note_acts = actions_for(&note, false, false);
         assert!(!note_acts.contains(&ItemAction::CopyUsername));
         assert!(!note_acts.contains(&ItemAction::CopyPassword));
         assert!(!note_acts.contains(&ItemAction::CopyTotp));
 
-        // A login without a password or TOTP hides those copies.
         let user_only = login_item("u", "UserOnly", "u@x");
         let uo = actions_for(&user_only, false, false);
         assert!(!uo.contains(&ItemAction::CopyPassword));
         assert!(!uo.contains(&ItemAction::CopyTotp));
 
-        // The trash view is restore-or-purge only.
         assert_eq!(
             actions_for(&full, true, true),
             vec![ItemAction::Open, ItemAction::Restore, ItemAction::Delete]
@@ -1381,7 +1602,7 @@ mod tests {
         app.screen = Screen::Vault;
         let mut term = Terminal::new(TestBackend::new(90, 30)).unwrap();
         term.draw(|f| crate::tui::view::draw(f, &mut app)).unwrap();
-        // Right-click the item's row in the list panel (its name is unique).
+
         let buf = term.backend().buffer();
         let mut text = String::new();
         for y in 0..buf.area().height {
@@ -1418,6 +1639,70 @@ mod tests {
     }
 
     #[test]
+    fn action_menu_stays_compact_and_its_rows_stay_clickable() {
+        use crate::tui::screens::Screen;
+        use crate::tui::view::widgets::{MODAL_WIDTH_PCT, active_modal_rect};
+        use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
+
+        const W: u16 = 90;
+        let (mut app, _req_rx, _resp_tx) = fresh_app();
+        app.vault.items = vec![login_item("a", "Acct", "user@example.com")];
+        app.vault.rebuild_caches();
+        app.vault.selected_index = 0;
+        app.screen = Screen::Vault;
+        crate::tui::flows::item_actions::open(&mut app);
+        assert_eq!(app.screen, Screen::ItemActions);
+        let action_rows = app.item_actions.as_ref().unwrap().actions.len() as u16;
+
+        let mut term = Terminal::new(TestBackend::new(W, 30)).unwrap();
+        term.draw(|f| crate::tui::view::draw(f, &mut app)).unwrap();
+
+        let rect = active_modal_rect().expect("the menu registers its modal rect");
+        assert!(
+            rect.width < W * MODAL_WIDTH_PCT / 100,
+            "a context menu must not inherit the picker band ({} cols)",
+            rect.width
+        );
+        assert!(
+            rect.height <= action_rows + 3,
+            "height is the rows plus borders + legend, got {}",
+            rect.height
+        );
+
+        let buf = term.backend().buffer();
+        let mut text = String::new();
+        for y in 0..buf.area().height {
+            for x in 0..buf.area().width {
+                if let Some(c) = buf.cell((x, y)) {
+                    text.push_str(c.symbol());
+                }
+            }
+            text.push('\n');
+        }
+        let (col, row) = text
+            .lines()
+            .enumerate()
+            .find_map(|(y, line)| {
+                line.find("Open")
+                    .map(|b| (line[..b].chars().count() as u16, y as u16))
+            })
+            .expect("the Open row is rendered");
+        crate::tui::input::mouse::handle(
+            &mut app,
+            MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Left),
+                column: col,
+                row,
+                modifiers: KeyModifiers::NONE,
+            },
+        );
+        assert_eq!(app.screen, Screen::Detail, "the clicked row ran its action");
+        assert!(app.item_actions.is_none(), "the menu closed behind it");
+    }
+
+    #[test]
     fn running_open_from_the_action_menu_goes_to_detail() {
         use crate::tui::flows::item_actions;
         use crate::tui::screens::Screen;
@@ -1429,8 +1714,7 @@ mod tests {
         app.screen = Screen::Vault;
         item_actions::open(&mut app);
         assert_eq!(app.screen, Screen::ItemActions);
-        // Cursor starts on "Open" (index 0); running it closes the menu and
-        // navigates to the detail view.
+
         item_actions::run_selected(&mut app);
         assert_eq!(app.screen, Screen::Detail, "Open navigated to detail");
         assert!(app.item_actions.is_none(), "menu state was cleared");
@@ -1508,7 +1792,7 @@ mod tests {
     #[test]
     fn redact_cmd_is_noop_without_a_marker() {
         assert_eq!(redact_cmd("bw status", None), "bw status");
-        // An empty marker must not turn every gap into `***`.
+
         assert_eq!(redact_cmd("bw status", Some("")), "bw status");
     }
 
@@ -1552,7 +1836,7 @@ mod tests {
             "",
         );
         assert_eq!(idx, vec![0]);
-        // No-folder filter keeps only the items with no folder_id.
+
         let idx_none =
             compute_filtered_indices(&items, &l, &ItemFilter::All, &FolderFilter::NoFolder, "");
         assert_eq!(idx_none, vec![2]);
@@ -1568,9 +1852,7 @@ mod tests {
         let l = lowered(&items);
         let idx =
             compute_filtered_indices(&items, &l, &ItemFilter::All, &FolderFilter::All, "github");
-        // "GitHub Personal" — name prefix substring → 100 + 20 = 120.
-        // "Old GitHub" — name substring (no prefix) → 100.
-        // "Unrelated" — no match → dropped.
+
         assert_eq!(idx, vec![0, 1]);
     }
 
@@ -1590,16 +1872,12 @@ mod tests {
 
     #[test]
     fn trash_filter_includes_every_source_item_regardless_of_folder() {
-        // The trash bucket should bypass the folder filter — we want
-        // to surface every trashed item even if its folder context is
-        // gone or pointing at a folder the user has since deleted.
         let trashed = vec![item("a", "x", 1, Some("F1")), item("b", "y", 1, None)];
         let l = lowered(&trashed);
         let idx = compute_filtered_indices(
             &trashed,
             &l,
             &ItemFilter::Trash,
-            // Even with a strict folder filter that wouldn't match…
             &FolderFilter::Folder("F-NOPE".into()),
             "",
         );
@@ -1627,8 +1905,6 @@ mod tests {
             login_item_with_uri("a", "GitHub Personal", "https://github.com"),
             login_item_with_uri("b", "GitHub Sandbox", "https://github.io/sandbox"),
             login_item_with_uri("c", "Gmail", "https://mail.google.com"),
-            // Item whose name contains "github" but URI doesn't —
-            // must be excluded under url: search.
             item("d", "github typo", 1, None),
         ];
         let l = lowered(&items);
@@ -1648,14 +1924,12 @@ mod tests {
         let l = lowered(&items);
         let idx =
             compute_filtered_indices(&items, &l, &ItemFilter::All, &FolderFilter::All, "url:");
-        // Bare prefix → all items (no narrowing).
+
         assert_eq!(idx, vec![0, 1]);
     }
 
     #[test]
     fn url_prefix_skips_fuzzy_ranking() {
-        // Two items with URIs containing the needle; preserve the
-        // input order (don't ranknames or anything).
         let items = vec![
             login_item_with_uri("a", "Z Site", "https://example.com/a"),
             login_item_with_uri("b", "A Site", "https://example.com/b"),
@@ -1668,7 +1942,7 @@ mod tests {
             &FolderFilter::All,
             "url:example.com",
         );
-        // Both match — order preserved (a then b).
+
         assert_eq!(idx, vec![0, 1]);
     }
 
@@ -1683,7 +1957,7 @@ mod tests {
         items[1].collection_ids = vec!["c1".into(), "c2".into()];
         items[2].collection_ids = vec!["c2".into()];
         let l = lowered(&items);
-        // Filter to collection c1 — items 0 and 1 match.
+
         let idx = compute_filtered_indices(
             &items,
             &l,
@@ -1692,7 +1966,7 @@ mod tests {
             "",
         );
         assert_eq!(idx, vec![0, 1]);
-        // c2 — items 1 and 2 match.
+
         let idx = compute_filtered_indices(
             &items,
             &l,
@@ -1722,7 +1996,6 @@ mod tests {
         use crate::tui::settings_overlay::SettingRow;
         let (mut app, _rx, _tx) = fresh_app();
 
-        // Bool: either direction toggles; value string tracks it.
         let before = app.auto_lock.enabled;
         app.settings_adjust(SettingRow::AutoLock, true);
         assert_eq!(app.auto_lock.enabled, !before);
@@ -1731,16 +2004,14 @@ mod tests {
             if !before { "On" } else { "Off" }
         );
 
-        // Number: steps by the row's increment and clamps at the floor.
         app.auto_lock.after_secs = 5 * 60;
         app.settings_adjust(SettingRow::LockAfter, true);
         assert_eq!(app.auto_lock.after_secs, 6 * 60);
         assert_eq!(app.settings_row_value(SettingRow::LockAfter), "6 min");
-        app.auto_lock.after_secs = 60; // 1 min, the floor
+        app.auto_lock.after_secs = 60;
         app.settings_adjust(SettingRow::LockAfter, false);
         assert_eq!(app.auto_lock.after_secs, 60);
 
-        // Clipboard clear steps by 5 and reads "Off" at zero.
         app.clipboard_clear_secs = 5;
         app.settings_adjust(SettingRow::ClipboardClear, false);
         assert_eq!(app.clipboard_clear_secs, 0);
