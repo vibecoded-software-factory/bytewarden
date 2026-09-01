@@ -1,6 +1,3 @@
-//! Mouse event handler — translates clicks/scrolls into focus changes
-//! and selection moves.
-
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 
 use crate::domain::filter::{ITEM_FILTERS, ItemFilter};
@@ -8,16 +5,21 @@ use crate::tui::app::App;
 use crate::tui::screens::{Focus, LoginField, Screen};
 use crate::tui::view::widgets::{ClickAction, ScrollTarget};
 
-/// Dispatches a mouse event.
+pub fn is_escape_click(ev: &MouseEvent) -> bool {
+    if !matches!(ev.kind, MouseEventKind::Down(MouseButton::Left)) {
+        return false;
+    }
+    crate::tui::view::widgets::active_modal_rect()
+        .is_some_and(|r| !crate::tui::mouse_areas::rect_contains(r, ev.column, ev.row))
+}
+
 pub fn handle(app: &mut App, mouse: MouseEvent) {
     let (col, row) = (mouse.column, mouse.row);
 
     match mouse.kind {
         MouseEventKind::Down(MouseButton::Left) => {
             app.last_click = Some((col, row));
-            // A click outside any centered overlay dismisses it — the mouse twin
-            // of Esc, routed through the active screen's own Esc handler (which
-            // knows how to cancel it). A click inside falls through below.
+
             if let Some(rect) = crate::tui::view::widgets::active_modal_rect()
                 && !crate::tui::mouse_areas::rect_contains(rect, col, row)
             {
@@ -27,8 +29,7 @@ pub fn handle(app: &mut App, mouse: MouseEvent) {
                 );
                 return;
             }
-            // Clickable command-bar chrome (the F1/F10 anchor) — the mouse twin
-            // of the function keys.
+
             if let Some(action) = crate::tui::view::widgets::button_at(col, row) {
                 apply_click_action(app, action);
                 return;
@@ -48,15 +49,13 @@ pub fn handle(app: &mut App, mouse: MouseEvent) {
                 Screen::Export => crate::tui::input::export::mouse(app, col, row),
                 Screen::Import => crate::tui::input::import::mouse(app, col, row),
                 Screen::SendCreate => crate::tui::input::send_create::mouse(app, col, row),
-                // Read-only overlays: a click anywhere closes them (the
-                // mouse twin of "any key dismisses").
+
                 Screen::Help => app.go_back(),
                 Screen::Memberships => crate::tui::flows::memberships::close(app),
                 _ => {}
             }
         }
-        // Right-click a vault row opens its secondary-action menu — the mouse
-        // twin of the per-item shortcuts (copy / edit / favorite / delete).
+
         MouseEventKind::Down(MouseButton::Right) if app.screen == Screen::Vault => {
             mouse_vault_right(app, col, row)
         }
@@ -78,8 +77,6 @@ pub fn handle(app: &mut App, mouse: MouseEvent) {
     }
 }
 
-/// Dispatches a click on a registered chrome button — the mouse twin of its
-/// key (mirrors the global `F1` / `F10` handling in the key router).
 fn apply_click_action(app: &mut App, action: ClickAction) {
     match action {
         ClickAction::OpenHelp => {
@@ -88,16 +85,12 @@ fn apply_click_action(app: &mut App, action: ClickAction) {
             app.screen = Screen::Help;
         }
         ClickAction::OpenSettings => app.open_settings(),
-        // The mouse twin of the advertised key — route it through the
-        // active screen's handler so the click reuses the exact key logic.
+
         ClickAction::Key(k) => crate::tui::input::dispatch_screen_key(app, k),
     }
 }
 
 fn mouse_login(app: &mut App, col: u16, row: u16) {
-    // The renderer records each field's exact rect as it draws; focus (and,
-    // for the checkboxes, toggle) whatever the pointer is over. No row math
-    // that can drift from the layout.
     let Some(field) = crate::tui::view::login::login_field_at(col, row) else {
         return;
     };
@@ -135,13 +128,11 @@ fn mouse_vault(app: &mut App, col: u16, row: u16) {
     if focus == Focus::Folders
         && let Some(vrow) = app.mouse_areas.folders_row(row)
     {
-        // Map the visible row back to a logical folder index, skipping the
-        // separator that sits at visible row 2 (before the named rows).
         let total = crate::tui::folders::row_count(&app.folders, &app.collections);
         let logical = if vrow >= 3 {
             vrow - 1
         } else if vrow == 2 {
-            usize::MAX // the separator (or empty space) — nothing to apply
+            usize::MAX
         } else {
             vrow
         };
@@ -158,13 +149,11 @@ fn mouse_vault(app: &mut App, col: u16, row: u16) {
     if focus == Focus::Items
         && let Some(row_idx) = app.mouse_areas.items_row(row)
     {
-        // A separator is injected before Trash (last filter), so any
-        // row past the SSH-key entry is offset by +1.
         let trash_display_row = ITEM_FILTERS.len();
         let filter_idx = if row_idx >= trash_display_row {
             ITEM_FILTERS.len() - 1
         } else if row_idx == ITEM_FILTERS.len() - 1 {
-            return; // The separator row itself — ignore.
+            return;
         } else {
             row_idx
         };
@@ -181,9 +170,6 @@ fn mouse_vault(app: &mut App, col: u16, row: u16) {
     }
 }
 
-/// Right-click on a vault list row: seat the selection on that row and open
-/// its per-item action menu, so every action targets the clicked item through
-/// the ordinary `selected_item` path.
 fn mouse_vault_right(app: &mut App, col: u16, row: u16) {
     if app.mouse_areas.focus_for(col, row) != Some(Focus::List) {
         return;
@@ -206,21 +192,15 @@ fn mouse_detail(app: &mut App, col: u16, row: u16) {
         app.go_back();
         return;
     }
-    // The renderer records each visible field card's exact rect; focus the
-    // card the pointer is over.
+
     let Some(field_idx) = crate::tui::view::detail::detail_field_at(col, row) else {
         return;
     };
     if app.edit.active {
-        // Edit mode: click focuses the field. Revealing a hidden field stays
-        // on F2 so it goes through the reprompt gate.
         app.edit.field_idx = field_idx;
         return;
     }
     if field_idx == app.detail_field {
-        // A repeat click on the focused card reveals/hides it — the mouse twin
-        // of F2, and it honours the same reprompt gate on the exposing edge so
-        // the mouse can't bypass the master-password re-check.
         if !app.show_password
             && app
                 .vault
@@ -240,18 +220,12 @@ fn mouse_detail(app: &mut App, col: u16, row: u16) {
     }
 }
 
-/// One generic wheel path: scroll whatever registered region sits under the
-/// pointer. The view layer records those regions each frame, so there is no
-/// per-screen `match` here — a new scrollable list is one `register_scroll`
-/// call at its draw site.
 fn mouse_scroll(app: &mut App, col: u16, row: u16, dir: i8, shift: bool) {
     if let Some(target) = crate::tui::view::widgets::scroll_target_at(col, row) {
         apply_scroll(app, target, dir, shift);
     }
 }
 
-/// The single table mapping a [`ScrollTarget`] to the state its wheel moves —
-/// the only place that knows how each surface scrolls.
 fn apply_scroll(app: &mut App, target: ScrollTarget, dir: i8, shift: bool) {
     match target {
         ScrollTarget::Vault => {
@@ -259,6 +233,13 @@ fn apply_scroll(app: &mut App, target: ScrollTarget, dir: i8, shift: bool) {
                 app.vault.move_down()
             } else {
                 app.vault.move_up()
+            }
+        }
+        ScrollTarget::Folders => {
+            if dir > 0 {
+                crate::tui::flows::folders::move_down(app)
+            } else {
+                crate::tui::flows::folders::move_up(app)
             }
         }
         ScrollTarget::Filters => {
@@ -277,14 +258,11 @@ fn apply_scroll(app: &mut App, target: ScrollTarget, dir: i8, shift: bool) {
         }
         ScrollTarget::Detail => {
             let total = app.detail_field_count();
-            if dir > 0 {
-                if app.detail_field + 1 < total {
-                    app.show_password = false;
-                    app.detail_field += 1;
-                }
-            } else if app.detail_field > 0 {
+            let before = app.detail_field;
+            crate::tui::input::nav::nav_clamp(&mut app.detail_field, total, dir);
+
+            if app.detail_field != before {
                 app.show_password = false;
-                app.detail_field -= 1;
             }
         }
         ScrollTarget::Palette => {
@@ -294,19 +272,11 @@ fn apply_scroll(app: &mut App, target: ScrollTarget, dir: i8, shift: bool) {
                 crate::tui::flows::palette::move_selection(app, -1)
             }
         }
-        ScrollTarget::SettingsTheme => {
-            let n = crate::tui::theme::Preset::ALL.len();
-            if dir > 0 && app.settings_ui.theme_idx + 1 < n {
-                app.settings_ui.theme_idx += 1;
-                app.settings_preview_theme();
-            } else if dir < 0 && app.settings_ui.theme_idx > 0 {
-                app.settings_ui.theme_idx -= 1;
-                app.settings_preview_theme();
-            }
+        ScrollTarget::Memberships => {
+            crate::tui::flows::memberships::move_cursor(app, if dir > 0 { 1 } else { -1 })
         }
+        ScrollTarget::SettingsTheme => crate::tui::input::settings::nav_preset(app, dir),
         ScrollTarget::Help => {
-            // Wheel scrolls vertically; Shift+Wheel pans horizontally. The
-            // renderer clamps both axes once it knows the viewport size.
             if shift {
                 if dir > 0 {
                     app.help_scroll.1 = app.help_scroll.1.saturating_add(2);
