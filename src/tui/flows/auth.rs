@@ -509,7 +509,7 @@ pub fn handle_fingerprint(app: &mut App, r: Result<String, BwError>) {
     match r {
         Ok(phrase) => {
             app.push_cmd("bw get fingerprint me", true, &phrase);
-            app.set_action(ActionState::Done(format!("🔑 {phrase}")));
+            app.set_action(ActionState::Done(format!("Fingerprint: {phrase}")));
         }
         Err(e) => app.cmd_err("bw get fingerprint me", &e, "Fingerprint failed"),
     }
