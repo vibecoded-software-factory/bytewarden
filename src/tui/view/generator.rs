@@ -1,5 +1,3 @@
-//! Renderer for [`crate::tui::screens::Screen::Generator`].
-
 use ratatui::{
     Frame,
     layout::{Constraint, Layout, Rect},
@@ -15,8 +13,7 @@ use crate::tui::view::action::action_line;
 use crate::tui::view::widgets::{focus_color, render_cmd_bar, rounded_block};
 
 thread_local! {
-    /// Frame-local hit map — one `(rect, control)` per generator control
-    /// row (and the Result box), recorded from the exact layout rects.
+
     static GEN_HITS: std::cell::RefCell<Vec<(Rect, GeneratorFocus)>> =
         const { std::cell::RefCell::new(Vec::new()) };
 }
@@ -27,7 +24,6 @@ fn register_hit(rect: Rect, f: GeneratorFocus) {
     }
 }
 
-/// The generator control under `(column, row)`, if any.
 pub fn gen_hit_at(column: u16, row: u16) -> Option<GeneratorFocus> {
     GEN_HITS.with(|h| {
         h.borrow()
@@ -40,7 +36,6 @@ pub fn gen_hit_at(column: u16, row: u16) -> Option<GeneratorFocus> {
     })
 }
 
-/// Renders the generator screen.
 pub fn draw(frame: &mut Frame, app: &mut App) {
     GEN_HITS.with(|h| h.borrow_mut().clear());
     let t = &app.theme;
@@ -53,7 +48,6 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     ])
     .split(area);
 
-    // ── Header ────────────────────────────────────────────────────────────
     let title = match app.generator.options.mode {
         GeneratorMode::Password => " Generate password",
         GeneratorMode::Passphrase => " Generate passphrase",
@@ -71,10 +65,8 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         chunks[0],
     );
 
-    // ── Body ──────────────────────────────────────────────────────────────
     render_body(frame, app, chunks[1]);
 
-    // ── Footer hints ──────────────────────────────────────────────────────
     let has_target = app.generator.return_target.is_some();
     render_cmd_bar(frame, chunks[2], footer_hints(has_target), t);
 }
@@ -102,8 +94,7 @@ fn footer_hints(has_target: bool) -> &'static [(&'static str, &'static str)] {
 
 fn render_body(frame: &mut Frame, app: &App, area: Rect) {
     let t = &app.theme;
-    // Center a fixed-width column so the form looks tidy on wide
-    // terminals.
+
     let body_w = area.width.saturating_sub(8).clamp(48, 78);
     let body = Layout::horizontal([
         Constraint::Fill(1),
@@ -115,24 +106,22 @@ fn render_body(frame: &mut Frame, app: &App, area: Rect) {
     let g = &app.generator;
     let focusables = focusable_for(g.options.mode);
 
-    // Per-row layout: 2 padding + N rows of 1 + 1 spacer + 3 result + 2 spinner.
     let mut constraints: Vec<Constraint> = Vec::new();
-    constraints.push(Constraint::Length(1)); // top padding
+    constraints.push(Constraint::Length(1));
     for _ in 0..focusables.len() - 1 {
-        // all controls except Result are 1 row tall
         constraints.push(Constraint::Length(1));
     }
-    constraints.push(Constraint::Length(1)); // spacer above result
-    constraints.push(Constraint::Length(3)); // result box
-    constraints.push(Constraint::Length(1)); // status line
+    constraints.push(Constraint::Length(1));
+    constraints.push(Constraint::Length(3));
+    constraints.push(Constraint::Length(1));
     constraints.push(Constraint::Min(0));
 
     let rows = Layout::vertical(constraints).split(body);
-    let mut row_idx = 1usize; // skip the top padding row
+    let mut row_idx = 1usize;
 
     for f in focusables.iter() {
         if matches!(f, GeneratorFocus::Result) {
-            continue; // result is rendered separately below
+            continue;
         }
         if row_idx >= rows.len() {
             break;
@@ -143,10 +132,9 @@ fn render_body(frame: &mut Frame, app: &App, area: Rect) {
         register_hit(area, *f);
         render_control(frame, area, g, *f, focused, t);
     }
-    // The "spacer above result" sits at row_idx; advance past it.
+
     row_idx += 1;
 
-    // Result box
     if row_idx < rows.len() {
         register_hit(rows[row_idx], GeneratorFocus::Result);
         let focused = g.focus == GeneratorFocus::Result;
@@ -175,8 +163,6 @@ fn render_body(frame: &mut Frame, app: &App, area: Rect) {
         row_idx += 1;
     }
 
-    // Status line — surface action_line so success / error flashes are
-    // visible without leaving the screen.
     if row_idx < rows.len()
         && let Some(line) = action_line(app)
     {

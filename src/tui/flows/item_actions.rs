@@ -1,19 +1,8 @@
-//! Dispatch for the per-item action menu (`Screen::ItemActions`).
-//!
-//! The menu is opened by right-clicking a vault row (the mouse layer
-//! seats the list cursor there first, so every action operates on the
-//! right item through the ordinary `vault.selected_item()` path). Each
-//! arm delegates to the existing per-action flow, so the secret-exposing
-//! actions (copy password) keep the reprompt gate they already carry —
-//! the mouse can't bypass the master-password re-check.
-
 use crate::tui::app::App;
 use crate::tui::flows::{assign_collections, copy, items};
 use crate::tui::item_actions::{ItemAction, ItemActionsState, actions_for};
 use crate::tui::screens::Screen;
 
-/// Opens the action menu for the currently-selected vault item. No-op
-/// when the list is empty (nothing to act on).
 pub fn open(app: &mut App) {
     let Some(item) = app.vault.selected_item() else {
         return;
@@ -33,27 +22,18 @@ pub fn open(app: &mut App) {
     app.screen = Screen::ItemActions;
 }
 
-/// Closes the menu back to the vault, discarding its state.
 pub fn close(app: &mut App) {
     app.item_actions = None;
     app.screen = Screen::Vault;
 }
 
-/// Moves the menu cursor by `delta`, clamped to the action list.
-pub fn move_cursor(app: &mut App, delta: isize) {
+pub fn move_cursor(app: &mut App, delta: i8) {
     if let Some(state) = app.item_actions.as_mut() {
         let n = state.actions.len();
-        if n == 0 {
-            return;
-        }
-        let cur = state.cursor as isize + delta;
-        state.cursor = cur.clamp(0, n as isize - 1) as usize;
+        crate::tui::input::nav::nav_clamp(&mut state.cursor, n, delta);
     }
 }
 
-/// Runs the highlighted action. Closes the menu first so any screen the
-/// action opens (detail, the confirm popup) — and any reprompt popup it
-/// triggers — is anchored on the vault, not on the transient menu.
 pub fn run_selected(app: &mut App) {
     let Some(state) = app.item_actions.as_ref() else {
         return;
@@ -64,8 +44,6 @@ pub fn run_selected(app: &mut App) {
     run(app, action);
 }
 
-/// Runs a specific action (the click path selects by index, then calls
-/// here). Closes the menu first, then delegates to the owning flow.
 pub fn run(app: &mut App, action: ItemAction) {
     close(app);
     match action {

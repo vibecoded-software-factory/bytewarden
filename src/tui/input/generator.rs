@@ -1,9 +1,3 @@
-//! Key handler for the generator screen.
-//!
-//! Generation is fully manual: changing any option only updates the
-//! configuration. The actual `bw generate` call is fired *only* when
-//! the user explicitly presses Enter.
-
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use crate::ports::GeneratorMode;
@@ -15,12 +9,9 @@ use crate::tui::generator::{
     GeneratorFocus, PASSPHRASE_WORDS_MAX, PASSPHRASE_WORDS_MIN, PASSWORD_LENGTH_MAX,
     PASSWORD_LENGTH_MIN,
 };
+use crate::tui::input::common;
 use crate::tui::input::is_alt;
 
-/// Click: focus the control under the pointer. The boolean toggles and
-/// the Mode switch also flip on click (dispatching `Space`, which their
-/// key handler already treats as a toggle); the steppers (Length /
-/// Words / Separator) and the Result box just take focus.
 pub fn mouse(app: &mut App, col: u16, row: u16) {
     let Some(f) = crate::tui::view::generator::gen_hit_at(col, row) else {
         return;
@@ -42,10 +33,7 @@ pub fn mouse(app: &mut App, col: u16, row: u16) {
     }
 }
 
-/// Dispatches a single key event on the generator screen.
 pub fn handle(app: &mut App, key: KeyEvent) {
-    // Modifier-driven shortcuts first — Alt+C and Alt+U work regardless
-    // of the focused control.
     if is_alt(&key) {
         match key.code {
             KeyCode::Char('c') => return copy_result(app),
@@ -62,13 +50,11 @@ pub fn handle(app: &mut App, key: KeyEvent) {
         KeyCode::BackTab | KeyCode::Up | KeyCode::Char('k') => {
             return focus_step(app, -1);
         }
-        // The single, explicit "generate now" trigger.
+
         KeyCode::Enter => return request_generate(app),
         _ => {}
     }
 
-    // Per-control behaviour for arrows / space / typing — these only
-    // mutate the configuration; no implicit `queue_regenerate`.
     match app.generator.focus {
         GeneratorFocus::Mode => match key.code {
             KeyCode::Left | KeyCode::Right | KeyCode::Char(' ') => toggle_mode(app),
@@ -112,8 +98,9 @@ pub fn handle(app: &mut App, key: KeyEvent) {
             }
             _ => {}
         },
+
         GeneratorFocus::Separator => match key.code {
-            KeyCode::Char(c) if !is_alt(&key) => {
+            KeyCode::Char(c) if common::types_a_char(&key) => {
                 app.generator.options.separator = c.to_string();
             }
             KeyCode::Backspace => app.generator.options.separator.clear(),
@@ -127,16 +114,11 @@ pub fn handle(app: &mut App, key: KeyEvent) {
         GeneratorFocus::Capitalize => toggle_if(app, key, |o| &mut o.capitalize),
         GeneratorFocus::IncludeNumber => toggle_if(app, key, |o| &mut o.include_number),
         GeneratorFocus::Result => {
-            // Result row is read-only — Enter (handled above) is the
-            // only meaningful action. Suppress an `unused_imports`
-            // warning when the enum gains future variants.
             let _ = GeneratorMode::Password;
         }
     }
 }
 
-/// Toggles a `bool` field of the generator options on Space / arrows.
-/// Pure config mutation — does not trigger a regenerate.
 fn toggle_if(
     app: &mut App,
     key: KeyEvent,

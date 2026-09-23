@@ -1,12 +1,9 @@
-//! Key handler for the vault-export popup.
-
 use crossterm::event::{KeyCode, KeyEvent};
 
 use crate::tui::app::App;
 use crate::tui::export::ExportFocus;
 use crate::tui::flows::export::{cancel, commit, cycle_format, focus_step};
 
-/// Click: focus the field under the pointer.
 pub fn mouse(app: &mut App, col: u16, row: u16) {
     let Some(idx) = crate::tui::view::widgets::field_hit_at(col, row) else {
         return;
@@ -20,7 +17,6 @@ pub fn mouse(app: &mut App, col: u16, row: u16) {
     }
 }
 
-/// Dispatches a single key event on the export popup.
 pub fn handle(app: &mut App, key: KeyEvent) {
     match key.code {
         KeyCode::Esc => return cancel(app),

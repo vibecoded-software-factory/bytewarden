@@ -1,5 +1,3 @@
-//! Confirm-delete popup renderer.
-
 use crossterm::event::KeyCode;
 use ratatui::{
     Frame,
@@ -11,10 +9,6 @@ use ratatui::{
 use crate::tui::app::App;
 use crate::tui::view::widgets::{ConfirmAction, ConfirmPopup, ConfirmTone, draw_confirm_popup};
 
-/// Renders the confirm-delete popup over the vault screen.
-///
-/// In trash view, Enter = permanent delete (the item is already
-/// trashed). In the regular vault, Enter = trash and D = permanent.
 pub fn draw_popup(frame: &mut Frame, area: Rect, app: &App) {
     let t = &app.theme;
     let name = app

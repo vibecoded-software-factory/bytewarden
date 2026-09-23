@@ -1,12 +1,9 @@
-//! Key handler for the send-create popup.
-
 use crossterm::event::{KeyCode, KeyEvent};
 
 use crate::tui::app::App;
 use crate::tui::flows::send::{adjust_days, cancel, commit, focus_step};
 use crate::tui::send::SendFocus;
 
-/// Click: focus the field under the pointer.
 pub fn mouse(app: &mut App, col: u16, row: u16) {
     let Some(idx) = crate::tui::view::widgets::field_hit_at(col, row) else {
         return;
@@ -20,7 +17,6 @@ pub fn mouse(app: &mut App, col: u16, row: u16) {
     }
 }
 
-/// Dispatches a single key event on the send-create popup.
 pub fn handle(app: &mut App, key: KeyEvent) {
     match key.code {
         KeyCode::Esc => return cancel(app),
@@ -50,7 +46,7 @@ pub fn handle(app: &mut App, key: KeyEvent) {
     let editor = match focus {
         SendFocus::Name => &mut state.name,
         SendFocus::Content => &mut state.content,
-        SendFocus::Days => return, // handled above
+        SendFocus::Days => return,
     };
     crate::tui::input::common::route_line_editor(editor, key);
 }

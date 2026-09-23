@@ -1,48 +1,17 @@
-//! Folder + collection filter state for the sidebar.
-//!
-//! The `[1]` panel is named "Folders" but actually drives a single
-//! "bucket" filter that covers two Bitwarden concepts:
-//!
-//! * **Folders** — personal organisational containers; only the
-//!   logged-in user sees them and they're a flat list.
-//! * **Collections** — shared organisational containers owned by
-//!   organisations the user is a member of. An item can sit in
-//!   several collections at once.
-//!
-//! The two are surfaced in the same sidebar — folders first, then
-//! collections labelled `"Org / Collection"` — so the user picks
-//! exactly one constraint at a time. `[`FolderFilter`]` is the
-//! tagged union of all four cases (`All`, `NoFolder`, a folder id,
-//! a collection id).
-
 use crate::domain::{Collection, Folder};
 
-/// Folder / collection filter applied to the vault list, ANDed with
-/// the active item-type filter ([`crate::domain::filter::ItemFilter`]).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FolderFilter {
-    /// Show items from every folder and collection (no constraint).
     All,
-    /// Show only items that have no folder assigned (`folder_id` is
-    /// `None`). Collection membership is irrelevant for this filter
-    /// because folder and collection are independent dimensions —
-    /// "no folder" is purely about the personal-vault `folder_id`.
+
     NoFolder,
-    /// Show only items whose `folder_id` matches the given UUID.
+
     Folder(String),
-    /// Show only items whose `collection_ids` contains the given
-    /// collection UUID. Items can belong to multiple collections, so
-    /// the same item may surface under more than one collection
-    /// filter.
+
     Collection(String),
 }
 
 impl FolderFilter {
-    /// Returns `true` if the given item metadata matches the filter.
-    ///
-    /// `folder_id` is the item's personal-folder id (often `None`)
-    /// and `collection_ids` is the list of collection UUIDs the item
-    /// is shared into (often empty for personal-vault items).
     pub fn matches(&self, folder_id: Option<&str>, collection_ids: &[String]) -> bool {
         match self {
             FolderFilter::All => true,
@@ -53,19 +22,6 @@ impl FolderFilter {
     }
 }
 
-/// Returns the rendered label for the sidebar row at `idx`.
-///
-/// The sidebar order is:
-/// * `0` — "All folders"
-/// * `1` — "(No folder)"
-/// * `2 .. 2+folders.len()` — one row per folder, alphabetical by name.
-/// * `2+folders.len() ..` — one row per collection, formatted
-///   `"Org / Collection"` (or just `"Collection"` if the org name
-///   isn't resolvable).
-///
-/// Returns `None` when `idx` is out of range. Returns `String` rather
-/// than `&str` because collection rows compose their label on the
-/// fly from the org list.
 pub fn row_label(
     idx: usize,
     folders: &[Folder],
@@ -94,20 +50,10 @@ pub fn row_label(
     }
 }
 
-/// Total number of rows in the sidebar.
-///
-/// `2 fixed + folders.len() + collections.len()`. Personal-only
-/// accounts (no orgs) collapse back to the previous shape because
-/// `collections` is empty.
 pub fn row_count(folders: &[Folder], collections: &[Collection]) -> usize {
     2 + folders.len() + collections.len()
 }
 
-/// Resolves a sidebar row index to the [`FolderFilter`] it represents.
-///
-/// Out-of-range indices fall back to [`FolderFilter::All`] so a stale
-/// `folder_selected` after a list reload never panics — the highlight
-/// just snaps back to the top row.
 pub fn filter_for_row(idx: usize, folders: &[Folder], collections: &[Collection]) -> FolderFilter {
     let folder_rows = 2 + folders.len();
     match idx {
@@ -124,8 +70,6 @@ pub fn filter_for_row(idx: usize, folders: &[Folder], collections: &[Collection]
     }
 }
 
-/// Resolves a [`FolderFilter`] back to its sidebar row index, used to
-/// keep the highlight in sync after a folder/collection list reload.
 pub fn row_for_filter(
     filter: &FolderFilter,
     folders: &[Folder],
@@ -200,8 +144,7 @@ mod tests {
         let f = FolderFilter::NoFolder;
         assert!(f.matches(None, &[]));
         assert!(!f.matches(Some("f1"), &[]));
-        // Collection membership doesn't change the verdict — folder
-        // and collection are independent dimensions.
+
         assert!(f.matches(None, &["c1".into()]));
     }
 
@@ -239,14 +182,14 @@ mod tests {
         assert_eq!(row_label(1, &fs, &cs, &os).as_deref(), Some("(No folder)"));
         assert_eq!(row_label(2, &fs, &cs, &os).as_deref(), Some("Work"));
         assert_eq!(row_label(3, &fs, &cs, &os).as_deref(), Some("Personal"));
-        // Collection rows include the org name when resolvable.
+
         assert_eq!(
             row_label(4, &fs, &cs, &os).as_deref(),
             Some("Acme / Engineering")
         );
-        // Collection without an org falls back to the bare name.
+
         assert_eq!(row_label(5, &fs, &cs, &os).as_deref(), Some("Loose"));
-        // Out of range.
+
         assert_eq!(row_label(6, &fs, &cs, &os), None);
     }
 
@@ -264,7 +207,7 @@ mod tests {
     fn filter_for_row_returns_collection_for_collection_rows() {
         let fs = folders();
         let cs = collections();
-        // Row 4 = first collection (after 2 meta + 2 folders).
+
         let f = filter_for_row(4, &fs, &cs);
         assert_eq!(f, FolderFilter::Collection("c1".into()));
         let f = filter_for_row(5, &fs, &cs);

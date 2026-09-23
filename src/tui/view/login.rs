@@ -1,5 +1,3 @@
-//! Login / unlock screen renderer.
-
 use ratatui::{
     Frame,
     layout::{Constraint, Layout, Rect},
@@ -19,10 +17,7 @@ use crate::tui::view::widgets::{
 };
 
 thread_local! {
-    /// Frame-local hit map for the login form — one `(rect, field)` per
-    /// clickable field, recorded from the exact layout rects as the form
-    /// draws (so a click lands on the field the user sees, with no
-    /// re-derived row arithmetic that can drift from the renderer).
+
     static LOGIN_HITS: std::cell::RefCell<Vec<(Rect, LoginField)>> =
         const { std::cell::RefCell::new(Vec::new()) };
 }
@@ -33,8 +28,6 @@ fn register_field(rect: Rect, field: LoginField) {
     }
 }
 
-/// The login field under `(column, row)`, if any — consumed by the mouse
-/// layer to focus / toggle the field the pointer is over.
 pub fn login_field_at(column: u16, row: u16) -> Option<LoginField> {
     LOGIN_HITS.with(|h| {
         h.borrow()
@@ -47,8 +40,6 @@ pub fn login_field_at(column: u16, row: u16) -> Option<LoginField> {
     })
 }
 
-/// Unions two vertically-adjacent rects (a field's label row + its input
-/// box) so a click on either focuses the field.
 fn union(a: Rect, b: Rect) -> Rect {
     let x = a.x.min(b.x);
     let y = a.y.min(b.y);
@@ -57,12 +48,7 @@ fn union(a: Rect, b: Rect) -> Rect {
     Rect::new(x, y, right - x, bottom - y)
 }
 
-/// Renders the login screen.
 pub fn draw(frame: &mut Frame, app: &mut App) {
-    // While a request is in flight (logging in / loading the vault) the
-    // form has nothing actionable — show the same centered logo + spinner
-    // as the boot/session-check splash instead of the form with a loading
-    // line tacked underneath.
     if matches!(
         app.action_state,
         crate::tui::action::ActionState::Running(_)
@@ -75,14 +61,8 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     let t = &app.theme;
     let area = frame.area();
 
-    // Form rows: padding(1)+server-lbl(1)+server-in(3)
-    //            +email-lbl(1)+email-in(3)+pass-lbl(1)+pass-in(3)
-    //            + [otp-lbl(1)+otp-in(3)]
-    //            +save(1)+lock(1)+keep_session(1)+strip(2)+border(2).
     let form_height: u16 = if app.login.awaiting_code() { 24 } else { 20 };
 
-    // Vertical layout — stars above the form (2/3) and below (1/3),
-    // command bar at the bottom.
     let c = Layout::vertical([
         Constraint::Fill(2),
         Constraint::Length(form_height),
@@ -99,7 +79,6 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     }
     fill_stars(frame, lower_chunk, t);
 
-    // Center the form and pick its border color from error state.
     let form_w = area.width.saturating_sub(8).clamp(44, 72);
     let form_row = Layout::horizontal([
         Constraint::Fill(1),
@@ -107,9 +86,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         Constraint::Fill(1),
     ])
     .split(form_chunk);
-    // Fill the gutters either side of the form with starfield so the
-    // splash background is continuous across the whole screen — without
-    // the form panel itself losing readability.
+
     fill_stars(frame, form_row[0], t);
     fill_stars(frame, form_row[2], t);
     let form_area = form_row[1];
@@ -127,24 +104,22 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     let inner = block.inner(form_area);
     frame.render_widget(block, form_area);
 
-    // Build the inner vertical splits dynamically — OTP rows only exist
-    // when needed (device verification *or* permanent 2FA).
     let (idx_otp_lbl, idx_otp_in, idx_save, idx_lock, idx_keep, idx_strip, f);
     if app.login.awaiting_code() {
         let splits = Layout::vertical([
-            Constraint::Length(1), // [0]  padding
-            Constraint::Length(1), // [1]  server label
-            Constraint::Length(3), // [2]  server input
-            Constraint::Length(1), // [3]  email label
-            Constraint::Length(3), // [4]  email input
-            Constraint::Length(1), // [5]  pass label
-            Constraint::Length(3), // [6]  pass input
-            Constraint::Length(1), // [7]  otp label
-            Constraint::Length(3), // [8]  otp input
-            Constraint::Length(1), // [9]  save email
-            Constraint::Length(1), // [10] auto-lock
-            Constraint::Length(1), // [11] keep session
-            Constraint::Length(2), // [12] feedback strip
+            Constraint::Length(1),
+            Constraint::Length(1),
+            Constraint::Length(3),
+            Constraint::Length(1),
+            Constraint::Length(3),
+            Constraint::Length(1),
+            Constraint::Length(3),
+            Constraint::Length(1),
+            Constraint::Length(3),
+            Constraint::Length(1),
+            Constraint::Length(1),
+            Constraint::Length(1),
+            Constraint::Length(2),
         ])
         .split(inner);
         (
@@ -158,17 +133,17 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         f = splits;
     } else {
         let splits = Layout::vertical([
-            Constraint::Length(1), // [0]  padding
-            Constraint::Length(1), // [1]  server label
-            Constraint::Length(3), // [2]  server input
-            Constraint::Length(1), // [3]  email label
-            Constraint::Length(3), // [4]  email input
-            Constraint::Length(1), // [5]  pass label
-            Constraint::Length(3), // [6]  pass input
-            Constraint::Length(1), // [7]  save email
-            Constraint::Length(1), // [8]  auto-lock
-            Constraint::Length(1), // [9]  keep session
-            Constraint::Length(2), // [10] feedback strip
+            Constraint::Length(1),
+            Constraint::Length(1),
+            Constraint::Length(3),
+            Constraint::Length(1),
+            Constraint::Length(3),
+            Constraint::Length(1),
+            Constraint::Length(3),
+            Constraint::Length(1),
+            Constraint::Length(1),
+            Constraint::Length(1),
+            Constraint::Length(2),
         ])
         .split(inner);
         (
@@ -181,8 +156,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         ) = (0, 0, 7, 8, 9, 10);
         f = splits;
     }
-    // Register each field's clickable area (label row + input box) from the
-    // exact layout rects, so the mouse focuses whatever the user points at.
+
     register_field(union(f[1], f[2]), LoginField::Server);
     register_field(union(f[3], f[4]), LoginField::Email);
     register_field(union(f[5], f[6]), LoginField::Password);
@@ -193,7 +167,6 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     register_field(f[idx_lock], LoginField::AutoLock);
     register_field(f[idx_keep], LoginField::KeepSession);
 
-    // ── Server ────────────────────────────────────────────────────────────
     let server_dirty = app.login.server_input.text().trim() != app.login.server_committed;
     frame.render_widget(
         Paragraph::new(Line::from(vec![
@@ -220,7 +193,6 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         f[2],
     );
 
-    // ── Email ─────────────────────────────────────────────────────────────
     frame.render_widget(
         Paragraph::new("Email:").style(Style::default().fg(t.dim)),
         f[3],
@@ -236,7 +208,6 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         f[4],
     );
 
-    // ── Password ──────────────────────────────────────────────────────────
     frame.render_widget(
         Paragraph::new(Line::from(vec![
             Span::styled("Master Password:", Style::default().fg(t.dim)),
@@ -262,12 +233,8 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         f[6],
     );
 
-    // ── OTP / 2FA ────────────────────────────────────────────────────────
     if app.login.awaiting_code() {
         let (label_main, label_hint) = if app.login.two_factor_required {
-            // Method-specific hint so the user knows what code is
-            // being asked for. The method chip below the label
-            // shows the current selection + cycle hint.
             let hint = match app.login.two_factor_method {
                 crate::domain::TwoFactorMethod::Authenticator => {
                     "  (TOTP from your authenticator app)"
@@ -287,24 +254,12 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
             f[idx_otp_lbl],
         );
         let otp_foc = app.login.active_field == LoginField::Otp;
-        // For 2FA we render a compact method chip on the input row's
-        // right side so the user can tell at a glance which factor
-        // is active. Cycling happens via ← → when focus is on the
-        // Otp field.
+
         let inner = Line::from(editor_spans(&app.login.otp_input, otp_foc, t));
         let block = rounded_block(focus_border(otp_foc, t.accent));
         frame.render_widget(Paragraph::new(inner).block(block), f[idx_otp_in]);
 
         if app.login.two_factor_required && otp_foc {
-            // One-line tip below the code input — small, dim, only
-            // when focused so it doesn't add noise on the rest of
-            // the form.
-            // We re-use the OTP-input box's row by overlaying — but
-            // simpler: show it as a status hint via the existing
-            // feedback strip below. Actually, simplest: append it
-            // as an inline label in the code label row. Done above
-            // via `label_hint`. Method chip is the next addition:
-            // render it as a one-row strip just under the input.
             let method_line = Line::from(vec![Span::styled(
                 format!(
                     " Method: {} · ← → to cycle (Authenticator / Email / YubiKey)",
@@ -312,19 +267,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
                 ),
                 Style::default().fg(t.dim),
             )]);
-            // Repurpose the OTP-input area's last row by re-rendering
-            // a thin overlay — but we don't have a dedicated chunk
-            // for it in the layout. Easiest: render it on top of the
-            // input border's bottom row. Since the editor spans
-            // fill the box, we instead cram the method chip into
-            // the *label* row when focused, by adding a second line
-            // below the existing label hint via the strip helper.
-            //
-            // The cleanest implementation is to just write the chip
-            // into the strip area below the input. We rely on the
-            // existing `idx_strip` cell — the strip already gets
-            // overwritten by `action_line` further down. So we
-            // intercept here only when nothing else is showing.
+
             if matches!(app.action_state, crate::tui::action::ActionState::Idle)
                 && !app.login.login_error
             {
@@ -333,7 +276,6 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         }
     }
 
-    // ── Checkboxes ────────────────────────────────────────────────────────
     render_checkbox(
         frame,
         "Save email",
@@ -363,7 +305,6 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         f[idx_keep],
     );
 
-    // ── Feedback strip ────────────────────────────────────────────────────
     let strip_block = Block::default()
         .borders(Borders::TOP)
         .border_style(Style::default().fg(t.muted));
@@ -390,7 +331,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         frame.render_widget(
             Paragraph::new(Line::from(vec![
                 Span::styled(
-                    " 🔐 ",
+                    format!(" {} ", app.icons.two_factor()),
                     Style::default().fg(t.accent).add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(
@@ -405,7 +346,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         frame.render_widget(
             Paragraph::new(Line::from(vec![
                 Span::styled(
-                    " ✉ ",
+                    format!(" {} ", app.icons.email()),
                     Style::default().fg(t.accent).add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(
@@ -420,7 +361,6 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         frame.render_widget(Paragraph::new(line).block(strip_block), f[idx_strip]);
     }
 
-    // ── Bottom hints bar ──────────────────────────────────────────────────
     render_cmd_bar_with_help(
         frame,
         bar_chunk,

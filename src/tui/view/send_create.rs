@@ -1,5 +1,3 @@
-//! Send-create popup renderer.
-
 use ratatui::{
     Frame,
     layout::Rect,
@@ -11,10 +9,9 @@ use ratatui::{
 use crate::tui::app::App;
 use crate::tui::send::SendFocus;
 use crate::tui::view::widgets::{
-    center_rect, editor_line_hinted, register_field_hit, rounded_block,
+    center_rect, editor_line_hinted, legend_line, register_field_hit, rounded_block,
 };
 
-/// Renders the send-create popup.
 pub fn draw_popup(frame: &mut Frame, area: Rect, app: &App) {
     let Some(state) = &app.send_create else {
         return;
@@ -33,20 +30,18 @@ pub fn draw_popup(frame: &mut Frame, area: Rect, app: &App) {
     frame.render_widget(outer, popup);
 
     let chunks = ratatui::layout::Layout::vertical([
-        ratatui::layout::Constraint::Length(1), // padding
-        ratatui::layout::Constraint::Length(1), // name label
-        ratatui::layout::Constraint::Length(3), // name input
-        ratatui::layout::Constraint::Length(1), // days label
-        ratatui::layout::Constraint::Length(1), // days value
-        ratatui::layout::Constraint::Length(1), // content label
-        ratatui::layout::Constraint::Length(3), // content input
-        ratatui::layout::Constraint::Length(1), // hints
-        ratatui::layout::Constraint::Length(1), // warning
+        ratatui::layout::Constraint::Length(1),
+        ratatui::layout::Constraint::Length(1),
+        ratatui::layout::Constraint::Length(3),
+        ratatui::layout::Constraint::Length(1),
+        ratatui::layout::Constraint::Length(1),
+        ratatui::layout::Constraint::Length(1),
+        ratatui::layout::Constraint::Length(3),
+        ratatui::layout::Constraint::Length(1),
+        ratatui::layout::Constraint::Length(1),
     ])
     .split(inner);
 
-    // Clickable field regions (label + input each): 0 → Name, 1 → Days,
-    // 2 → Content.
     register_field_hit(chunks[1], 0);
     register_field_hit(chunks[2], 0);
     register_field_hit(chunks[3], 1);
@@ -54,7 +49,6 @@ pub fn draw_popup(frame: &mut Frame, area: Rect, app: &App) {
     register_field_hit(chunks[5], 2);
     register_field_hit(chunks[6], 2);
 
-    // Name
     frame.render_widget(
         Paragraph::new(Line::from(Span::styled(
             " Name",
@@ -80,7 +74,6 @@ pub fn draw_popup(frame: &mut Frame, area: Rect, app: &App) {
         chunks[2],
     );
 
-    // Days
     frame.render_widget(
         Paragraph::new(Line::from(vec![
             Span::styled(" Expires in", Style::default().fg(t.dim)),
@@ -114,7 +107,6 @@ pub fn draw_popup(frame: &mut Frame, area: Rect, app: &App) {
         chunks[4],
     );
 
-    // Content
     frame.render_widget(
         Paragraph::new(Line::from(vec![
             Span::styled(" Content", Style::default().fg(t.dim)),
@@ -143,13 +135,17 @@ pub fn draw_popup(frame: &mut Frame, area: Rect, app: &App) {
         chunks[6],
     );
 
-    frame.render_widget(
-        Paragraph::new(Line::from(Span::styled(
-            " Tab switch field · Enter create · Esc cancel",
-            Style::default().fg(t.dim),
-        ))),
-        chunks[7],
+    let mut hints = legend_line(
+        &[
+            ("Tab", "switch field"),
+            ("Enter", "create"),
+            ("Esc", "cancel"),
+        ],
+        chunks[7].width.saturating_sub(1),
+        t,
     );
+    hints.spans.insert(0, Span::raw(" "));
+    frame.render_widget(Paragraph::new(hints), chunks[7]);
     frame.render_widget(
         Paragraph::new(Line::from(Span::styled(
             " On success the URL is copied to your clipboard.",

@@ -1,5 +1,3 @@
-//! "Create new item" screen renderer (type-picker + form).
-
 use ratatui::{
     Frame,
     layout::{Constraint, Layout, Rect},
@@ -17,9 +15,7 @@ use crate::tui::view::widgets::{
 };
 
 thread_local! {
-    /// Frame-local hit map — one `(rect, index)` per clickable row. In
-    /// the type-picker step the index is the item-type; in the form step
-    /// it is the field index. Recorded from the exact layout rects.
+
     static CREATE_HITS: std::cell::RefCell<Vec<(Rect, usize)>> =
         const { std::cell::RefCell::new(Vec::new()) };
 }
@@ -30,8 +26,6 @@ fn register_hit(rect: Rect, idx: usize) {
     }
 }
 
-/// The row index under `(column, row)`, if any — a type index while
-/// choosing the type, otherwise a field index.
 pub fn create_hit_at(column: u16, row: u16) -> Option<usize> {
     CREATE_HITS.with(|h| {
         h.borrow()
@@ -44,7 +38,6 @@ pub fn create_hit_at(column: u16, row: u16) -> Option<usize> {
     })
 }
 
-/// Renders the create screen.
 pub fn draw(frame: &mut Frame, app: &mut App) {
     CREATE_HITS.with(|h| h.borrow_mut().clear());
     let t = &app.theme;
@@ -136,8 +129,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
             } else {
                 ""
             };
-            // Read-only rows don't accept text input — render them
-            // without a cursor so the user isn't tempted to type.
+
             let vline = if sel && !field.read_only {
                 if field.hidden && !field.revealed {
                     Line::from(editor_spans_masked(&field.editor, true, t))

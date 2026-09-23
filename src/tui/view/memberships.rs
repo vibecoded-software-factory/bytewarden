@@ -1,115 +1,94 @@
-//! Memberships popup renderer.
-//!
-//! Displays each organisation as a header, followed by a bulleted list
-//! of its collections. Personal-only accounts see a friendly empty
-//! state.
-
 use ratatui::{
     Frame,
     layout::Rect,
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, BorderType, Borders, Clear, Paragraph},
 };
 
 use crate::tui::app::App;
-use crate::tui::view::widgets::center_rect;
+use crate::tui::view::widgets::{
+    PickerModal, PickerRow, ScrollTarget, draw_picker_modal, empty_state_lines,
+};
 
-/// Renders the memberships popup.
-pub fn draw_popup(frame: &mut Frame, area: Rect, app: &App) {
+pub fn draw_popup(frame: &mut Frame, _area: Rect, app: &App) {
     let Some(state) = &app.memberships else {
         return;
     };
     let t = &app.theme;
-    let popup = center_rect(70, 22, area);
-    crate::tui::view::widgets::register_modal(popup);
-    frame.render_widget(Clear, popup);
 
-    let mut lines: Vec<Line> = Vec::new();
-    lines.push(Line::from(""));
+    let header = |text: String| {
+        PickerRow::Header(Line::from(Span::styled(
+            text,
+            Style::default().fg(t.accent).add_modifier(Modifier::BOLD),
+        )))
+    };
+    let note = |text: &str| {
+        PickerRow::Header(Line::from(Span::styled(
+            format!("    {text}"),
+            Style::default().fg(t.dim).add_modifier(Modifier::ITALIC),
+        )))
+    };
+    let collection = |name: &str| {
+        PickerRow::Item(vec![Line::from(Span::styled(
+            name.to_string(),
+            Style::default().fg(t.foreground),
+        ))])
+    };
 
-    if state.organizations.is_empty() {
-        lines.push(Line::from(Span::styled(
-            "  You are not a member of any Bitwarden organization.",
-            Style::default().fg(t.dim),
-        )));
-        lines.push(Line::from(""));
-        lines.push(Line::from(Span::styled(
-            "  Personal accounts have no collections — items live in",
-            Style::default().fg(t.dim),
-        )));
-        lines.push(Line::from(Span::styled(
-            "  folders only (see the Folders sidebar panel).",
-            Style::default().fg(t.dim),
-        )));
-    } else {
-        for org in &state.organizations {
-            lines.push(Line::from(vec![
-                Span::styled("  🏢 ", Style::default().fg(t.accent)),
-                Span::styled(
-                    org.name.as_str(),
-                    Style::default().fg(t.accent).add_modifier(Modifier::BOLD),
-                ),
-            ]));
-            // `state.collections` is sorted at popup-open time by
-            // `flows::memberships::open`, so the per-org filter slice
-            // is in display order without extra work here. Re-sorting
-            // per frame would allocate a fresh lowercased String per
-            // collection on every redraw.
-            let org_collections: Vec<&_> = state
-                .collections
-                .iter()
-                .filter(|c| c.organization_id.as_deref() == Some(org.id.as_str()))
-                .collect();
-            if org_collections.is_empty() {
-                lines.push(Line::from(Span::styled(
-                    "      (no collections visible to you)",
-                    Style::default().fg(t.dim).add_modifier(Modifier::ITALIC),
-                )));
-            } else {
-                for c in org_collections {
-                    lines.push(Line::from(vec![
-                        Span::styled("      • ", Style::default().fg(t.dim)),
-                        Span::styled(c.name.as_str(), Style::default().fg(t.foreground)),
-                    ]));
-                }
-            }
-            lines.push(Line::from(""));
-        }
-        // Surface any collection that has no parent org (defensive —
-        // shouldn't happen with current bw output but cheap to handle).
-        let orphans: Vec<&_> = state
+    let mut rows: Vec<PickerRow> = Vec::new();
+    for org in &state.organizations {
+        rows.push(header(format!("{} {}", app.icons.org(), org.name)));
+        let mut any = false;
+        for c in state
             .collections
             .iter()
-            .filter(|c| c.organization_id.is_none())
-            .collect();
-        if !orphans.is_empty() {
-            lines.push(Line::from(Span::styled(
-                "  (Orphan collections, no parent org)",
-                Style::default().fg(t.dim).add_modifier(Modifier::ITALIC),
-            )));
-            for c in orphans {
-                lines.push(Line::from(vec![
-                    Span::styled("      • ", Style::default().fg(t.dim)),
-                    Span::styled(c.name.as_str(), Style::default().fg(t.foreground)),
-                ]));
-            }
+            .filter(|c| c.organization_id.as_deref() == Some(org.id.as_str()))
+        {
+            rows.push(collection(&c.name));
+            any = true;
+        }
+        if !any {
+            rows.push(note("(no collections visible to you)"));
         }
     }
-    lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled(
-        "  Esc / Enter to close.",
-        Style::default().fg(t.dim),
-    )));
 
-    frame.render_widget(
-        Paragraph::new(lines).block(
-            Block::default()
-                .title(" Memberships (read-only) ")
-                .borders(Borders::ALL)
-                .border_type(BorderType::Rounded)
-                .border_style(Style::default().fg(t.accent)),
-        ),
-        popup,
+    let orphans: Vec<&crate::domain::Collection> = state
+        .collections
+        .iter()
+        .filter(|c| c.organization_id.is_none())
+        .collect();
+    if !orphans.is_empty() {
+        rows.push(header("(orphan collections, no parent org)".to_string()));
+        for c in orphans {
+            rows.push(collection(&c.name));
+        }
+    }
+
+    let orgs = state.organizations.len();
+    let cols = state.collections.len();
+    draw_picker_modal(
+        frame,
+        t,
+        app.icons,
+        PickerModal {
+            title: format!(" Memberships · {orgs} org / {cols} collections "),
+
+            query: None,
+            rows,
+            selected: state.cursor,
+            empty: empty_state_lines(
+                "No organisations",
+                &[
+                    "personal items live in folders — see the [1] sidebar",
+                    "organisations are joined from the Bitwarden web vault",
+                    "Esc closes",
+                ],
+                t,
+            ),
+            legend: &[("j/k ↑↓", "scroll"), ("Esc", "close")],
+            scroll_target: Some(ScrollTarget::Memberships),
+
+            size: None,
+        },
     );
 }

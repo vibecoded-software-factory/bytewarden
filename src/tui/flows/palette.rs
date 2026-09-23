@@ -1,44 +1,28 @@
-//! Command palette (`Ctrl+P`) — a fuzzy-searchable, context-aware list
-//! of the actions valid where you are, each of which dispatches the very
-//! same `flows::*` its keybinding would. Doubles as an executable
-//! cheat-sheet: every row shows its shortcut.
-//!
-//! Keep in sync (the fifth surface): footer hints · `view/help.rs` ·
-//! `README.md` tables · `UX.md` · **this `palette_commands` list**.
-
 use crate::domain::LineEditor;
 use crate::tui::app::App;
 use crate::tui::screens::Screen;
 
-/// One entry in the command palette. `run` is a plain `fn(&mut App)`
-/// pointing at an existing flow, so the palette can never diverge from
-/// what the keybinding does.
 #[derive(Clone, Copy)]
 pub struct PaletteCommand {
-    /// What the row says.
     pub label: &'static str,
-    /// The keybinding shown right-aligned (the cheat-sheet half).
+
     pub keys: &'static str,
-    /// The action, run on the screen the palette was opened from.
+
     pub run: fn(&mut App),
 }
 
-/// In-flight command-palette state. `None` outside the palette.
 pub struct PaletteState {
-    /// The fuzzy query.
     pub query: LineEditor,
-    /// Every command available in this context, captured at open time.
+
     pub all: Vec<PaletteCommand>,
-    /// Indices into `all` matching the query (substring over the label).
+
     pub filtered: Vec<usize>,
-    /// Highlight, indexing `filtered`.
+
     pub selected: usize,
-    /// Screen the palette was opened from — restored before the command
-    /// runs so the action lands on the right context.
+
     pub origin: Screen,
 }
 
-/// Wrapper: open the selected item's detail straight in edit mode.
 fn edit_selected(app: &mut App) {
     if app.vault.selected_item().is_some() {
         app.go_to_detail();
@@ -46,14 +30,22 @@ fn edit_selected(app: &mut App) {
     }
 }
 
-/// Builds the context-aware command list for the palette. App-wide
-/// commands always show; the item verbs only when an item is selected
-/// (and not in the trash), matching the keybindings' own guards.
 pub fn palette_commands(app: &App) -> Vec<PaletteCommand> {
-    let cmd = |label, keys, run| PaletteCommand { label, keys, run };
-    let mut v = vec![
-        cmd("New item", "n", super::items::open_create as fn(&mut App)),
-        cmd("Sync vault", "Alt+S", super::vault::request_sync),
+    if matches!(app.screen, Screen::Create | Screen::Generator)
+        || (app.screen == Screen::Detail && app.edit.active)
+    {
+        return form_commands(app);
+    }
+
+    let cmd = |label, keys, run: fn(&mut App)| PaletteCommand { label, keys, run };
+    let trash = app.vault.is_trash_view();
+
+    let mut v: Vec<PaletteCommand> = Vec::new();
+    if !trash {
+        v.push(cmd("New item", "n", super::items::open_create));
+        v.push(cmd("Sync vault", "Alt+S", super::vault::request_sync));
+    }
+    v.extend([
         cmd(
             "Password generator",
             "Alt+G",
@@ -67,34 +59,109 @@ pub fn palette_commands(app: &App) -> Vec<PaletteCommand> {
         cmd("Settings", "F10", App::open_settings),
         cmd("Lock vault", "Alt+L", super::auth::lock_vault),
         cmd("Log out", "Alt+O", super::auth::open_confirm_logout),
-    ];
-    // Item verbs — only meaningful with a selected, non-trashed item.
-    if app.vault.selected_item().is_some() && !app.vault.is_trash_view() {
-        v.extend([
-            cmd(
-                "Copy password",
-                "c",
-                super::copy::copy_password_to_clipboard,
-            ),
-            cmd(
-                "Copy username",
-                "u",
-                super::copy::copy_username_to_clipboard,
-            ),
-            cmd("Edit item", "e", edit_selected),
-            cmd("Toggle favorite", "f", super::items::toggle_favorite),
-            cmd(
-                "Check HIBP breaches",
-                "x",
-                super::items::queue_check_exposed,
-            ),
-            cmd("Delete item", "d", super::items::open_confirm_delete),
-        ]);
+    ]);
+
+    if app.vault.selected_item().is_some() {
+        if trash {
+            v.push(cmd("Restore item", "r", super::items::queue_restore_item));
+        } else {
+            v.extend([
+                cmd(
+                    "Copy password",
+                    "c",
+                    super::copy::copy_password_to_clipboard,
+                ),
+                cmd(
+                    "Copy username",
+                    "u",
+                    super::copy::copy_username_to_clipboard,
+                ),
+                cmd("Edit item", "e", edit_selected),
+                cmd("Toggle favorite", "f", super::items::toggle_favorite),
+                cmd(
+                    "Check HIBP breaches",
+                    "x",
+                    super::items::queue_check_exposed,
+                ),
+            ]);
+        }
+
+        v.push(cmd("Delete item", "d", super::items::open_confirm_delete));
     }
     v
 }
 
-/// Opens the palette over the current screen.
+fn form_commands(app: &App) -> Vec<PaletteCommand> {
+    let cmd = |label, keys, run: fn(&mut App)| PaletteCommand { label, keys, run };
+    let mut v: Vec<PaletteCommand> = Vec::new();
+
+    match app.screen {
+        Screen::Detail if app.edit.active => {
+            if app
+                .edit
+                .fields
+                .get(app.edit.field_idx)
+                .is_some_and(|f| f.hidden)
+            {
+                v.push(cmd("Generate into this field", "Alt+G", |app| {
+                    super::generator::open_for_edit_field(app, app.edit.field_idx)
+                }));
+            }
+            v.extend([
+                cmd("Add custom field", "Alt+N", super::items::add_custom_field),
+                cmd("Add URL row", "Alt+U", super::items::add_uri_row),
+                cmd(
+                    "Rename custom field",
+                    "Alt+R",
+                    super::items::open_rename_field,
+                ),
+                cmd("Cycle field type", "Alt+T", super::items::cycle_field_type),
+                cmd(
+                    "Assign collections",
+                    "Alt+L",
+                    super::assign_collections::open,
+                ),
+                cmd(
+                    "Remove field / URL row",
+                    "Alt+Del",
+                    super::items::remove_current_field,
+                ),
+            ]);
+        }
+
+        Screen::Create => {
+            if app
+                .create
+                .fields
+                .get(app.create.field_idx)
+                .is_some_and(|f| f.hidden)
+            {
+                v.push(cmd("Generate into this field", "Alt+G", |app| {
+                    super::generator::open_for_create_field(app, app.create.field_idx)
+                }));
+            }
+            v.push(cmd(
+                "Assign collections",
+                "Alt+L",
+                super::assign_collections::open,
+            ));
+        }
+
+        Screen::Generator => {
+            v.push(cmd("Copy result", "Alt+C", super::generator::copy_result));
+            if app.generator.return_target.is_some() {
+                v.push(cmd(
+                    "Use result in form",
+                    "Alt+U",
+                    super::generator::use_result,
+                ));
+            }
+        }
+        _ => {}
+    }
+    v
+}
+
 pub fn open(app: &mut App) {
     let all = palette_commands(app);
     let filtered = (0..all.len()).collect();
@@ -108,15 +175,12 @@ pub fn open(app: &mut App) {
     app.screen = Screen::CommandPalette;
 }
 
-/// Closes the palette without running anything.
 pub fn cancel(app: &mut App) {
     if let Some(state) = app.palette.take() {
         app.screen = state.origin;
     }
 }
 
-/// Recomputes the filtered list from the query (case-insensitive
-/// substring over the label) and clamps the highlight.
 pub fn rebuild_filter(app: &mut App) {
     let Some(state) = app.palette.as_mut() else {
         return;
@@ -134,20 +198,13 @@ pub fn rebuild_filter(app: &mut App) {
     }
 }
 
-/// Moves the highlight by `delta`, clamped to the filtered list.
-pub fn move_selection(app: &mut App, delta: isize) {
+pub fn move_selection(app: &mut App, delta: i8) {
     if let Some(state) = app.palette.as_mut() {
         let len = state.filtered.len();
-        if len == 0 {
-            return;
-        }
-        let cur = state.selected as isize;
-        state.selected = (cur + delta).clamp(0, len as isize - 1) as usize;
+        crate::tui::input::nav::nav_clamp(&mut state.selected, len, delta);
     }
 }
 
-/// Restores the origin screen and runs the highlighted command — the
-/// exact same `flows::*` the keybinding would call.
 pub fn run_selected(app: &mut App) {
     let Some(state) = app.palette.take() else {
         return;

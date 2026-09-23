@@ -1,9 +1,3 @@
-//! Crossterm event dispatching.
-//!
-//! [`handle_events`] is the single entry point called from the run loop.
-//! It first handles global keys (Ctrl+C → quit) and then routes to a
-//! per-screen handler.
-
 pub mod assign_collections;
 pub mod attachment_download;
 pub mod attachment_upload;
@@ -35,33 +29,24 @@ use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use crate::tui::app::App;
 use crate::tui::screens::Screen;
 
-/// Returns `true` when the key was pressed with the Alt modifier.
-///
-/// On Linux, AltGr arrives as `ALT | CONTROL`; we accept any modifier
-/// set that *contains* `ALT` so AltGr-only keyboards still work.
 #[inline]
 pub fn is_alt(key: &KeyEvent) -> bool {
     key.modifiers.contains(KeyModifiers::ALT)
 }
 
-/// Whether a key should be swallowed because a worker request is in
-/// flight. While busy we accept only `Esc` (cancel / back) — every other
-/// key could queue a second request or race the pending one. `Ctrl+C`
-/// quits and is handled before this gate, so it always works.
-///
-/// Pure helper (no `App`) so it's unit-testable.
+#[inline]
+pub fn is_bare_action(key: &KeyEvent) -> bool {
+    is_alt(key) || !key.modifiers.contains(KeyModifiers::CONTROL)
+}
+
 #[inline]
 pub fn busy_blocks(is_busy: bool, key: &KeyEvent) -> bool {
     is_busy && key.code != KeyCode::Esc
 }
 
-/// Per-axis step constants for help-popup scrolling.
 const HELP_PAGE_ROWS: u16 = 8;
 const HELP_PAGE_COLS: u16 = 16;
 
-/// Key handler for the help popup itself. Only Esc and F1 close it —
-/// any other navigation key scrolls the popup so it can show content
-/// taller or wider than its viewport.
 fn handle_help(app: &mut App, key: KeyEvent) {
     let (y, x) = app.help_scroll;
     match key.code {
@@ -73,8 +58,8 @@ fn handle_help(app: &mut App, key: KeyEvent) {
         KeyCode::PageDown => app.help_scroll.0 = y.saturating_add(HELP_PAGE_ROWS),
         KeyCode::PageUp => app.help_scroll.0 = y.saturating_sub(HELP_PAGE_ROWS),
         KeyCode::Home => app.help_scroll = (0, 0),
-        KeyCode::End => app.help_scroll.0 = u16::MAX, // renderer clamps
-        // Shift+Left / Shift+Right page horizontally.
+        KeyCode::End => app.help_scroll.0 = u16::MAX,
+
         _ if key.modifiers.contains(KeyModifiers::SHIFT) => match key.code {
             KeyCode::Char('H') => app.help_scroll.1 = x.saturating_sub(HELP_PAGE_COLS),
             KeyCode::Char('L') => app.help_scroll.1 = x.saturating_add(HELP_PAGE_COLS),
@@ -84,12 +69,6 @@ fn handle_help(app: &mut App, key: KeyEvent) {
     }
 }
 
-/// Returns the screens where pressing F1 should open the help popup.
-///
-/// Popups (Generator, Export, RenameField, …) are deliberately excluded:
-/// each carries its own self-contained instructions and overlaying yet
-/// another popup on top would lose the user's in-progress state. The
-/// user must Esc out of any popup first.
 fn f1_opens_help(screen: &Screen) -> bool {
     matches!(
         screen,
@@ -97,9 +76,6 @@ fn f1_opens_help(screen: &Screen) -> bool {
     )
 }
 
-/// Returns the screens where pressing F10 should open the Settings
-/// overlay. Like [`f1_opens_help`] plus the standalone Generator;
-/// excluded on the modal popups, which own their input.
 fn f10_opens_settings(screen: &Screen) -> bool {
     matches!(
         screen,
@@ -107,41 +83,29 @@ fn f10_opens_settings(screen: &Screen) -> bool {
     )
 }
 
-/// Dispatches a pre-read crossterm event to the right per-screen handler.
 pub fn handle_events(app: &mut App, ev: Event) {
     match ev {
         Event::Key(key) => {
             if key.kind != KeyEventKind::Press {
                 return;
             }
-            // Sticky errors clear on the next keypress (mutt/lazygit): a
-            // failure is a condition the user must read, not a 1.5 s
-            // event. The clearing key still does its thing below. (The
-            // `⚠ WORKER DEAD` condition badge is separate and persists.)
+
             if matches!(app.action_state, crate::tui::action::ActionState::Error(_)) {
                 app.set_action(crate::tui::action::ActionState::Idle);
             }
-            // Global quit shortcut.
+
             if key.code == KeyCode::Char('c') && key.modifiers == KeyModifiers::CONTROL {
                 app.should_quit = true;
                 return;
             }
-            // Global help shortcut — F1 opens the help popup from any
-            // main screen. From the help screen itself it closes (any
-            // key does), and from popups it falls through (the popup
-            // handler decides). The originating screen is stashed so
-            // the help renderer can show the correct background and
-            // scope its content.
+
             if key.code == KeyCode::F(1) && f1_opens_help(&app.screen) {
                 app.help_from = Some(app.screen.clone());
                 app.help_scroll = (0, 0);
                 app.screen = Screen::Help;
                 return;
             }
-            // Global Settings shortcut — F10 toggles the Settings overlay.
-            // It opens from the main screens (never stacked on a popup)
-            // and closes (cancel) when already open. Pure UI overlay, so
-            // it sits before the busy gate like F1.
+
             if key.code == KeyCode::F(10) {
                 if app.screen == Screen::Settings {
                     app.settings_cancel();
@@ -151,34 +115,35 @@ pub fn handle_events(app: &mut App, ev: Event) {
                     return;
                 }
             }
-            // Global command palette (Ctrl+P) — toggles the fuzzy,
-            // context-aware action list. Opens from the vault / detail
-            // (where the actions apply) and closes when already open. A
-            // UI overlay, so it sits before the busy gate like F1 / F10.
+
             if key.code == KeyCode::Char('p') && key.modifiers == KeyModifiers::CONTROL {
                 if app.screen == Screen::CommandPalette {
                     crate::tui::flows::palette::cancel(app);
                     return;
-                } else if matches!(app.screen, Screen::Vault | Screen::Detail) {
+                } else if matches!(
+                    app.screen,
+                    Screen::Vault | Screen::Detail | Screen::Create | Screen::Generator
+                ) {
                     crate::tui::flows::palette::open(app);
                     return;
                 }
             }
-            // While a worker request is in flight, swallow every key but
-            // Esc so a second request can't be queued mid-flight.
+
             if busy_blocks(app.is_busy(), &key) {
                 return;
             }
             dispatch_screen_key(app, key);
         }
-        Event::Mouse(mouse) => mouse::handle(app, mouse),
+        Event::Mouse(mouse) => {
+            if app.is_busy() && !mouse::is_escape_click(&mouse) {
+                return;
+            }
+            mouse::handle(app, mouse)
+        }
         _ => {}
     }
 }
 
-/// Routes a key to the active screen's handler. Extracted from
-/// [`handle_events`] so the mouse layer can synthesize an `Esc` to dismiss the
-/// active overlay (click-outside-to-close) through the same per-screen logic.
 pub(crate) fn dispatch_screen_key(app: &mut App, key: KeyEvent) {
     match app.screen.clone() {
         Screen::Splash => {}
@@ -222,8 +187,37 @@ mod tests {
         assert!(busy_blocks(true, &key(KeyCode::Char('a'))));
         assert!(busy_blocks(true, &key(KeyCode::Enter)));
         assert!(busy_blocks(true, &key(KeyCode::Down)));
-        // Esc always passes so the user can cancel / navigate away.
+
         assert!(!busy_blocks(true, &key(KeyCode::Esc)));
+    }
+
+    #[test]
+    fn bare_action_declines_ctrl_letters() {
+        for c in ['n', 'r', 'd', 'c', 'e', 'x'] {
+            let k = KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL);
+            assert!(!is_bare_action(&k), "Ctrl+{c} must not run a row action");
+        }
+    }
+
+    #[test]
+    fn bare_action_accepts_plain_and_shifted_letters() {
+        assert!(is_bare_action(&key(KeyCode::Char('n'))));
+        assert!(is_bare_action(&KeyEvent::new(
+            KeyCode::Char('D'),
+            KeyModifiers::SHIFT
+        )));
+    }
+
+    #[test]
+    fn bare_action_keeps_the_alt_aliases_including_altgr() {
+        assert!(is_bare_action(&KeyEvent::new(
+            KeyCode::Char('n'),
+            KeyModifiers::ALT
+        )));
+        assert!(is_bare_action(&KeyEvent::new(
+            KeyCode::Char('n'),
+            KeyModifiers::ALT | KeyModifiers::CONTROL
+        )));
     }
 
     #[test]

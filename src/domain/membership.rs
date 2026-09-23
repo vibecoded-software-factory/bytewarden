@@ -1,32 +1,18 @@
-//! Organization + Collection types (read-only in this iteration).
-//!
-//! Both come from the user's Bitwarden organisation memberships.
-//! Personal-only accounts simply have empty lists.
-
 use serde::Deserialize;
 
-/// A Bitwarden organisation the user is a member of.
 #[derive(Debug, Clone, Deserialize)]
 pub struct Organization {
-    /// Stable Bitwarden organisation identifier (UUID).
     pub id: String,
 
-    /// User-visible organisation name.
     pub name: String,
 }
 
-/// A collection inside an organisation. Items can be shared by being
-/// assigned to one or more collections.
 #[derive(Debug, Clone, Deserialize)]
 pub struct Collection {
-    /// Stable Bitwarden collection identifier (UUID).
     pub id: String,
 
-    /// Display name.
     pub name: String,
 
-    /// Owning organisation's id. Joined against [`Organization::id`]
-    /// to render the popup grouped by org.
     #[serde(rename = "organizationId")]
     pub organization_id: Option<String>,
 }

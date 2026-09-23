@@ -1,5 +1,3 @@
-//! Decorative starfield used by the splash and login screens.
-
 use ratatui::{
     Frame,
     layout::Rect,
@@ -10,12 +8,6 @@ use ratatui::{
 
 use crate::tui::theme::Theme;
 
-/// Returns a deterministic `(char, color)` pair for a given screen
-/// cell.
-///
-/// Avalanche bit-mixing combines `row` and `col` so the pattern doesn't
-/// cluster on large terminals. Density: ~0.3% bright, ~0.7% mid,
-/// ~1.0% dim, ~98% empty.
 pub fn star_char_at(row: usize, col: usize, t: &Theme) -> (char, Color) {
     let mut h = row
         .wrapping_mul(2_654_435_761)
@@ -29,17 +21,13 @@ pub fn star_char_at(row: usize, col: usize, t: &Theme) -> (char, Color) {
     h ^= h >> 15;
 
     match h % 1000 {
-        0..=2 => ('\u{2726}', t.star_bright), // ✦ — very rare
-        3..=9 => ('\u{00b7}', t.star_mid),    // ·
-        10..=19 => ('\u{22c6}', t.star_dim),  // ⋆
+        0..=2 => ('\u{2726}', t.star_bright),
+        3..=9 => ('\u{00b7}', t.star_mid),
+        10..=19 => ('\u{22c6}', t.star_dim),
         _ => (' ', t.star_dim),
     }
 }
 
-/// Builds a full-width line of pure starfield for `row` and `w` columns.
-///
-/// Adjacent cells with the same color are merged into a single
-/// [`Span`] to keep the resulting widget light.
 pub fn build_star_line(w: usize, row: usize, t: &Theme) -> Line<'static> {
     let mut spans: Vec<Span<'static>> = Vec::new();
     let mut cur_color = t.star_dim;
@@ -66,7 +54,6 @@ pub fn build_star_line(w: usize, row: usize, t: &Theme) -> Line<'static> {
     Line::from(spans)
 }
 
-/// Fills `area` with the pure star pattern (no logo overlay).
 pub fn fill_stars(frame: &mut Frame, area: Rect, t: &Theme) {
     if area.height == 0 || area.width == 0 {
         return;

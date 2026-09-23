@@ -1,5 +1,3 @@
-//! Attachment-download popup renderer.
-
 use ratatui::{
     Frame,
     layout::Rect,
@@ -10,7 +8,6 @@ use ratatui::{
 use crate::tui::app::App;
 use crate::tui::view::widgets::{InputFooter, InputPopup, draw_input_popup};
 
-/// Renders the attachment-download popup over the detail screen.
 pub fn draw_popup(frame: &mut Frame, area: Rect, app: &App) {
     let Some(state) = &app.attachment_download else {
         return;

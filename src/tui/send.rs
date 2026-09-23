@@ -1,13 +1,8 @@
-//! Send-create popup state.
-
 use crate::domain::LineEditor;
 
-/// Bw enforces 1–31 days; we clamp at the UI layer too so the
-/// adjuster keys never produce out-of-range values.
 pub const SEND_MIN_DAYS: u8 = 1;
 pub const SEND_MAX_DAYS: u8 = 31;
 
-/// Which control of the send-create popup currently has focus.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SendFocus {
     Name,
@@ -15,7 +10,6 @@ pub enum SendFocus {
     Content,
 }
 
-/// Buffer for the in-flight send-create popup.
 #[derive(Debug, Clone)]
 pub struct SendCreateState {
     pub name: LineEditor,
@@ -25,9 +19,6 @@ pub struct SendCreateState {
 }
 
 impl SendCreateState {
-    /// Builds a fresh popup with sensible defaults: empty name + 7-day
-    /// expiration (the bw default), focus parked on Name so the user
-    /// can start typing.
     pub fn new() -> Self {
         Self {
             name: LineEditor::new(),

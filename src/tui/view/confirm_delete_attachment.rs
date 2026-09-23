@@ -1,5 +1,3 @@
-//! Confirm-delete-attachment popup renderer.
-
 use crossterm::event::KeyCode;
 use ratatui::{
     Frame,
@@ -11,7 +9,6 @@ use ratatui::{
 use crate::tui::app::App;
 use crate::tui::view::widgets::{ConfirmAction, ConfirmPopup, ConfirmTone, draw_confirm_popup};
 
-/// Renders the confirm-delete-attachment popup.
 pub fn draw_popup(frame: &mut Frame, area: Rect, app: &App) {
     let t = &app.theme;
     let (file_name, item_name) = match &app.attachment_delete {

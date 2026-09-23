@@ -1,6 +1,3 @@
-//! Boot splash screen — logo + spinner shown during the initial
-//! `bw status` probe.
-
 use ratatui::{
     Frame,
     layout::Rect,
@@ -17,12 +14,10 @@ use crate::tui::view::starfield::fill_stars;
 
 const LOGO_HEIGHT: u16 = 18;
 
-/// Renders the splash screen.
 pub fn draw(frame: &mut Frame, app: &mut App) {
     let t = &app.theme;
     let area = frame.area();
 
-    // Center the logo vertically (leave room for the spinner below).
     let top = area.height.saturating_sub(LOGO_HEIGHT + 3) / 2;
     let logo_area = Rect {
         x: 0,
@@ -56,7 +51,6 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         );
     }
 
-    // Spinner / status text just below the logo.
     let sp = spinner_frame(app.action_tick);
     let msg = match &app.action_state {
         ActionState::Running(m) => format!(" {sp}  {m}"),

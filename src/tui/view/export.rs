@@ -1,5 +1,3 @@
-//! Vault-export popup renderer.
-
 use ratatui::{
     Frame,
     layout::Rect,
@@ -10,9 +8,10 @@ use ratatui::{
 
 use crate::tui::app::App;
 use crate::tui::export::{ExportFocus, ExportFormat};
-use crate::tui::view::widgets::{center_rect, editor_spans, register_field_hit, rounded_block};
+use crate::tui::view::widgets::{
+    center_rect, editor_spans, legend_line, register_field_hit, rounded_block,
+};
 
-/// Renders the export popup.
 pub fn draw_popup(frame: &mut Frame, area: Rect, app: &App) {
     let Some(state) = &app.export else {
         return;
@@ -31,24 +30,21 @@ pub fn draw_popup(frame: &mut Frame, area: Rect, app: &App) {
     frame.render_widget(outer, popup);
 
     let chunks = ratatui::layout::Layout::vertical([
-        ratatui::layout::Constraint::Length(1), // padding
-        ratatui::layout::Constraint::Length(1), // format label
-        ratatui::layout::Constraint::Length(1), // format value
-        ratatui::layout::Constraint::Length(1), // path label
-        ratatui::layout::Constraint::Length(3), // path input
-        ratatui::layout::Constraint::Length(1), // hints
-        ratatui::layout::Constraint::Length(1), // security note
+        ratatui::layout::Constraint::Length(1),
+        ratatui::layout::Constraint::Length(1),
+        ratatui::layout::Constraint::Length(1),
+        ratatui::layout::Constraint::Length(1),
+        ratatui::layout::Constraint::Length(3),
+        ratatui::layout::Constraint::Length(1),
+        ratatui::layout::Constraint::Length(1),
     ])
     .split(inner);
 
-    // Clickable field regions: Format (label + value) and Path (label +
-    // input). The mouse handler maps 0 → Format, 1 → Path.
     register_field_hit(chunks[1], 0);
     register_field_hit(chunks[2], 0);
     register_field_hit(chunks[3], 1);
     register_field_hit(chunks[4], 1);
 
-    // ── Format ────────────────────────────────────────────────────────────
     frame.render_widget(
         Paragraph::new(Line::from(vec![
             Span::styled(" Format", Style::default().fg(t.dim)),
@@ -75,7 +71,6 @@ pub fn draw_popup(frame: &mut Frame, area: Rect, app: &App) {
         chunks[2],
     );
 
-    // ── Path ──────────────────────────────────────────────────────────────
     frame.render_widget(
         Paragraph::new(Line::from(vec![
             Span::styled(" Output path", Style::default().fg(t.dim)),
@@ -104,14 +99,17 @@ pub fn draw_popup(frame: &mut Frame, area: Rect, app: &App) {
         chunks[4],
     );
 
-    // ── Footer hints + security note ──────────────────────────────────────
-    frame.render_widget(
-        Paragraph::new(Line::from(Span::styled(
-            " Tab switch field · Enter export · Esc cancel",
-            Style::default().fg(t.dim),
-        ))),
-        chunks[5],
+    let mut hints = legend_line(
+        &[
+            ("Tab", "switch field"),
+            ("Enter", "export"),
+            ("Esc", "cancel"),
+        ],
+        chunks[5].width.saturating_sub(1),
+        t,
     );
+    hints.spans.insert(0, Span::raw(" "));
+    frame.render_widget(Paragraph::new(hints), chunks[5]);
 
     let security_note = match state.format {
         ExportFormat::EncryptedJson => {

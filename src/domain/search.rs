@@ -1,58 +1,19 @@
-//! Lightweight fuzzy ranking used by the vault search box.
-//!
-//! The algorithm is deliberately simple — name match wins, then prefix bonus,
-//! subsequence match, username match, URI match, notes match. It is enough
-//! for a vault size of a few thousand items and runs purely on local data.
-//!
-//! ## Hot path
-//!
-//! Calling [`fuzzy_score`] re-lowercases the item's name, username, every
-//! URI and the notes on every invocation, which adds up across a large
-//! vault and a fast typist. The TUI keeps a parallel
-//! `Vec<LoweredItem>` populated from `app.vault.items`/`app.vault.trashed_items`
-//! and calls [`fuzzy_score_lowered`] instead, so the lowercase work
-//! happens once per item per *mutation* rather than once per item per
-//! *keystroke*.
-//!
-//! [`fuzzy_score`] survives as a thin wrapper that builds a temporary
-//! [`LoweredItem`] — useful for ad-hoc tests and any caller that
-//! doesn't want to maintain a side cache. Both functions return the
-//! same scores; the public test suite treats the wrapper as the
-//! reference implementation.
-
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
 use crate::domain::item::Item;
 
-/// Pre-lowercased view of the searchable fields of an [`Item`].
-///
-/// Owns its strings — the TUI builds these once when items are loaded
-/// (or mutated) and keeps the vector parallel to `app.vault.items` /
-/// `app.vault.trashed_items`. Reading them on every keystroke is then O(N)
-/// of cheap `&str::contains` calls instead of O(N) of allocations.
-///
-/// Carries the same `Zeroize`/`ZeroizeOnDrop` derives as [`Item`] — the
-/// lowercased copies aren't secrets per se (name, username, URIs,
-/// notes), but they are derived from the same surface as the items
-/// themselves, and treating them with identical hygiene means the
-/// security guarantees on `App::items` extend to `App::items_lowered`
-/// without exception.
 #[derive(Debug, Clone, Default, Zeroize, ZeroizeOnDrop)]
 pub struct LoweredItem {
-    /// Lowercased item name.
     pub name: String,
-    /// Lowercased login username, when present.
+
     pub username: Option<String>,
-    /// Lowercased login URIs (one entry per non-empty URI).
+
     pub uris: Vec<String>,
-    /// Lowercased notes, when non-empty.
+
     pub notes: Option<String>,
 }
 
 impl LoweredItem {
-    /// Builds a fresh [`LoweredItem`] from `item`. The lowercase
-    /// happens once here; reads via [`fuzzy_score_lowered`] are
-    /// allocation-free.
     pub fn from_item(item: &Item) -> Self {
         let name = item.name.to_lowercase();
         let (username, uris) = match item.login.as_ref() {
@@ -84,11 +45,6 @@ impl LoweredItem {
     }
 }
 
-/// Computes a relevance score against a pre-lowercased view of an
-/// item. Caller provides `query` already lower-cased.
-///
-/// This is the hot-path implementation — no allocations, just a
-/// handful of `&str::contains` / subsequence checks.
 pub fn fuzzy_score_lowered(lowered: &LoweredItem, query: &str) -> i32 {
     let mut score = 0i32;
 
@@ -125,35 +81,10 @@ pub fn fuzzy_score_lowered(lowered: &LoweredItem, query: &str) -> i32 {
     score
 }
 
-/// Computes a relevance score between an item and a lower-cased query.
-///
-/// Convenience wrapper: builds a [`LoweredItem`] on the fly and
-/// delegates to [`fuzzy_score_lowered`]. **Allocates** on every call;
-/// callers in the search hot path should keep a `Vec<LoweredItem>`
-/// alongside their `Vec<Item>` and call [`fuzzy_score_lowered`]
-/// directly.
-///
-/// Kept on the public surface because it's the easiest entry point
-/// for tests and ad-hoc callers, and because removing it would break
-/// the existing fuzzy-search doctest.
-///
-/// A score of `0` means "no match" and the caller should drop the item.
-/// Scores are unitless: only the relative ordering between items matters.
-///
-/// # Examples
-///
-/// ```
-/// // Name prefix matches outrank substring-only matches.
-/// // (See unit tests in this module for concrete examples.)
-/// ```
 pub fn fuzzy_score(item: &Item, query: &str) -> i32 {
     fuzzy_score_lowered(&LoweredItem::from_item(item), query)
 }
 
-/// Returns `true` if every character of `needle` appears in `haystack`
-/// in the same order (not necessarily contiguous).
-///
-/// Example: `is_subseq("abc", "axbycz") == true`.
 fn is_subseq(needle: &str, haystack: &str) -> bool {
     let mut chars = haystack.chars();
     needle.chars().all(|c| chars.any(|h| h == c))
@@ -215,7 +146,6 @@ mod tests {
 
     #[test]
     fn subsequence_match_scores_50_when_no_substring() {
-        // 'g','h','b' all appear in order in "GitHub" but not contiguous.
         let i = item("GitHub");
         assert_eq!(fuzzy_score(&i, "ghb"), 50);
     }
@@ -235,8 +165,7 @@ mod tests {
             uris: None,
             totp: None,
         });
-        // Name fails ("anything" vs "alice"): no substring, no subseq.
-        // Username "alice@example.com" contains "alice" → +30.
+
         assert_eq!(fuzzy_score(&i, "alice"), 30);
     }
 
@@ -271,17 +200,9 @@ mod tests {
             uris: None,
             totp: None,
         });
-        // 100 (substring) + 30 (username substring).
+
         assert_eq!(fuzzy_score(&i, "github"), 130);
     }
-
-    // ── LoweredItem parity ──────────────────────────────────────────────
-    //
-    // The wrapper `fuzzy_score(item, query)` and the hot-path
-    // `fuzzy_score_lowered(LoweredItem::from_item(&item), query)` must
-    // return identical scores for every relevant input shape. These
-    // tests guard against drift the day someone tweaks one but not the
-    // other.
 
     fn assert_parity(item: &Item, query: &str) {
         let direct = fuzzy_score(item, query);
@@ -346,15 +267,9 @@ mod tests {
             totp: None,
         });
         let lowered = LoweredItem::from_item(&i);
-        // Empty notes/username are dropped (no point keeping them — they
-        // can't contribute to any score), but a non-empty username slot
-        // is preserved even when the value is empty so the parity tests
-        // still match.
+
         assert!(lowered.notes.is_none());
-        // The username is wrapped in `Some("")` because we preserve the
-        // original `Some` shape without further filtering — the score
-        // logic short-circuits on empty strings either way. Document
-        // the behaviour rather than relying on it.
+
         assert_eq!(lowered.username.as_deref(), Some(""));
         assert_eq!(lowered.uris, vec!["https://x".to_string()]);
     }
