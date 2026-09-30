@@ -59,14 +59,9 @@ pub fn copy_result(app: &mut App) {
     let value = app.generator.result.clone();
     let ttl = app.clipboard_clear_secs;
     match app.clipboard.write_with_clear(&value, ttl) {
-        Ok(()) => {
+        Ok(clear) => {
             app.push_cmd("clipboard", true, "generated value [hidden]");
-            let toast = if ttl == 0 {
-                "Copied ✓".to_string()
-            } else {
-                format!("Copied ✓ (clears in {ttl}s)")
-            };
-            app.set_action(ActionState::Done(toast));
+            app.set_action(ActionState::Done(super::copy::copied_toast(clear, ttl)));
         }
         Err(e) => {
             app.push_cmd("clipboard", false, &e);

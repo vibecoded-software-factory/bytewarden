@@ -1,6 +1,6 @@
 use crate::domain::identity::{build_full_name, identity_fields};
 use crate::domain::item::Item;
-use crate::ports::BwError;
+use crate::ports::{AutoClear, BwError};
 use crate::tui::action::ActionState;
 use crate::tui::app::App;
 use crate::tui::reprompt::ProtectedAction;
@@ -9,9 +9,9 @@ use crate::tui::worker::{InFlight, WorkerRequest};
 fn write_clipboard(app: &mut App, text: String, success_msg: &str) {
     let ttl = app.clipboard_clear_secs;
     match app.clipboard.write_with_clear(&text, ttl) {
-        Ok(()) => {
+        Ok(clear) => {
             app.push_cmd("clipboard", true, success_msg);
-            app.set_action(ActionState::Done(copied_toast(ttl)));
+            app.set_action(ActionState::Done(copied_toast(clear, ttl)));
         }
         Err(e) => {
             app.push_cmd("clipboard", false, &e);
@@ -20,11 +20,11 @@ fn write_clipboard(app: &mut App, text: String, success_msg: &str) {
     }
 }
 
-fn copied_toast(ttl: u64) -> String {
-    if ttl == 0 {
-        "Copied ✓".to_string()
-    } else {
-        format!("Copied ✓ (clears in {ttl}s)")
+pub(super) fn copied_toast(clear: AutoClear, ttl: u64) -> String {
+    match clear {
+        AutoClear::Scheduled => format!("Copied ✓ (clears in {ttl}s)"),
+        AutoClear::Off => "Copied ✓".to_string(),
+        AutoClear::Unsupported => "Copied ✓ (won't auto-clear)".to_string(),
     }
 }
 
@@ -232,17 +232,31 @@ pub fn copy_selected_field(app: &mut App) {
 mod tests {
     use super::{copied_toast, detail_copy_targets};
     use crate::domain::item::{Attachment, CardData, Field, Item, LoginData, SshKeyData, UriData};
+    use crate::ports::AutoClear;
     use crate::tui::detail_fields::build_detail_fields;
 
     #[test]
     fn copied_toast_omits_hint_when_disabled() {
-        assert_eq!(copied_toast(0), "Copied ✓");
+        assert_eq!(copied_toast(AutoClear::Off, 0), "Copied ✓");
     }
 
     #[test]
     fn copied_toast_includes_seconds_when_enabled() {
-        assert_eq!(copied_toast(30), "Copied ✓ (clears in 30s)");
-        assert_eq!(copied_toast(5), "Copied ✓ (clears in 5s)");
+        assert_eq!(
+            copied_toast(AutoClear::Scheduled, 30),
+            "Copied ✓ (clears in 30s)"
+        );
+        assert_eq!(
+            copied_toast(AutoClear::Scheduled, 5),
+            "Copied ✓ (clears in 5s)"
+        );
+    }
+
+    #[test]
+    fn copied_toast_warns_when_no_clear_could_be_scheduled() {
+        let toast = copied_toast(AutoClear::Unsupported, 30);
+        assert!(toast.contains("won't auto-clear"), "{toast}");
+        assert!(!toast.contains("clears in"), "{toast}");
     }
 
     fn base(name: &str, item_type: u8) -> Item {

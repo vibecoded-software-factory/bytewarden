@@ -2018,6 +2018,20 @@ mod tests {
         assert_eq!(app.settings_row_value(SettingRow::ClipboardClear), "Off");
     }
 
+    #[test]
+    fn copy_toast_says_when_the_clipboard_cannot_auto_clear() {
+        let (mut app, _req_rx, _resp_tx) = fresh_app();
+        app.clipboard_clear_secs = 30;
+        crate::tui::flows::copy::copy_raw(&mut app, "s3cret".into(), "Value copied ✓");
+        match &app.action_state {
+            ActionState::Done(msg) => {
+                assert!(msg.contains("won't auto-clear"), "{msg}");
+                assert!(!msg.contains("clears in"), "{msg}");
+            }
+            other => panic!("expected a done toast, got {other:?}"),
+        }
+    }
+
     fn session_env_lock() -> std::sync::MutexGuard<'static, ()> {
         crate::tui::session_file::ENV_LOCK
             .lock()

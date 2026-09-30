@@ -1,11 +1,24 @@
 use super::BwError;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AutoClear {
+    Scheduled,
+
+    Off,
+
+    Unsupported,
+}
+
 pub trait ClipboardPort {
     fn write(&self, text: &str) -> Result<(), BwError>;
 
-    fn write_with_clear(&self, text: &str, clear_after_secs: u64) -> Result<(), BwError> {
-        let _ = clear_after_secs;
-        self.write(text)
+    fn write_with_clear(&self, text: &str, clear_after_secs: u64) -> Result<AutoClear, BwError> {
+        self.write(text)?;
+        Ok(if clear_after_secs == 0 {
+            AutoClear::Off
+        } else {
+            AutoClear::Unsupported
+        })
     }
 }
 
@@ -39,5 +52,12 @@ mod tests {
         assert_eq!(c.last.borrow().as_deref(), Some("a"));
         c.write_with_clear("b", 9999).unwrap();
         assert_eq!(c.last.borrow().as_deref(), Some("b"));
+    }
+
+    #[test]
+    fn default_write_with_clear_reports_that_it_schedules_no_clear() {
+        let c = FakeClipboard::default();
+        assert_eq!(c.write_with_clear("a", 0).unwrap(), AutoClear::Off);
+        assert_eq!(c.write_with_clear("a", 30).unwrap(), AutoClear::Unsupported);
     }
 }

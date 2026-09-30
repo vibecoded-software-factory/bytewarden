@@ -1,4 +1,4 @@
-use crate::ports::BwError;
+use crate::ports::{AutoClear, BwError};
 use crate::tui::action::ActionState;
 use crate::tui::app::App;
 use crate::tui::screens::Screen;
@@ -73,11 +73,11 @@ pub fn handle(app: &mut App, r: Result<String, BwError>) {
 
             let ttl = app.clipboard_clear_secs;
             match app.clipboard.write_with_clear(&url, ttl) {
-                Ok(()) => {
-                    let clear_hint = if ttl == 0 {
-                        String::new()
-                    } else {
-                        format!(", clears in {ttl}s")
+                Ok(clear) => {
+                    let clear_hint = match clear {
+                        AutoClear::Scheduled => format!(", clears in {ttl}s"),
+                        AutoClear::Off => String::new(),
+                        AutoClear::Unsupported => ", won't auto-clear".to_string(),
                     };
                     app.set_action(ActionState::Done(format!(
                         "Send URL copied to clipboard ✓ (expires in {days}d{clear_hint})"
