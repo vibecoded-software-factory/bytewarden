@@ -182,7 +182,7 @@ pub fn list_table(frame: &mut Frame, t: &Theme, area: Rect, lt: ListTable) -> us
             Style::default()
                 .bg(t.selected_bg)
                 .fg(t.foreground)
-                .add_modifier(Modifier::BOLD),
+                .add_modifier(Modifier::BOLD | t.select_mark()),
         )
         .highlight_symbol("▶ ");
     if let Some(headers) = lt.headers {
@@ -239,9 +239,11 @@ pub fn focus_color(focused: bool, accent: Color, inactive: Color) -> Color {
     if focused { accent } else { inactive }
 }
 
-pub fn focus_border(focused: bool, accent: Color) -> Style {
+pub fn focus_border(focused: bool, t: &Theme) -> Style {
     if focused {
-        Style::default().fg(accent)
+        Style::default()
+            .fg(t.accent)
+            .add_modifier(t.focus_mark(true))
     } else {
         Style::default()
     }
@@ -572,7 +574,10 @@ pub fn draw_picker_modal(frame: &mut Frame, t: &Theme, icons: IconSet, m: Picker
                         let mut l = Line::from(spans);
                         if selected {
                             for s in l.spans.iter_mut() {
-                                s.style = s.style.bg(t.selected_bg).add_modifier(Modifier::BOLD);
+                                s.style = s
+                                    .style
+                                    .bg(t.selected_bg)
+                                    .add_modifier(Modifier::BOLD | t.select_mark());
                             }
                         }
                         display.push(l);
@@ -634,7 +639,7 @@ pub fn titled_block_styled(
             Line::from(Span::styled(bottom.to_string(), Style::default().fg(t.dim)))
                 .right_aligned(),
         )
-        .border_style(Style::default().fg(col))
+        .border_style(Style::default().fg(col).add_modifier(t.focus_mark(focused)))
 }
 
 pub fn render_cmd_bar(frame: &mut Frame, bar: Rect, hints: &[(&str, &str)], t: &Theme) {
@@ -770,17 +775,21 @@ pub fn render_checkbox(
     label: &str,
     checked: bool,
     focused: bool,
-    accent: Color,
-    inactive: Color,
+    t: &Theme,
     area: Rect,
 ) {
     let icon = if checked { "☑" } else { "☐" };
-    let icol = if checked { accent } else { inactive };
-    let lcol = if focused { accent } else { inactive };
+    let icol = if checked { t.accent } else { t.inactive };
+    let lcol = if focused { t.accent } else { t.inactive };
     frame.render_widget(
         Paragraph::new(Line::from(vec![
             Span::styled(icon, Style::default().fg(icol)),
-            Span::styled(format!(" {label}"), Style::default().fg(lcol)),
+            Span::styled(
+                format!(" {label}"),
+                Style::default()
+                    .fg(lcol)
+                    .add_modifier(t.focus_mark(focused)),
+            ),
         ])),
         area,
     );
@@ -821,10 +830,11 @@ pub fn render_field_card(
     label: &str,
     hint: &str,
     vline: Line,
-    bcol: Color,
+    selected: bool,
     area: Rect,
     t: &Theme,
 ) {
+    let bcol = if selected { t.accent } else { t.inactive };
     let fc = Layout::vertical([Constraint::Length(1), Constraint::Length(3)]).split(area);
     frame.render_widget(
         Paragraph::new(Line::from(vec![
@@ -837,7 +847,11 @@ pub fn render_field_card(
         fc[0],
     );
     frame.render_widget(
-        Paragraph::new(vline).block(rounded_block(Style::default().fg(bcol))),
+        Paragraph::new(vline).block(rounded_block(
+            Style::default()
+                .fg(bcol)
+                .add_modifier(t.focus_mark(selected)),
+        )),
         fc[1],
     );
 }
@@ -899,12 +913,13 @@ pub fn help_line<'a>(key: &'a str, desc: &'a str, t: &Theme) -> Line<'a> {
 #[cfg(test)]
 mod tests {
     use super::{
-        ScrollTarget, cmdlog_height, legend_line_on, register_scroll, reset_scroll_regions,
-        scroll_target_at,
+        ScrollTarget, cmdlog_height, focus_border, legend_line_on, register_scroll,
+        reset_scroll_regions, scroll_target_at, titled_block,
     };
     use crate::tui::keyboard::Keyboard;
-    use crate::tui::theme::Theme;
+    use crate::tui::theme::{ColorCaps, Theme, adapt};
     use ratatui::layout::Rect;
+    use ratatui::style::{Modifier, Style};
 
     #[test]
     fn scroll_registry_dispatches_by_position_top_most_wins() {
@@ -939,6 +954,29 @@ mod tests {
 
         assert_eq!(cmdlog_height(18), 3);
         assert_eq!(cmdlog_height(40), 6);
+    }
+
+    #[test]
+    fn mono_focus_border_is_bold_and_differs_from_unfocused() {
+        let t = adapt(Theme::default(), ColorCaps::Mono);
+        let on = focus_border(true, &t);
+        let off = focus_border(false, &t);
+        assert!(on.add_modifier.contains(Modifier::BOLD));
+        assert!(!off.add_modifier.contains(Modifier::BOLD));
+        assert_ne!(on, off);
+        let block = titled_block("x", "", true, &t);
+        let mut buf = ratatui::buffer::Buffer::empty(Rect::new(0, 0, 4, 3));
+        ratatui::widgets::Widget::render(block, buf.area, &mut buf);
+        assert!(buf[(0, 1)].modifier.contains(Modifier::BOLD));
+    }
+
+    #[test]
+    fn colour_tier_focus_border_is_the_plain_accent() {
+        for caps in [ColorCaps::True, ColorCaps::Indexed256] {
+            let t = adapt(Theme::default(), caps);
+            assert_eq!(focus_border(true, &t), Style::default().fg(t.accent));
+            assert_eq!(focus_border(false, &t), Style::default());
+        }
     }
 
     fn rendered(line: &ratatui::text::Line<'_>) -> String {

@@ -145,7 +145,11 @@ fn focus_block(app: &App, title: &str, focused: bool) -> Block<'static> {
         .title(Span::styled(format!(" {title} "), title_style))
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(color))
+        .border_style(
+            Style::default()
+                .fg(color)
+                .add_modifier(t.focus_mark(focused)),
+        )
 }
 
 fn draw_sidebar(frame: &mut Frame, app: &App, area: Rect) {

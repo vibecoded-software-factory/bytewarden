@@ -136,7 +136,6 @@ fn render_read_only(frame: &mut Frame, app: &App, item: &Item, area: Rect) {
             break;
         };
         let is_sel = i == sel;
-        let bcol = if is_sel { t.accent } else { t.inactive };
         let hint = if field.hidden && is_sel {
             "  (F2: reveal)"
         } else {
@@ -153,7 +152,7 @@ fn render_read_only(frame: &mut Frame, app: &App, item: &Item, area: Rect) {
                 Style::default().fg(t.inactive),
             ))
         };
-        render_field_card(frame, &field.label, hint, vline, bcol, *area, t);
+        render_field_card(frame, &field.label, hint, vline, is_sel, *area, t);
         register_field(*area, i);
     }
 }
@@ -168,7 +167,6 @@ fn render_edit_form(frame: &mut Frame, app: &App, area: Rect) {
             break;
         };
         let sel = i == app.edit.field_idx;
-        let bcol = if sel { t.accent } else { t.inactive };
 
         let custom_tag = match field.custom_type() {
             Some(0) => " [text]",
@@ -201,7 +199,7 @@ fn render_edit_form(frame: &mut Frame, app: &App, area: Rect) {
             };
             Line::from(Span::styled(display, Style::default().fg(t.inactive)))
         };
-        render_field_card(frame, &field.label, &combined_hint, vline, bcol, *area, t);
+        render_field_card(frame, &field.label, &combined_hint, vline, sel, *area, t);
         register_field(*area, i);
     }
 }

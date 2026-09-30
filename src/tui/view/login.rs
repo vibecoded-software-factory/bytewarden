@@ -189,7 +189,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
             server_foc,
             t,
         )))
-        .block(rounded_block(focus_border(server_foc, t.accent))),
+        .block(rounded_block(focus_border(server_foc, t))),
         f[2],
     );
 
@@ -204,7 +204,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
             email_foc,
             t,
         )))
-        .block(rounded_block(focus_border(email_foc, t.accent))),
+        .block(rounded_block(focus_border(email_foc, t))),
         f[4],
     );
 
@@ -229,7 +229,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         Line::from(editor_spans_masked(&app.login.password_input, pass_foc, t))
     };
     frame.render_widget(
-        Paragraph::new(pass_line).block(rounded_block(focus_border(pass_foc, t.accent))),
+        Paragraph::new(pass_line).block(rounded_block(focus_border(pass_foc, t))),
         f[6],
     );
 
@@ -256,7 +256,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         let otp_foc = app.login.active_field == LoginField::Otp;
 
         let inner = Line::from(editor_spans(&app.login.otp_input, otp_foc, t));
-        let block = rounded_block(focus_border(otp_foc, t.accent));
+        let block = rounded_block(focus_border(otp_foc, t));
         frame.render_widget(Paragraph::new(inner).block(block), f[idx_otp_in]);
 
         if app.login.two_factor_required && otp_foc {
@@ -281,8 +281,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         "Save email",
         app.login.save_email,
         app.login.active_field == LoginField::SaveEmail,
-        t.accent,
-        t.inactive,
+        t,
         f[idx_save],
     );
     let lock_label = format!("Auto-lock after {} min", app.auto_lock.after_secs / 60);
@@ -291,8 +290,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         &lock_label,
         app.auto_lock.enabled,
         app.login.active_field == LoginField::AutoLock,
-        t.accent,
-        t.inactive,
+        t,
         f[idx_lock],
     );
     render_checkbox(
@@ -300,8 +298,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         "Keep session",
         app.login.keep_session,
         app.login.active_field == LoginField::KeepSession,
-        t.accent,
-        t.inactive,
+        t,
         f[idx_keep],
     );
 

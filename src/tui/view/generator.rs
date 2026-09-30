@@ -153,7 +153,12 @@ fn render_body(frame: &mut Frame, app: &App, area: Rect) {
         };
         frame.render_widget(
             Paragraph::new(Line::from(Span::styled(value, style))).block(
-                rounded_block(Style::default().fg(bcol)).title(Span::styled(
+                rounded_block(
+                    Style::default()
+                        .fg(bcol)
+                        .add_modifier(t.focus_mark(focused)),
+                )
+                .title(Span::styled(
                     " Result ",
                     Style::default().fg(focus_color(focused, t.accent, t.inactive)),
                 )),

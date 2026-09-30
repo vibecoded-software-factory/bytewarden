@@ -28,6 +28,8 @@ pub struct Theme {
     pub item_note: Color,
     pub item_ssh: Color,
     pub item_favorite: Color,
+
+    pub mono: bool,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -423,6 +425,22 @@ impl Theme {
         Style::default().fg(self.error).add_modifier(Modifier::BOLD)
     }
 
+    pub fn focus_mark(&self, focused: bool) -> Modifier {
+        if self.mono && focused {
+            Modifier::BOLD
+        } else {
+            Modifier::empty()
+        }
+    }
+
+    pub fn select_mark(&self) -> Modifier {
+        if self.mono {
+            Modifier::REVERSED
+        } else {
+            Modifier::empty()
+        }
+    }
+
     pub fn from_palette(p: &Palette) -> Theme {
         Theme {
             accent: p.accent,
@@ -446,6 +464,7 @@ impl Theme {
             item_note: p.cyan,
             item_ssh: p.accent,
             item_favorite: p.orange,
+            mono: false,
         }
     }
 }
@@ -509,7 +528,10 @@ pub fn adapt(theme: Theme, caps: ColorCaps) -> Theme {
     match caps {
         ColorCaps::True => theme,
         ColorCaps::Indexed256 => map_colors(theme, quantize_256),
-        ColorCaps::Mono => map_colors(theme, to_gray),
+        ColorCaps::Mono => Theme {
+            mono: true,
+            ..map_colors(theme, drop_color)
+        },
     }
 }
 
@@ -533,20 +555,12 @@ fn map_colors(t: Theme, f: fn(Color) -> Color) -> Theme {
         item_note: f(t.item_note),
         item_ssh: f(t.item_ssh),
         item_favorite: f(t.item_favorite),
+        mono: t.mono,
     }
 }
 
-fn to_gray(c: Color) -> Color {
-    let Color::Rgb(r, g, b) = c else {
-        return c;
-    };
-    let luma = (2 * r as u32 + 3 * g as u32 + b as u32) / 6;
-    match luma {
-        0..=63 => Color::Black,
-        64..=127 => Color::DarkGray,
-        128..=191 => Color::Gray,
-        _ => Color::White,
-    }
+fn drop_color(_: Color) -> Color {
+    Color::Reset
 }
 
 fn quantize_256(c: Color) -> Color {
@@ -714,13 +728,69 @@ mod tests {
     }
 
     #[test]
-    fn to_gray_maps_by_brightness_and_passes_non_rgb() {
-        assert_eq!(to_gray(Color::Rgb(255, 255, 255)), Color::White);
-        assert_eq!(to_gray(Color::Rgb(0, 0, 0)), Color::Black);
-        assert_eq!(to_gray(Color::Rgb(160, 160, 160)), Color::Gray);
-        assert_eq!(to_gray(Color::Rgb(90, 90, 90)), Color::DarkGray);
+    fn drop_color_resets_every_colour() {
+        assert_eq!(drop_color(Color::Rgb(255, 255, 255)), Color::Reset);
+        assert_eq!(drop_color(Color::Rgb(0, 0, 0)), Color::Reset);
+        assert_eq!(drop_color(Color::Indexed(42)), Color::Reset);
+        assert_eq!(drop_color(Color::Gray), Color::Reset);
+        assert_eq!(drop_color(Color::Reset), Color::Reset);
+    }
 
-        assert_eq!(to_gray(Color::Reset), Color::Reset);
+    fn colours(t: &Theme) -> [Color; 18] {
+        [
+            t.accent,
+            t.inactive,
+            t.selected_bg,
+            t.success,
+            t.error,
+            t.dim,
+            t.foreground,
+            t.placeholder,
+            t.muted,
+            t.star_dim,
+            t.star_mid,
+            t.star_bright,
+            t.item_login,
+            t.item_card,
+            t.item_identity,
+            t.item_note,
+            t.item_ssh,
+            t.item_favorite,
+        ]
+    }
+
+    #[test]
+    fn mono_leaves_no_colour_and_marks_focus_and_selection_by_modifier() {
+        for p in Preset::ALL {
+            let m = adapt(Theme::from_palette(&p.palette()), ColorCaps::Mono);
+            assert!(m.mono);
+            assert!(
+                colours(&m).iter().all(|&c| c == Color::Reset),
+                "{} keeps a colour under NO_COLOR",
+                p.name()
+            );
+            assert_eq!(m.focus_mark(true), Modifier::BOLD);
+            assert_eq!(m.focus_mark(false), Modifier::empty());
+            assert_eq!(m.select_mark(), Modifier::REVERSED);
+        }
+    }
+
+    #[test]
+    fn colour_tiers_carry_no_mono_marks_and_keep_their_colours() {
+        let t = Theme::from_palette(&Preset::Nord.palette());
+        let tc = adapt(t.clone(), ColorCaps::True);
+        assert_eq!(colours(&tc), colours(&t));
+        let ix = adapt(t.clone(), ColorCaps::Indexed256);
+        assert_eq!(
+            colours(&ix),
+            colours(&t).map(quantize_256),
+            "256-colour tier is exactly the quantized palette"
+        );
+        for c in [&t, &tc, &ix] {
+            assert!(!c.mono);
+            assert_eq!(c.focus_mark(true), Modifier::empty());
+            assert_eq!(c.select_mark(), Modifier::empty());
+        }
     }
 
     #[test]
@@ -871,9 +941,10 @@ mod tests {
             ),
             "a 256-colour terminal gets a deterministic palette index"
         );
-        assert!(
-            !matches!(adapt(raw, ColorCaps::Mono).accent, Color::Rgb(..)),
-            "NO_COLOR collapses the hue to a grayscale tier"
+        assert_eq!(
+            adapt(raw, ColorCaps::Mono).accent,
+            Color::Reset,
+            "NO_COLOR drops the hue entirely"
         );
     }
 

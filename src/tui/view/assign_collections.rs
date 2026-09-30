@@ -109,7 +109,11 @@ pub fn draw_popup(frame: &mut Frame, area: Rect, app: &App) {
         let mut ls = ListState::default();
         ls.select(Some(state.cursor));
         let list = List::new(items)
-            .highlight_style(Style::default().bg(t.selected_bg))
+            .highlight_style(
+                Style::default()
+                    .bg(t.selected_bg)
+                    .add_modifier(t.select_mark()),
+            )
             .highlight_symbol("▸ ");
         frame.render_stateful_widget(list, list_area, &mut ls);
 

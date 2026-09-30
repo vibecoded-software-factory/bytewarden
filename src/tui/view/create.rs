@@ -97,7 +97,9 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
                         Modifier::empty()
                     }),
                 )))
-                .block(rounded_block(Style::default().fg(col))),
+                .block(rounded_block(
+                    Style::default().fg(col).add_modifier(t.focus_mark(sel)),
+                )),
                 areas[i],
             );
         }
@@ -116,7 +118,6 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
                 break;
             }
             let sel = i == app.create.field_idx;
-            let bcol = if sel { t.accent } else { t.inactive };
             register_hit(fas[i], i);
             let hint = if field.is_organization() && sel {
                 "  (← → to cycle)"
@@ -146,7 +147,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
                 };
                 Line::from(Span::styled(display, Style::default().fg(t.inactive)))
             };
-            render_field_card(frame, &field.label, hint, vline, bcol, fas[i], t);
+            render_field_card(frame, &field.label, hint, vline, sel, fas[i], t);
         }
     }
 

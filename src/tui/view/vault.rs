@@ -236,7 +236,12 @@ fn render_vaults(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     frame.render_stateful_widget(
         List::new(rows)
             .block(titled_block("─[1]-Folders", &indicator, ff, t))
-            .highlight_style(Style::default().bg(t.selected_bg).fg(t.foreground))
+            .highlight_style(
+                Style::default()
+                    .bg(t.selected_bg)
+                    .fg(t.foreground)
+                    .add_modifier(t.select_mark()),
+            )
             .highlight_symbol("▶ "),
         area,
         &mut state,
@@ -337,7 +342,12 @@ fn render_filters(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     frame.render_stateful_widget(
         List::new(filter_items_with_sep)
             .block(titled_block("─[2]-Items", &indicator, itf, t))
-            .highlight_style(Style::default().bg(t.selected_bg).fg(t.foreground))
+            .highlight_style(
+                Style::default()
+                    .bg(t.selected_bg)
+                    .fg(t.foreground)
+                    .add_modifier(t.select_mark()),
+            )
             .highlight_symbol("▶ "),
         area,
         &mut state,

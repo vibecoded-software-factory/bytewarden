@@ -67,7 +67,9 @@ pub fn draw_popup(frame: &mut Frame, area: Rect, app: &App) {
     };
     frame.render_widget(
         Paragraph::new(name_line).block(rounded_block(if name_focus {
-            Style::default().fg(t.accent)
+            Style::default()
+                .fg(t.accent)
+                .add_modifier(t.focus_mark(true))
         } else {
             Style::default().fg(t.inactive)
         })),
@@ -128,7 +130,9 @@ pub fn draw_popup(frame: &mut Frame, area: Rect, app: &App) {
     };
     frame.render_widget(
         Paragraph::new(content_line).block(rounded_block(if content_focus {
-            Style::default().fg(t.accent)
+            Style::default()
+                .fg(t.accent)
+                .add_modifier(t.focus_mark(true))
         } else {
             Style::default().fg(t.inactive)
         })),
