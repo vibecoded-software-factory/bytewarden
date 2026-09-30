@@ -673,6 +673,9 @@ mod tests {
 
     #[test]
     fn worker_survives_panic_and_serves_next_request() {
+        let _guard = crate::tui::PANIC_HOOK_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let prev_hook = std::panic::take_hook();
         std::panic::set_hook(Box::new(|_| {}));
 

@@ -33,10 +33,14 @@ pub use app::App;
 use color_eyre::Result;
 use crossterm::event::{self, DisableMouseCapture, EnableMouseCapture};
 use crossterm::execute;
+use std::thread::ThreadId;
 use std::time::Duration;
 
 use crate::ports::{ClipboardPort, PasswordGeneratorPort, SettingsPort, VaultPort};
 use action::ActionState;
+
+#[cfg(test)]
+pub(crate) static PANIC_HOOK_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 const FEEDBACK_TICKS: u8 = 19;
 
@@ -84,9 +88,18 @@ fn write_mouse_teardown(out: &mut impl std::io::Write) -> std::io::Result<()> {
 }
 
 fn install_mouse_teardown_hook() {
+    install_ui_thread_hook(std::thread::current().id(), || {
+        let _ = write_mouse_teardown(&mut std::io::stdout());
+    });
+}
+
+fn install_ui_thread_hook(ui_thread: ThreadId, teardown: impl Fn() + Send + Sync + 'static) {
     let previous = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
-        let _ = write_mouse_teardown(&mut std::io::stdout());
+        if std::thread::current().id() != ui_thread {
+            return;
+        }
+        teardown();
         previous(info);
     }));
 }
@@ -174,6 +187,52 @@ fn tick_state(app: &mut App, done_ticks: &mut u8) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn caught_panic_off_the_ui_thread_skips_teardown_and_previous_hook() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let _guard = PANIC_HOOK_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let saved = std::panic::take_hook();
+        let previous_calls = Arc::new(AtomicUsize::new(0));
+        let teardown_calls = Arc::new(AtomicUsize::new(0));
+        {
+            let previous_calls = Arc::clone(&previous_calls);
+            std::panic::set_hook(Box::new(move |_| {
+                previous_calls.fetch_add(1, Ordering::SeqCst);
+            }));
+        }
+        {
+            let teardown_calls = Arc::clone(&teardown_calls);
+            install_ui_thread_hook(std::thread::current().id(), move || {
+                teardown_calls.fetch_add(1, Ordering::SeqCst);
+            });
+        }
+
+        let off_ui_caught = std::thread::spawn(|| std::panic::catch_unwind(|| panic!("worker")))
+            .join()
+            .expect("the spawned thread contains its own panic")
+            .is_err();
+        let off_ui = (
+            teardown_calls.load(Ordering::SeqCst),
+            previous_calls.load(Ordering::SeqCst),
+        );
+        let on_ui_caught = std::panic::catch_unwind(|| panic!("ui")).is_err();
+        let on_ui = (
+            teardown_calls.load(Ordering::SeqCst),
+            previous_calls.load(Ordering::SeqCst),
+        );
+
+        drop(std::panic::take_hook());
+        std::panic::set_hook(saved);
+
+        assert!(off_ui_caught && on_ui_caught);
+        assert_eq!(off_ui, (0, 0), "a non-UI panic must not touch the terminal");
+        assert_eq!(on_ui, (1, 1), "a UI-thread panic must tear down and chain");
+    }
 
     #[test]
     fn mouse_teardown_disables_every_mode_mouse_capture_enables() {
