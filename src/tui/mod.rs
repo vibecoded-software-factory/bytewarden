@@ -64,18 +64,31 @@ pub fn run(
         );
 
         execute!(std::io::stdout(), EnableMouseCapture)?;
+        install_mouse_teardown_hook();
 
         app.set_action(ActionState::Running("Checking session…".into()));
         draw_frame(terminal, &mut app)?;
         flows::auth::request_resume(&mut app);
 
         let result = run_loop(terminal, &mut app);
-        let _ = execute!(std::io::stdout(), DisableMouseCapture);
+        let _ = write_mouse_teardown(&mut std::io::stdout());
 
         drop(app);
         drop(worker);
         result
     })
+}
+
+fn write_mouse_teardown(out: &mut impl std::io::Write) -> std::io::Result<()> {
+    execute!(out, DisableMouseCapture)
+}
+
+fn install_mouse_teardown_hook() {
+    let previous = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let _ = write_mouse_teardown(&mut std::io::stdout());
+        previous(info);
+    }));
 }
 
 fn draw_frame(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<()> {
@@ -155,5 +168,23 @@ fn tick_state(app: &mut App, done_ticks: &mut u8) {
             }
         }
         ActionState::Error(_) | ActionState::Idle => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mouse_teardown_disables_every_mode_mouse_capture_enables() {
+        let mut out = Vec::new();
+        write_mouse_teardown(&mut out).unwrap();
+        let written = String::from_utf8(out).unwrap();
+        for mode in ["?1000l", "?1002l", "?1003l", "?1015l", "?1006l"] {
+            assert!(
+                written.contains(&format!("\x1b[{mode}")),
+                "missing {mode} in {written:?}"
+            );
+        }
     }
 }
