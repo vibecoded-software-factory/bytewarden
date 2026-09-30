@@ -19,6 +19,12 @@ fn full_args<'a>(args: &'a [&'a str]) -> Vec<&'a str> {
     v
 }
 
+fn join_reader<T>(handle: std::thread::JoinHandle<T>, stream: &str) -> Result<T, BwError> {
+    handle
+        .join()
+        .map_err(|_| BwError::Internal(format!("bw {stream} reader panicked")))
+}
+
 fn wait_with_timeout(mut child: Child, secs: u64, label: &str) -> Result<Output, BwError> {
     let deadline = Instant::now() + Duration::from_secs(secs);
 
@@ -44,10 +50,12 @@ fn wait_with_timeout(mut child: Child, secs: u64, label: &str) -> Result<Output,
         {
             Some(status) => {
                 let stdout = stdout_thread
-                    .and_then(|t| t.join().ok())
+                    .map(|t| join_reader(t, "stdout"))
+                    .transpose()?
                     .unwrap_or_default();
                 let stderr = stderr_thread
-                    .and_then(|t| t.join().ok())
+                    .map(|t| join_reader(t, "stderr"))
+                    .transpose()?
                     .unwrap_or_default();
                 return Ok(Output {
                     status,
@@ -272,7 +280,7 @@ impl InteractiveChild {
             }
             match self.child.try_wait() {
                 Err(e) => return Err(BwError::Internal(format!("bw wait error: {e}"))),
-                Ok(Some(status)) => return Ok(PromptWait::Exited(Box::new(self.collect(status)))),
+                Ok(Some(status)) => return Ok(PromptWait::Exited(Box::new(self.collect(status)?))),
                 Ok(None) => {}
             }
             if Instant::now() >= deadline {
@@ -300,7 +308,7 @@ impl InteractiveChild {
         loop {
             match self.child.try_wait() {
                 Err(e) => return Err(BwError::Internal(format!("bw wait error: {e}"))),
-                Ok(Some(status)) => return Ok(self.collect(status)),
+                Ok(Some(status)) => return self.collect(status),
                 Ok(None) => {}
             }
             if Instant::now() >= deadline {
@@ -315,20 +323,20 @@ impl InteractiveChild {
         }
     }
 
-    fn collect(&mut self, status: std::process::ExitStatus) -> Output {
+    fn collect(&mut self, status: std::process::ExitStatus) -> Result<Output, BwError> {
         for r in self.readers.drain(..) {
-            let _ = r.join();
+            join_reader(r, "output")?;
         }
         let take = |b: &std::sync::Arc<std::sync::Mutex<Vec<u8>>>| {
             b.lock()
                 .map(|mut v| std::mem::take(&mut *v))
                 .unwrap_or_default()
         };
-        Output {
+        Ok(Output {
             status,
             stdout: take(&self.stdout),
             stderr: take(&self.stderr),
-        }
+        })
     }
 }
 
@@ -539,6 +547,22 @@ mod tests {
         let elapsed = started.elapsed();
         assert!(matches!(res, Err(BwError::Timeout { .. })));
         assert!(elapsed < Duration::from_secs(3), "took {elapsed:?}");
+    }
+
+    #[test]
+    fn a_panicked_reader_surfaces_as_an_internal_error() {
+        let reader = std::thread::spawn(|| -> Vec<u8> { panic!("reader blew up") });
+        match join_reader(reader, "stdout") {
+            Err(BwError::Internal(msg)) => assert_eq!(msg, "bw stdout reader panicked"),
+            Err(e) => panic!("expected an internal error, got {e}"),
+            Ok(_) => panic!("a panicked reader must not pass as empty output"),
+        }
+    }
+
+    #[test]
+    fn a_finished_reader_hands_back_its_output() {
+        let reader = std::thread::spawn(|| b"hello".to_vec());
+        assert_eq!(join_reader(reader, "stdout").unwrap(), b"hello");
     }
 
     #[test]
