@@ -63,6 +63,10 @@ pub struct App {
 
     pub cmd_log: CmdLog,
 
+    pub debug_log_path: Option<std::path::PathBuf>,
+
+    pub debug_log_failed: bool,
+
     pub action_state: ActionState,
     pub action_tick: u8,
 
@@ -171,6 +175,8 @@ impl App {
             show_password: false,
             detail_field: 0,
             cmd_log: CmdLog::default(),
+            debug_log_path: crate::tui::debug_log::enabled_path(),
+            debug_log_failed: false,
             action_state: ActionState::Idle,
             action_tick: 0,
             in_flight: None,
@@ -467,12 +473,27 @@ impl App {
         let detail = detail.to_string();
 
         let redacted = redact_cmd(cmd, self.session_marker.as_deref().map(|s| s.as_str()));
-        crate::tui::debug_log::append(&redacted, ok, &detail);
+        let write_err = match &self.debug_log_path {
+            Some(path) if !self.debug_log_failed => {
+                crate::tui::debug_log::append(path, &redacted, ok, &detail)
+                    .err()
+                    .map(|e| format!("could not write {}: {e}", path.display()))
+            }
+            _ => None,
+        };
         self.cmd_log.push(CmdEntry {
             cmd: redacted,
             ok,
             detail,
         });
+        if let Some(detail) = write_err {
+            self.debug_log_failed = true;
+            self.cmd_log.push(CmdEntry {
+                cmd: "debug log".to_string(),
+                ok: false,
+                detail,
+            });
+        }
     }
 
     pub fn set_action(&mut self, state: ActionState) {
@@ -2168,6 +2189,32 @@ mod tests {
         assert!(app.item_actions.is_none());
         assert!(app.reprompt.is_none());
         assert!(app.palette.is_none());
+    }
+
+    #[test]
+    fn a_failing_debug_log_is_reported_once_per_session() {
+        let (mut app, _req_rx, _resp_tx) = fresh_app();
+        let dir = tempfile::tempdir().unwrap();
+        app.debug_log_path = Some(dir.path().to_path_buf());
+
+        for i in 0..3 {
+            app.push_cmd(&format!("bw cmd {i}"), true, "ok");
+        }
+
+        let notices: Vec<_> = app
+            .cmd_log
+            .entries
+            .iter()
+            .filter(|e| e.cmd == "debug log")
+            .collect();
+        assert_eq!(notices.len(), 1);
+        assert!(!notices[0].ok);
+        assert!(
+            notices[0]
+                .detail
+                .starts_with(&format!("could not write {}: ", dir.path().display()))
+        );
+        assert_eq!(app.cmd_log.entries.len(), 4);
     }
 
     #[test]
