@@ -2017,4 +2017,195 @@ mod tests {
         assert_eq!(app.clipboard_clear_secs, 0);
         assert_eq!(app.settings_row_value(SettingRow::ClipboardClear), "Off");
     }
+
+    fn session_env_lock() -> std::sync::MutexGuard<'static, ()> {
+        crate::tui::session_file::ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+    }
+
+    fn unlocked_app_gone_idle() -> (App, Receiver<WorkerRequest>, Sender<WorkerResponse>) {
+        let (mut app, req_rx, resp_tx) = fresh_app();
+        app.authenticated = true;
+        app.vault.items = vec![login_item("a", "Alpha", "a@example.com")];
+        app.vault.rebuild_caches();
+        app.auto_lock.enabled = true;
+        app.auto_lock.after_secs = 60;
+        app.auto_lock.last_activity = Instant::now()
+            .checked_sub(Duration::from_secs(120))
+            .expect("the monotonic clock is past two minutes");
+        (app, req_rx, resp_tx)
+    }
+
+    fn sent_lock(req_rx: &Receiver<WorkerRequest>) -> bool {
+        req_rx.try_iter().any(|r| matches!(r, WorkerRequest::Lock))
+    }
+
+    #[test]
+    fn stale_auto_lock_on_the_create_form_locks_and_wipes_it() {
+        let _env = session_env_lock();
+        use crate::tui::edit_field::EditField;
+        let (mut app, req_rx, _resp_tx) = unlocked_app_gone_idle();
+        app.screen = Screen::Create;
+        app.create.choosing_type = false;
+        app.create.fields = vec![EditField::new("Password", "changeme", true)];
+        app.edit.fields = vec![EditField::new("Password", "changeme", true)];
+        app.edit.item_id = "a".into();
+        app.edit.active = true;
+
+        crate::tui::flows::auth::check_auto_lock(&mut app);
+
+        assert!(sent_lock(&req_rx), "an idle Create form locked the vault");
+        assert_eq!(app.screen, Screen::Login);
+        assert!(app.create.fields.is_empty());
+        assert!(app.create.choosing_type);
+        assert!(app.edit.fields.is_empty());
+        assert!(app.edit.item_id.is_empty());
+        assert!(!app.edit.active);
+        assert!(app.vault.items.is_empty());
+    }
+
+    #[test]
+    fn stale_auto_lock_on_the_generator_overlay_locks_and_wipes_it() {
+        let _env = session_env_lock();
+        let (mut app, req_rx, _resp_tx) = unlocked_app_gone_idle();
+        app.screen = Screen::Generator;
+        app.generator.result = Zeroizing::new("changeme".into());
+        app.generator.return_target = Some(crate::tui::generator::ReturnTarget::EditField(0));
+
+        crate::tui::flows::auth::check_auto_lock(&mut app);
+
+        assert!(
+            sent_lock(&req_rx),
+            "an idle Generator overlay locked the vault"
+        );
+        assert_eq!(app.screen, Screen::Login);
+        assert!(app.generator.result.is_empty());
+        assert!(app.generator.return_target.is_none());
+    }
+
+    #[test]
+    fn stale_auto_lock_on_the_command_palette_locks_and_closes_it() {
+        let _env = session_env_lock();
+        let (mut app, req_rx, _resp_tx) = unlocked_app_gone_idle();
+        app.screen = Screen::Create;
+        crate::tui::flows::palette::open(&mut app);
+        assert_eq!(app.screen, Screen::CommandPalette);
+
+        crate::tui::flows::auth::check_auto_lock(&mut app);
+
+        assert!(sent_lock(&req_rx));
+        assert_eq!(app.screen, Screen::Login);
+        assert!(app.palette.is_none());
+    }
+
+    #[test]
+    fn lock_wipes_every_overlay_that_can_hold_decrypted_state() {
+        let _env = session_env_lock();
+        use crate::tui::flows::items::RenameFieldState;
+        use crate::tui::item_actions::ItemActionsState;
+        use crate::tui::reprompt::{ProtectedAction, RepromptState};
+        let (mut app, _req_rx, _resp_tx) = unlocked_app_gone_idle();
+        app.screen = Screen::RepromptUnlock;
+        app.folders = vec![Folder {
+            id: "f".into(),
+            name: "Private".into(),
+        }];
+        app.show_password = true;
+        app.detail_field = 3;
+        app.reprompt_verified = true;
+        app.help_from = Some(Screen::Detail);
+        app.vault.search_query.insert_str("alpha");
+        app.rename_field = Some(RenameFieldState {
+            input: crate::domain::line_editor::LineEditor::with_text("changeme"),
+            target_idx: 0,
+        });
+        app.send_create = Some(crate::tui::send::SendCreateState::new());
+        app.export = Some(crate::tui::export::ExportState::new());
+        app.import = Some(crate::tui::import::ImportState::new(&[]));
+        app.item_actions = Some(ItemActionsState {
+            item_id: "a".into(),
+            actions: Vec::new(),
+            cursor: 0,
+        });
+        let mut reprompt = RepromptState::new(ProtectedAction::RevealDetail, Screen::Detail);
+        reprompt.input.insert_str("changeme");
+        app.reprompt = Some(reprompt);
+
+        crate::tui::flows::auth::lock_vault(&mut app);
+
+        assert_eq!(app.screen, Screen::Login);
+        assert!(app.folders.is_empty());
+        assert!(!app.show_password);
+        assert_eq!(app.detail_field, 0);
+        assert!(!app.reprompt_verified);
+        assert!(app.help_from.is_none());
+        assert!(app.vault.search_query.is_empty());
+        assert!(app.rename_field.is_none());
+        assert!(app.folder_name.is_none());
+        assert!(app.send_create.is_none());
+        assert!(app.export.is_none());
+        assert!(app.import.is_none());
+        assert!(app.attachment_upload.is_none());
+        assert!(app.attachment_download.is_none());
+        assert!(app.attachment_delete.is_none());
+        assert!(app.memberships.is_none());
+        assert!(app.assign_collections.is_none());
+        assert!(app.item_actions.is_none());
+        assert!(app.reprompt.is_none());
+        assert!(app.palette.is_none());
+    }
+
+    #[test]
+    fn auto_lock_leaves_screens_with_nothing_to_lock_alone() {
+        let _env = session_env_lock();
+        for screen in [Screen::Splash, Screen::Login] {
+            let (mut app, req_rx, _resp_tx) = unlocked_app_gone_idle();
+            app.screen = screen.clone();
+            crate::tui::flows::auth::check_auto_lock(&mut app);
+            assert!(!sent_lock(&req_rx), "{screen:?} must not trigger a lock");
+            assert_eq!(app.screen, screen);
+        }
+
+        let (mut app, req_rx, _resp_tx) = unlocked_app_gone_idle();
+        app.screen = Screen::Login;
+        app.help_from = Some(Screen::Login);
+        app.screen = Screen::Help;
+        crate::tui::flows::auth::check_auto_lock(&mut app);
+        assert!(
+            !sent_lock(&req_rx),
+            "help opened from Login has nothing to lock"
+        );
+        assert_eq!(app.screen, Screen::Help);
+
+        let (mut app, req_rx, _resp_tx) = unlocked_app_gone_idle();
+        app.screen = Screen::Login;
+        app.open_settings();
+        crate::tui::flows::auth::check_auto_lock(&mut app);
+        assert!(
+            !sent_lock(&req_rx),
+            "settings opened from Login has nothing to lock"
+        );
+        assert_eq!(app.screen, Screen::Settings);
+
+        let (mut app, req_rx, _resp_tx) = unlocked_app_gone_idle();
+        app.authenticated = false;
+        app.screen = Screen::Create;
+        crate::tui::flows::auth::check_auto_lock(&mut app);
+        assert!(
+            !sent_lock(&req_rx),
+            "an unauthenticated app has nothing to lock"
+        );
+    }
+
+    #[test]
+    fn auto_lock_waits_while_a_request_is_in_flight() {
+        let _env = session_env_lock();
+        let (mut app, req_rx, _resp_tx) = unlocked_app_gone_idle();
+        app.screen = Screen::Create;
+        assert!(app.begin(InFlight::Sync));
+        crate::tui::flows::auth::check_auto_lock(&mut app);
+        assert!(!sent_lock(&req_rx));
+        assert_eq!(app.screen, Screen::Create);
+    }
 }

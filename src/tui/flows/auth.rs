@@ -6,6 +6,8 @@ use crate::domain::vault_info::{LoginOutcome, VaultInfo, VaultStatus};
 use crate::ports::ParallelSessionData;
 use crate::tui::action::ActionState;
 use crate::tui::app::App;
+use crate::tui::generator::GeneratorState;
+use crate::tui::item_forms::{CreateForm, EditForm};
 use crate::tui::screens::{LoginField, Screen};
 use crate::tui::session_file;
 use crate::tui::worker::{InFlight, WorkerRequest};
@@ -409,16 +411,47 @@ pub fn lock_vault(app: &mut App) {
     app.request_started = None;
     session_file::clear();
     app.session_marker = None;
+    if app.screen == Screen::Settings {
+        app.settings_cancel();
+    }
     app.screen = Screen::Login;
     app.vault.items.clear();
     app.vault.trashed_items.clear();
+    app.folders.clear();
     app.collections.clear();
     app.organizations.clear();
+    app.vault.search_query.clear();
+    app.vault.selected_index = 0;
+    app.vault.scroll_offset = 0;
     app.vault.rebuild_caches();
+    wipe_overlays(app);
     app.login.password_input.clear();
     app.login.active_field = LoginField::Password;
     app.push_cmd("bw lock", true, "vault locked");
     app.set_action(ActionState::Done("Locked ✓".into()));
+}
+
+fn wipe_overlays(app: &mut App) {
+    app.show_password = false;
+    app.detail_field = 0;
+    app.reprompt_verified = false;
+    app.help_from = None;
+    app.edit = EditForm::default();
+    app.create = CreateForm::default();
+    app.generator = GeneratorState::default();
+    app.rename_field = None;
+    app.folder_name = None;
+    app.export = None;
+    app.import = None;
+    app.attachment_upload = None;
+    app.attachment_download = None;
+    app.attachment_delete = None;
+    app.send_create = None;
+    app.memberships = None;
+    app.assign_collections = None;
+    app.reprompt = None;
+    app.palette = None;
+    app.item_actions = None;
 }
 
 pub fn open_confirm_logout(app: &mut App) {
@@ -515,11 +548,20 @@ pub fn handle_fingerprint(app: &mut App, r: Result<String, BwError>) {
     }
 }
 
+fn has_unlocked_screen(app: &App) -> bool {
+    let origin = match app.screen {
+        Screen::Help => app.help_from.as_ref().unwrap_or(&app.screen),
+        Screen::Settings => &app.settings_ui.from,
+        _ => &app.screen,
+    };
+    app.authenticated && !matches!(origin, Screen::Splash | Screen::Login)
+}
+
 pub fn check_auto_lock(app: &mut App) {
     if !app.auto_lock.enabled || app.is_busy() {
         return;
     }
-    if app.screen != Screen::Vault && app.screen != Screen::Detail {
+    if !has_unlocked_screen(app) {
         return;
     }
     if app.auto_lock.is_expired() {
