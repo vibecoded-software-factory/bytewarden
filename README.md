@@ -146,7 +146,7 @@ cannot clobber one by surprise, but where you put it is your call.
 
 ## Contributing
 
-`CLAUDE.md` holds the working agreements — the architecture boundaries, the
+`AGENTS.md` holds the working agreements — the architecture boundaries, the
 invariants that must not regress, and the checks that gate a commit.
 
 ```bash
