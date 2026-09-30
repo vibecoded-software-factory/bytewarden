@@ -98,9 +98,9 @@ is inherited from your terminal, so light backgrounds stay readable.
 |---|---|
 | `BW_SESSION` | An existing unlocked session key; picked up at boot. |
 | `BW_CLIENTID` / `BW_CLIENTSECRET` | Consumed by the API-key login. |
-| `BYTEWARDEN_DEBUG=1` | Also append the command log to `~/.bytewarden.log` (mode `0600`), for a session longer than the in-app panel keeps. |
-| `BYTEWARDEN_GLYPHS=console\|full` | Override the terminal glyph-capability detection. |
-| `BYTEWARDEN_KEYS=mac\|pc` | Override the shortcut-label convention. Useful over SSH, where the machine running bytewarden and the keyboard in front of you disagree. |
+| `BYTEWARDEN_DEBUG=1` | Any non-empty value. Also append the redacted command log to `~/.bytewarden.log` (mode `0600`), for a session longer than the in-app panel keeps. |
+| `BYTEWARDEN_GLYPHS=console\|full` | Override the terminal glyph-capability detection (`ascii` is an alias for `console`). |
+| `BYTEWARDEN_KEYS=mac\|pc` | Override the shortcut-label convention (`macos`/`apple` alias `mac`; `linux`/`windows` alias `pc`). Useful over SSH, where the machine running bytewarden and the keyboard in front of you disagree. |
 | `NO_COLOR` / `COLORTERM` | Standard; see *Theme*. |
 
 ## macOS

@@ -32,8 +32,6 @@ cargo test                                  # hard gate
 
 - **Before every commit**, even a one-liner, run fmt, clippy and test. Check
   real exit codes; never pipe a gate into a grep that can mask a failure.
-- `BYTEWARDEN_DEBUG=1` logs redacted commands to `~/.bytewarden.log`;
-  `BYTEWARDEN_GLYPHS` / `BYTEWARDEN_KEYS` override capability/keyboard detection.
 
 ## Architecture (non-negotiable)
 
@@ -126,7 +124,7 @@ and row actions on a typing surface · **`/`** = focus search.
 Every text input is the shared line editor: UTF-8-safe cursor, readline word
 ops defined in one place, zeroized on drop (any input can hold a secret). Keys
 go through the shared router, rendering through the shared renderer. **Never
-hand-roll cursor editing in a screen**; that duplication has grown back before.
+hand-roll cursor editing in a screen**.
 
 ## Bitwarden CLI adapter
 
@@ -171,9 +169,6 @@ new invocation, never an SDK crate.
 - **Fix the class, not the instance**: after a targeted fix, grep for siblings
   of the pattern and fix them all. **A change to one screen is a change to
   all**: touching a shared mechanic means checking every place it is used.
-- **Judge coherence and flow first**: match the app's patterns and comparable
-  tools (vim, lazygit, mutt, the Bitwarden GUI); no needless mode switches,
-  cursor jumps or lost input. State the reasoning when non-trivial.
 - **No `//` comments in source.** Names and tests carry the meaning.
 
 ## Workflow and git
