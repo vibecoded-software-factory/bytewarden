@@ -15,8 +15,9 @@ use codec::base64_encode;
 use json::opt_str;
 use process::{
     BW_PASSWORD_ENV, PromptWait, bw_run, bw_run_timeout, bw_run_with_password,
-    bw_run_with_password_and_stdin_timeout, bw_run_with_session, bw_run_with_session_timeout,
-    spawn_interactive, stderr_str, stdout_str,
+    bw_run_with_password_and_stdin_timeout, bw_run_with_session,
+    bw_run_with_session_and_stdin_timeout, bw_run_with_session_timeout, spawn_interactive,
+    stderr_str, stdout_str,
 };
 
 fn redact_secret(text: &str, secret: &str) -> String {
@@ -24,6 +25,37 @@ fn redact_secret(text: &str, secret: &str) -> String {
         return text.to_string();
     }
     text.replace(secret, "***")
+}
+
+enum PayloadOp<'a> {
+    CreateItem,
+    EditItem {
+        item_id: &'a str,
+    },
+    CreateFolder,
+    EditFolder {
+        folder_id: &'a str,
+    },
+    Move {
+        item_id: &'a str,
+        organization_id: &'a str,
+    },
+    SendCreate,
+}
+
+fn payload_invocation<'a>(op: PayloadOp<'a>, json: &str) -> (Vec<&'a str>, Zeroizing<String>) {
+    let args = match op {
+        PayloadOp::CreateItem => vec!["create", "item"],
+        PayloadOp::EditItem { item_id } => vec!["edit", "item", item_id],
+        PayloadOp::CreateFolder => vec!["create", "folder"],
+        PayloadOp::EditFolder { folder_id } => vec!["edit", "folder", folder_id],
+        PayloadOp::Move {
+            item_id,
+            organization_id,
+        } => vec!["move", item_id, organization_id],
+        PayloadOp::SendCreate => vec!["send", "create"],
+    };
+    (args, Zeroizing::new(base64_encode(json)))
 }
 
 fn bw_exit(out: &std::process::Output) -> BwError {
@@ -157,6 +189,17 @@ impl BwCliAdapter {
             .as_ref()
             .map(|z| Zeroizing::new(z.as_str().to_string()))
             .ok_or_else(|| BwError::Internal("Vault is locked".to_string()))
+    }
+
+    fn run_payload(
+        &self,
+        op: PayloadOp<'_>,
+        json: &str,
+        secs: u64,
+    ) -> Result<std::process::Output, BwError> {
+        let session = self.session()?;
+        let (args, stdin) = payload_invocation(op, json);
+        bw_run_with_session_and_stdin_timeout(&args, &session, &stdin, secs)
     }
 }
 
@@ -445,10 +488,7 @@ impl VaultPort for BwCliAdapter {
     }
 
     fn create_item(&mut self, item_json: &str) -> Result<Item, BwError> {
-        let session = self.session()?;
-        let encoded = base64_encode(item_json);
-        let out =
-            bw_run_with_session_timeout(&["create", "item", &encoded], &session, ITEM_OP_TIMEOUT)?;
+        let out = self.run_payload(PayloadOp::CreateItem, item_json, ITEM_OP_TIMEOUT)?;
         if out.status.success() {
             serde_json::from_str::<Item>(&stdout_str(&out))
                 .map_err(|e| BwError::InvalidJson(format!("Error parsing created item: {e}")))
@@ -458,13 +498,7 @@ impl VaultPort for BwCliAdapter {
     }
 
     fn edit_item(&mut self, item_id: &str, item_json: &str) -> Result<Item, BwError> {
-        let session = self.session()?;
-        let encoded = base64_encode(item_json);
-        let out = bw_run_with_session_timeout(
-            &["edit", "item", item_id, &encoded],
-            &session,
-            ITEM_OP_TIMEOUT,
-        )?;
+        let out = self.run_payload(PayloadOp::EditItem { item_id }, item_json, ITEM_OP_TIMEOUT)?;
         if out.status.success() {
             serde_json::from_str::<Item>(&stdout_str(&out))
                 .map_err(|e| BwError::InvalidJson(format!("Error parsing edited item: {e}")))
@@ -509,14 +543,8 @@ impl VaultPort for BwCliAdapter {
     }
 
     fn create_folder(&mut self, name: &str) -> Result<Folder, BwError> {
-        let session = self.session()?;
         let payload = json!({ "name": name }).to_string();
-        let encoded = base64_encode(&payload);
-        let out = bw_run_with_session_timeout(
-            &["create", "folder", &encoded],
-            &session,
-            ITEM_OP_TIMEOUT,
-        )?;
+        let out = self.run_payload(PayloadOp::CreateFolder, &payload, ITEM_OP_TIMEOUT)?;
         if out.status.success() {
             serde_json::from_str::<Folder>(&stdout_str(&out))
                 .map_err(|e| BwError::InvalidJson(format!("Error parsing created folder: {e}")))
@@ -526,12 +554,10 @@ impl VaultPort for BwCliAdapter {
     }
 
     fn edit_folder(&mut self, folder_id: &str, name: &str) -> Result<Folder, BwError> {
-        let session = self.session()?;
         let payload = json!({ "name": name }).to_string();
-        let encoded = base64_encode(&payload);
-        let out = bw_run_with_session_timeout(
-            &["edit", "folder", folder_id, &encoded],
-            &session,
+        let out = self.run_payload(
+            PayloadOp::EditFolder { folder_id },
+            &payload,
             ITEM_OP_TIMEOUT,
         )?;
         if out.status.success() {
@@ -586,14 +612,15 @@ impl VaultPort for BwCliAdapter {
         organization_id: &str,
         collection_ids: &[String],
     ) -> Result<(), BwError> {
-        let session = self.session()?;
         let json = serde_json::to_string(collection_ids).map_err(|e| {
             BwError::InvalidJson(format!("Could not serialize collection ids: {e}"))
         })?;
-        let encoded = base64_encode(&json);
-        let out = bw_run_with_session_timeout(
-            &["move", item_id, organization_id, &encoded],
-            &session,
+        let out = self.run_payload(
+            PayloadOp::Move {
+                item_id,
+                organization_id,
+            },
+            &json,
             ITEM_OP_TIMEOUT,
         )?;
         if out.status.success() {
@@ -735,7 +762,6 @@ impl VaultPort for BwCliAdapter {
         days_to_expire: u8,
         content: &str,
     ) -> Result<String, BwError> {
-        let session = self.session()?;
         let days = days_to_expire.clamp(1, 31) as i64;
 
         let now = std::time::SystemTime::now()
@@ -750,9 +776,7 @@ impl VaultPort for BwCliAdapter {
             "text": { "text": content, "hidden": false },
             "deletionDate": deletion,
         });
-        let encoded = base64_encode(&payload.to_string());
-        let out =
-            bw_run_with_session_timeout(&["send", "create", &encoded], &session, ITEM_OP_TIMEOUT)?;
+        let out = self.run_payload(PayloadOp::SendCreate, &payload.to_string(), ITEM_OP_TIMEOUT)?;
         if out.status.success() {
             let url = stdout_str(&out);
             if url.is_empty() {
@@ -925,6 +949,44 @@ mod tests {
             combined_outcome("Two-step login code:\nCode is required."),
             Some(LoginOutcome::NeedsTwoFactor)
         ));
+    }
+
+    #[test]
+    fn payload_writes_keep_the_encoded_json_out_of_argv() {
+        let json = r#"{"login":{"password":"hunter2-DO-NOT-USE"}}"#;
+        let encoded = base64_encode(json);
+        let cases: Vec<(PayloadOp<'_>, Vec<&str>)> = vec![
+            (PayloadOp::CreateItem, vec!["create", "item"]),
+            (
+                PayloadOp::EditItem { item_id: "item-1" },
+                vec!["edit", "item", "item-1"],
+            ),
+            (PayloadOp::CreateFolder, vec!["create", "folder"]),
+            (
+                PayloadOp::EditFolder {
+                    folder_id: "folder-1",
+                },
+                vec!["edit", "folder", "folder-1"],
+            ),
+            (
+                PayloadOp::Move {
+                    item_id: "item-1",
+                    organization_id: "org-1",
+                },
+                vec!["move", "item-1", "org-1"],
+            ),
+            (PayloadOp::SendCreate, vec!["send", "create"]),
+        ];
+        for (op, expected) in cases {
+            let (args, stdin) = payload_invocation(op, json);
+            assert_eq!(args, expected);
+            assert!(
+                args.iter()
+                    .all(|a| !a.contains(&encoded) && !a.contains("hunter2")),
+                "payload leaked into argv: {args:?}"
+            );
+            assert_eq!(stdin.as_str(), encoded, "the payload goes over stdin");
+        }
     }
 
     #[test]

@@ -2,6 +2,7 @@ use crate::ports::BwError;
 use std::io::{Read, Write};
 use std::process::{Child, Command, Output, Stdio};
 use std::time::{Duration, Instant};
+use zeroize::Zeroizing;
 
 pub const BW_PASSWORD_ENV: &str = "BW_PASS_INPUT";
 
@@ -125,6 +126,56 @@ pub fn bw_run_with_session_timeout(
         .spawn()
         .map_err(|e| BwError::Spawn(format!("Could not run bw: {e}")))?;
     wait_with_timeout(child, secs, "bw")
+}
+
+pub fn bw_run_with_session_and_stdin_timeout(
+    args: &[&str],
+    session: &str,
+    stdin_input: &str,
+    secs: u64,
+) -> Result<Output, BwError> {
+    let mut cmd = Command::new("bw");
+    cmd.args(full_args(args)).env(BW_SESSION_ENV, session);
+    run_with_stdin_timeout(cmd, stdin_input, secs, "bw")
+}
+
+fn run_with_stdin_timeout(
+    mut cmd: Command,
+    stdin_input: &str,
+    secs: u64,
+    label: &str,
+) -> Result<Output, BwError> {
+    let mut child = cmd
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| BwError::Spawn(format!("Could not run bw: {e}")))?;
+
+    let Some(mut sin) = child.stdin.take() else {
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err(BwError::Internal("bw stdin was not captured".into()));
+    };
+
+    let payload = Zeroizing::new(stdin_input.to_string());
+    let writer = std::thread::spawn(move || {
+        let res = sin.write_all(payload.as_bytes()).and_then(|()| sin.flush());
+        drop(sin);
+        res
+    });
+
+    let out = wait_with_timeout(child, secs, label)?;
+    let written = writer
+        .join()
+        .map_err(|_| BwError::Internal("bw stdin writer panicked".into()))?;
+    match written {
+        Ok(()) => Ok(out),
+        Err(_) if !out.status.success() => Ok(out),
+        Err(e) => Err(BwError::Internal(format!(
+            "could not send the payload to bw: {e}"
+        ))),
+    }
 }
 
 pub fn bw_run_with_password_and_stdin(
@@ -459,6 +510,68 @@ mod tests {
         let out = wait_with_timeout(child, 5, "test").expect("not timeout");
         assert!(!out.status.success());
         assert_eq!(out.status.code(), Some(7));
+    }
+
+    fn sh_command(script: &str) -> Command {
+        let mut cmd = Command::new("sh");
+        cmd.args(["-c", script]);
+        cmd
+    }
+
+    #[test]
+    fn stdin_runner_delivers_the_payload_and_closes_stdin() {
+        let out = run_with_stdin_timeout(sh_command("exec cat"), "eyJuYW1lIjoieCJ9", 5, "test")
+            .expect("must not time out");
+        assert!(out.status.success(), "cat only exits once stdin hits EOF");
+        assert_eq!(String::from_utf8_lossy(&out.stdout), "eyJuYW1lIjoieCJ9");
+    }
+
+    #[test]
+    fn stdin_runner_echoes_a_large_payload_without_deadlocking() {
+        let payload = "A".repeat(256 * 1024);
+        let started = Instant::now();
+        let out = run_with_stdin_timeout(sh_command("exec cat"), &payload, 5, "test")
+            .expect("must not time out");
+        let elapsed = started.elapsed();
+        assert!(out.status.success());
+        assert_eq!(out.stdout.len(), payload.len());
+        assert!(out.stdout == payload.as_bytes());
+        assert!(elapsed < Duration::from_secs(3), "took {elapsed:?}");
+    }
+
+    #[test]
+    fn stdin_runner_reports_a_payload_the_child_never_read() {
+        let payload = "A".repeat(256 * 1024);
+        let res = run_with_stdin_timeout(sh_command("exit 0"), &payload, 5, "test");
+        match res {
+            Err(BwError::Internal(msg)) => assert!(msg.contains("payload"), "{msg}"),
+            Err(e) => panic!("expected an internal write error, got {e}"),
+            Ok(_) => panic!("a truncated payload must not pass as success"),
+        }
+    }
+
+    #[test]
+    fn stdin_runner_keeps_the_childs_own_error_when_it_fails_unread() {
+        let payload = "A".repeat(256 * 1024);
+        let out = run_with_stdin_timeout(
+            sh_command(">&2 echo 'Vault is locked.'; exit 1"),
+            &payload,
+            5,
+            "test",
+        )
+        .expect("the child's failure is returned as output");
+        assert_eq!(out.status.code(), Some(1));
+        assert_eq!(stderr_str(&out), "Vault is locked.");
+    }
+
+    #[test]
+    fn stdin_runner_times_out_when_the_child_hangs() {
+        let payload = "A".repeat(256 * 1024);
+        let started = Instant::now();
+        let res = run_with_stdin_timeout(sh_command("exec sleep 5"), &payload, 1, "test");
+        let elapsed = started.elapsed();
+        assert!(matches!(res, Err(BwError::Timeout { .. })));
+        assert!(elapsed < Duration::from_secs(3), "took {elapsed:?}");
     }
 
     #[test]
