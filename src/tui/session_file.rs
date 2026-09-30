@@ -1,5 +1,6 @@
 use std::fs;
-use std::os::unix::fs::PermissionsExt;
+use std::io::Write;
+use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::os::unix::process::parent_id;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -34,24 +35,68 @@ pub fn save(session_key: &str) {
         return;
     }
     let d = dir();
-    if fs::create_dir_all(&d).is_err() {
+    if fs::DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(&d)
+        .is_err()
+    {
+        return;
+    }
+    if !trusted_dir(&d) {
         return;
     }
 
-    let _ = fs::set_permissions(&d, fs::Permissions::from_mode(0o700));
+    write_atomic(&current_path(), session_key);
+}
 
-    let path = current_path();
-    if fs::write(&path, session_key).is_err() {
-        return;
+fn trusted_dir(d: &Path) -> bool {
+    let owner_only = |d: &Path| {
+        fs::symlink_metadata(d).is_ok_and(|m| m.file_type().is_dir() && m.mode() & 0o077 == 0)
+    };
+    if owner_only(d) {
+        return true;
     }
-    let _ = fs::set_permissions(&path, fs::Permissions::from_mode(0o600));
+    if fs::symlink_metadata(d).is_ok_and(|m| m.file_type().is_dir()) {
+        let _ = fs::set_permissions(d, fs::Permissions::from_mode(0o700));
+    }
+    owner_only(d)
+}
+
+fn write_atomic(path: &Path, contents: &str) {
+    let tmp = {
+        let mut p = path.as_os_str().to_owned();
+        p.push(".tmp");
+        PathBuf::from(p)
+    };
+    let _ = fs::remove_file(&tmp);
+    let write = (|| -> std::io::Result<()> {
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&tmp)?;
+        file.write_all(contents.as_bytes())?;
+        file.sync_all()?;
+        fs::rename(&tmp, path)
+    })();
+    if write.is_err() {
+        let _ = fs::remove_file(&tmp);
+    }
 }
 
 pub fn load() -> Option<Zeroizing<String>> {
+    if !trusted_dir(&dir()) {
+        return None;
+    }
     let path = current_path();
 
     if is_too_old(&path) {
         let _ = fs::remove_file(&path);
+        return None;
+    }
+    let meta = fs::symlink_metadata(&path).ok()?;
+    if !meta.file_type().is_file() || meta.mode() & 0o077 != 0 {
         return None;
     }
 
@@ -311,5 +356,109 @@ mod tests {
         assert!(live.exists(), "live PID file must survive");
         assert!(!dead.exists(), "dead PID file must be removed");
         assert!(other.exists(), "non-matching name must be ignored");
+    }
+
+    fn use_xdg(tmp: &TempDir) -> PathBuf {
+        unsafe {
+            std::env::set_var("XDG_RUNTIME_DIR", tmp.path());
+        }
+        tmp.path().join("bytewarden")
+    }
+
+    fn session_path_in(dir: &Path) -> PathBuf {
+        dir.join(format!("session-{}", std::os::unix::process::parent_id()))
+    }
+
+    #[test]
+    fn save_writes_owner_only_file_and_dir() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let tmp = TempDir::new().unwrap();
+        let dir = use_xdg(&tmp);
+        save("KEY-MODE");
+        let path = session_path_in(&dir);
+        let file_mode = fs::metadata(&path).unwrap().mode() & 0o777;
+        let dir_mode = fs::metadata(&dir).unwrap().mode() & 0o777;
+        assert_eq!(file_mode, 0o600);
+        assert_eq!(dir_mode, 0o700);
+        let tmp_path = {
+            let mut p = path.as_os_str().to_owned();
+            p.push(".tmp");
+            PathBuf::from(p)
+        };
+        assert!(!tmp_path.exists(), "temp file must not linger");
+    }
+
+    #[test]
+    fn save_tightens_own_world_writable_dir() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let tmp = TempDir::new().unwrap();
+        let dir = use_xdg(&tmp);
+        fs::create_dir(&dir).unwrap();
+        fs::set_permissions(&dir, fs::Permissions::from_mode(0o777)).unwrap();
+        save("KEY-LOOSE");
+        assert_eq!(fs::metadata(&dir).unwrap().mode() & 0o777, 0o700);
+        assert_eq!(load().as_ref().map(|z| z.as_str()), Some("KEY-LOOSE"));
+    }
+
+    #[test]
+    fn save_and_load_refuse_symlinked_dir() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let tmp = TempDir::new().unwrap();
+        let dir = use_xdg(&tmp);
+        let target = tmp.path().join("elsewhere");
+        fs::create_dir(&target).unwrap();
+        fs::set_permissions(&target, fs::Permissions::from_mode(0o700)).unwrap();
+        std::os::unix::fs::symlink(&target, &dir).unwrap();
+
+        save("KEY-SYMLINK");
+        assert!(
+            !session_path_in(&target).exists(),
+            "must not write through a symlinked dir"
+        );
+
+        fs::write(session_path_in(&target), "PLANTED").unwrap();
+        fs::set_permissions(session_path_in(&target), fs::Permissions::from_mode(0o600)).unwrap();
+        assert!(load().is_none(), "must not trust a symlinked dir");
+    }
+
+    #[test]
+    fn save_replaces_planted_symlink_instead_of_following_it() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let tmp = TempDir::new().unwrap();
+        let dir = use_xdg(&tmp);
+        fs::DirBuilder::new().mode(0o700).create(&dir).unwrap();
+        let victim = tmp.path().join("victim");
+        fs::write(&victim, "ORIGINAL").unwrap();
+        std::os::unix::fs::symlink(&victim, session_path_in(&dir)).unwrap();
+
+        save("KEY-ATOMIC");
+
+        assert_eq!(fs::read_to_string(&victim).unwrap(), "ORIGINAL");
+        let meta = fs::symlink_metadata(session_path_in(&dir)).unwrap();
+        assert!(meta.file_type().is_file());
+        assert_eq!(meta.mode() & 0o777, 0o600);
+    }
+
+    #[test]
+    fn load_refuses_symlinked_or_loose_session_file() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let tmp = TempDir::new().unwrap();
+        let dir = use_xdg(&tmp);
+        fs::DirBuilder::new().mode(0o700).create(&dir).unwrap();
+        let path = session_path_in(&dir);
+
+        let planted = tmp.path().join("planted");
+        fs::write(&planted, "PLANTED").unwrap();
+        fs::set_permissions(&planted, fs::Permissions::from_mode(0o600)).unwrap();
+        std::os::unix::fs::symlink(&planted, &path).unwrap();
+        assert!(load().is_none(), "symlinked session file must be refused");
+
+        fs::remove_file(&path).unwrap();
+        fs::write(&path, "LOOSE").unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
+        assert!(
+            load().is_none(),
+            "group/world-readable file must be refused"
+        );
     }
 }
