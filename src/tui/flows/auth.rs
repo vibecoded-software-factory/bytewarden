@@ -427,6 +427,7 @@ pub fn lock_vault(app: &mut App) {
     wipe_overlays(app);
     app.login.password_input.clear();
     app.login.active_field = LoginField::Password;
+    app.cmd_log.clear();
     app.push_cmd("bw lock", true, "vault locked");
     app.set_action(ActionState::Done("Locked ✓".into()));
 }

@@ -2171,6 +2171,19 @@ mod tests {
     }
 
     #[test]
+    fn lock_clears_the_command_log_down_to_the_lock_entry() {
+        let _env = session_env_lock();
+        let (mut app, _req_rx, _resp_tx) = unlocked_app_gone_idle();
+        app.push_cmd("bw list items", true, "3 items loaded");
+        app.push_cmd("bw get item a", true, "fetched");
+
+        crate::tui::flows::auth::lock_vault(&mut app);
+
+        assert_eq!(app.cmd_log.entries.len(), 1);
+        assert_eq!(app.cmd_log.entries[0].cmd, "bw lock");
+    }
+
+    #[test]
     fn auto_lock_leaves_screens_with_nothing_to_lock_alone() {
         let _env = session_env_lock();
         for screen in [Screen::Splash, Screen::Login] {
