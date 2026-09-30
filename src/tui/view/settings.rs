@@ -196,7 +196,7 @@ fn draw_rows_panel(frame: &mut Frame, app: &App, area: Rect, section: SettingsSe
     let sel = app.settings_ui.row.min(rows.len().saturating_sub(1));
     let label_w = rows
         .iter()
-        .map(|r| r.label().chars().count())
+        .map(|r| Span::raw(r.label()).width())
         .max()
         .unwrap_or(0);
 
@@ -222,7 +222,11 @@ fn draw_rows_panel(frame: &mut Frame, app: &App, area: Rect, section: SettingsSe
             };
             Line::from(vec![
                 Span::styled(
-                    format!("{marker}{:<width$}  ", r.label(), width = label_w),
+                    format!(
+                        "{marker}{}{}  ",
+                        r.label(),
+                        " ".repeat(label_w.saturating_sub(Span::raw(r.label()).width()))
+                    ),
                     name_style,
                 ),
                 Span::styled(app.settings_row_value(r), value_style),

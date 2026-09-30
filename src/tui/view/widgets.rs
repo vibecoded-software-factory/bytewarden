@@ -260,12 +260,22 @@ pub fn key_style(t: &Theme) -> Style {
 }
 
 pub fn legend_line(items: &[(&str, &str)], width: u16, t: &Theme) -> Line<'static> {
+    legend_line_on(crate::tui::keyboard::host(), items, width, t)
+}
+
+fn legend_line_on(
+    kb: crate::tui::keyboard::Keyboard,
+    items: &[(&str, &str)],
+    width: u16,
+    t: &Theme,
+) -> Line<'static> {
     let mut spans: Vec<Span<'static>> = Vec::new();
     let mut used = 0usize;
     let width = width as usize;
     for (i, (key, label)) in items.iter().enumerate() {
         let sep = if i == 0 { 0 } else { 3 };
-        let seg = key.chars().count() + 1 + label.chars().count();
+        let key_label = crate::tui::keyboard::label_on(kb, key).into_owned();
+        let seg = Span::raw(key_label.as_str()).width() + 1 + Span::raw(*label).width();
 
         let reserve = if i + 1 < items.len() { 2 } else { 0 };
         if i > 0 && used + sep + seg + reserve > width {
@@ -275,10 +285,7 @@ pub fn legend_line(items: &[(&str, &str)], width: u16, t: &Theme) -> Line<'stati
         if i > 0 {
             spans.push(Span::styled(" · ", Style::default().fg(t.muted)));
         }
-        spans.push(Span::styled(
-            crate::tui::keyboard::label(key).into_owned(),
-            key_style(t),
-        ));
+        spans.push(Span::styled(key_label, key_style(t)));
         spans.push(Span::raw(" "));
         spans.push(Span::styled(
             (*label).to_string(),
@@ -652,7 +659,7 @@ fn render_cmd_bar_inner(
     let suffix_block = if suffix.is_empty() {
         0
     } else {
-        suffix.chars().count() + 2
+        Span::raw(suffix).width() + 2
     };
     let hints_avail = total.saturating_sub(suffix_block + 1);
 
@@ -673,7 +680,7 @@ fn render_cmd_bar_inner(
             inner,
         );
 
-        let anchor_len = suffix.chars().count() as u16;
+        let anchor_len = Span::raw(suffix).width() as u16;
         if inner.width >= anchor_len {
             let ax = inner.x + inner.width - anchor_len;
             let help_w = "F1 help".chars().count() as u16;
@@ -892,8 +899,11 @@ pub fn help_line<'a>(key: &'a str, desc: &'a str, t: &Theme) -> Line<'a> {
 #[cfg(test)]
 mod tests {
     use super::{
-        ScrollTarget, cmdlog_height, register_scroll, reset_scroll_regions, scroll_target_at,
+        ScrollTarget, cmdlog_height, legend_line_on, register_scroll, reset_scroll_regions,
+        scroll_target_at,
     };
+    use crate::tui::keyboard::Keyboard;
+    use crate::tui::theme::Theme;
     use ratatui::layout::Rect;
 
     #[test]
@@ -929,5 +939,29 @@ mod tests {
 
         assert_eq!(cmdlog_height(18), 3);
         assert_eq!(cmdlog_height(40), 6);
+    }
+
+    fn rendered(line: &ratatui::text::Line<'_>) -> String {
+        line.spans.iter().map(|s| s.content.as_ref()).collect()
+    }
+
+    #[test]
+    fn legend_fit_is_measured_against_the_rendered_key_label() {
+        let t = Theme::default();
+        let items = [("Ctrl+P", "palette"), ("Ctrl+Q", "quit")];
+        let line = legend_line_on(Keyboard::Mac, &items, 20, &t);
+        assert_eq!(rendered(&line), "⌃P palette · ⌃Q quit");
+        assert_eq!(line.width(), 20);
+    }
+
+    #[test]
+    fn legend_fit_counts_wide_glyphs_as_two_cells() {
+        let t = Theme::default();
+        let items = [("a", "日本語"), ("b", "c")];
+        let fits = legend_line_on(Keyboard::Pc, &items, 14, &t);
+        assert_eq!(rendered(&fits), "a 日本語 · b c");
+        let clipped = legend_line_on(Keyboard::Pc, &items, 13, &t);
+        assert_eq!(rendered(&clipped), "a 日本語 …");
+        assert!(clipped.width() <= 13);
     }
 }

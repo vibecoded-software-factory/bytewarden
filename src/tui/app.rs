@@ -2235,4 +2235,42 @@ mod tests {
         assert!(!sent_lock(&req_rx));
         assert_eq!(app.screen, Screen::Create);
     }
+
+    #[test]
+    fn the_detail_header_right_anchors_the_status_whatever_the_name_width() {
+        use crate::tui::action::ActionState;
+        use crate::tui::screens::Screen;
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
+
+        let status_end = |name: &str| -> usize {
+            let (mut app, _req_rx, _resp_tx) = fresh_app();
+            app.vault.items = vec![login_item("a", name, "user@example.com")];
+            app.vault.rebuild_caches();
+            app.vault.selected_index = 0;
+            app.screen = Screen::Detail;
+            app.set_action(ActionState::Done("Copied".into()));
+            let mut term = Terminal::new(TestBackend::new(90, 24)).unwrap();
+            term.draw(|f| crate::tui::view::draw(f, &mut app)).unwrap();
+            let buf = term.backend().buffer();
+            let row: Vec<&str> = (0..buf.area().width)
+                .map(|x| buf.cell((x, 0)).map_or("", |c| c.symbol()))
+                .collect();
+            row.windows(6)
+                .position(|w| w == ["C", "o", "p", "i", "e", "d"])
+                .map(|i| i + 6)
+                .unwrap_or_else(|| panic!("the status is rendered next to {name}"))
+        };
+        let ascii = status_end("Acct");
+        assert_eq!(
+            status_end("Café"),
+            ascii,
+            "an accented name shifts the status"
+        );
+        assert_eq!(
+            status_end("日本語é"),
+            ascii,
+            "a wide name shifts the status"
+        );
+    }
 }

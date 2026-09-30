@@ -66,7 +66,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     };
     if !msg.is_empty() {
         let y = (top + LOGO_HEIGHT + 1).min(area.height.saturating_sub(1));
-        let w = msg.len() as u16;
+        let w = Span::raw(msg.as_str()).width() as u16;
         let x = area.width.saturating_sub(w) / 2;
         frame.render_widget(
             Paragraph::new(Span::styled(

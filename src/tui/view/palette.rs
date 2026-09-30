@@ -27,8 +27,8 @@ pub fn draw(frame: &mut Frame, app: &App) {
         .filter_map(|&i| state.all.get(i))
         .map(|c| {
             let keys = crate::tui::keyboard::label(c.keys).into_owned();
-            let label_w = c.label.chars().count();
-            let keys_w = keys.chars().count();
+            let label_w = Span::raw(c.label).width();
+            let keys_w = Span::raw(keys.as_str()).width();
             let pad = width.saturating_sub(label_w + keys_w + 1).max(1);
             PickerRow::Item(vec![Line::from(vec![
                 Span::styled(c.label, Style::default().fg(t.foreground)),

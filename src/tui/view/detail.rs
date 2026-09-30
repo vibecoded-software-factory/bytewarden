@@ -65,9 +65,13 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         Span::raw("")
     };
     let pad = (area.width as usize).saturating_sub(
-        4 + item.name.len() + 4 + item_type_label(item.item_type).len() + action_text.len() + 2,
+        4 + Span::raw(item.name.as_str()).width()
+            + 4
+            + Span::raw(item_type_label(item.item_type)).width()
+            + Span::raw(action_text.as_str()).width()
+            + 2,
     );
-    let padded = format!("{:>width$}", action_text, width = action_text.len() + pad);
+    let padded = format!("{}{action_text}", " ".repeat(pad));
     frame.render_widget(
         Paragraph::new(Line::from(vec![
             Span::styled(" ← ", Style::default().fg(t.dim)),

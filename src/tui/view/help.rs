@@ -68,10 +68,7 @@ pub fn draw_popup(frame: &mut Frame, area: Rect, app: &mut App) {
 }
 
 fn line_visual_width(line: &Line<'_>) -> u16 {
-    line.spans
-        .iter()
-        .map(|s| s.content.chars().count() as u16)
-        .sum()
+    line.width() as u16
 }
 
 fn draw_scroll_indicators(
@@ -537,4 +534,16 @@ fn global_footer(t: &Theme) -> Line<'static> {
         "  F10: settings (theme · security · advanced)  ·  j/k ↑↓ PgUp/PgDn: scroll  ·  h/l ←→: pan  ·  Home/End: top/bottom  ·  F1/Esc: close",
         Style::default().fg(t.dim),
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::line_visual_width;
+    use ratatui::text::{Line, Span};
+
+    #[test]
+    fn line_visual_width_counts_terminal_cells_not_chars() {
+        let line = Line::from(vec![Span::raw("日本"), Span::raw(" ab")]);
+        assert_eq!(line_visual_width(&line), 7);
+    }
 }
