@@ -178,48 +178,15 @@ fn run_with_stdin_timeout(
     }
 }
 
-pub fn bw_run_with_password_and_stdin(
-    args: &[&str],
-    password: &str,
-    stdin_input: &str,
-) -> Result<Output, BwError> {
-    let mut child = Command::new("bw")
-        .args(args)
-        .env(BW_PASSWORD_ENV, password)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|e| BwError::Spawn(format!("Could not run bw: {e}")))?;
-
-    if let Some(mut sin) = child.stdin.take() {
-        let _ = sin.write_all(stdin_input.as_bytes());
-    }
-
-    child
-        .wait_with_output()
-        .map_err(|e| BwError::Internal(format!("bw wait error: {e}")))
-}
-
 pub fn bw_run_with_password_and_stdin_timeout(
     args: &[&str],
     password: &str,
     stdin_input: &str,
     secs: u64,
 ) -> Result<Output, BwError> {
-    let mut child = Command::new("bw")
-        .args(args)
-        .env(BW_PASSWORD_ENV, password)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|e| BwError::Spawn(format!("Could not run bw: {e}")))?;
-
-    if let Some(mut sin) = child.stdin.take() {
-        let _ = sin.write_all(stdin_input.as_bytes());
-    }
-    wait_with_timeout(child, secs, "bw")
+    let mut cmd = Command::new("bw");
+    cmd.args(args).env(BW_PASSWORD_ENV, password);
+    run_with_stdin_timeout(cmd, stdin_input, secs, "bw")
 }
 
 pub fn stdout_str(out: &Output) -> String {
