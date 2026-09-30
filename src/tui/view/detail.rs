@@ -56,37 +56,32 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     .split(area);
 
     let (action_text, action_style) = action_text_style(app);
-    let mode_tag = if app.edit.active {
+    let mut spans = vec![
+        Span::styled(" ← ", Style::default().fg(t.dim)),
         Span::styled(
+            item.name.as_str(),
+            Style::default().fg(t.accent).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            format!("  [{}]", item_type_label(item.item_type)),
+            Style::default().fg(t.inactive),
+        ),
+    ];
+    if app.edit.active {
+        spans.push(Span::styled(
             "  [EDIT]",
             Style::default().fg(t.accent).add_modifier(Modifier::BOLD),
-        )
-    } else {
-        Span::raw("")
-    };
-    let pad = (area.width as usize).saturating_sub(
-        4 + Span::raw(item.name.as_str()).width()
-            + 4
-            + Span::raw(item_type_label(item.item_type)).width()
-            + Span::raw(action_text.as_str()).width()
-            + 2,
-    );
-    let padded = format!("{}{action_text}", " ".repeat(pad));
+        ));
+    }
+    let used =
+        spans.iter().map(Span::width).sum::<usize>() + Span::raw(action_text.as_str()).width() + 2;
+    let pad = (area.width as usize).saturating_sub(used);
+    spans.push(Span::styled(
+        format!("{}{action_text}", " ".repeat(pad)),
+        action_style,
+    ));
     frame.render_widget(
-        Paragraph::new(Line::from(vec![
-            Span::styled(" ← ", Style::default().fg(t.dim)),
-            Span::styled(
-                item.name.as_str(),
-                Style::default().fg(t.accent).add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(
-                format!("  [{}]", item_type_label(item.item_type)),
-                Style::default().fg(t.inactive),
-            ),
-            mode_tag,
-            Span::styled(padded, action_style),
-        ]))
-        .block(
+        Paragraph::new(Line::from(spans)).block(
             Block::default()
                 .borders(Borders::BOTTOM)
                 .border_style(Style::default().fg(t.inactive)),

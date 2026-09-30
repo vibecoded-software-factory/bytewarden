@@ -2243,12 +2243,16 @@ mod tests {
         use ratatui::Terminal;
         use ratatui::backend::TestBackend;
 
-        let status_end = |name: &str| -> usize {
+        let status_end_in = |name: &str, editing: bool| -> usize {
             let (mut app, _req_rx, _resp_tx) = fresh_app();
             app.vault.items = vec![login_item("a", name, "user@example.com")];
             app.vault.rebuild_caches();
             app.vault.selected_index = 0;
             app.screen = Screen::Detail;
+            if editing {
+                crate::tui::flows::items::enter_edit_mode(&mut app);
+                assert!(app.edit.active);
+            }
             app.set_action(ActionState::Done("Copied".into()));
             let mut term = Terminal::new(TestBackend::new(90, 24)).unwrap();
             term.draw(|f| crate::tui::view::draw(f, &mut app)).unwrap();
@@ -2261,7 +2265,9 @@ mod tests {
                 .map(|i| i + 6)
                 .unwrap_or_else(|| panic!("the status is rendered next to {name}"))
         };
+        let status_end = |name: &str| status_end_in(name, false);
         let ascii = status_end("Acct");
+        assert_eq!(ascii, 88, "the status ends two cells short of the edge");
         assert_eq!(
             status_end("Café"),
             ascii,
@@ -2271,6 +2277,16 @@ mod tests {
             status_end("日本語é"),
             ascii,
             "a wide name shifts the status"
+        );
+        assert_eq!(
+            status_end_in("Acct", true),
+            ascii,
+            "the [EDIT] tag pushes the status past the edge"
+        );
+        assert_eq!(
+            status_end_in("日本語é", true),
+            ascii,
+            "a wide name in edit mode shifts the status"
         );
     }
 }
