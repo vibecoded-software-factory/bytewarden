@@ -223,9 +223,14 @@ pub struct AttachmentDownloadState {
 }
 
 pub fn default_download_path(file_name: &str) -> String {
-    let downloads = std::env::var("HOME")
-        .map(|h| std::path::PathBuf::from(h).join("Downloads"))
-        .unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let home = std::env::var("HOME").ok().map(std::path::PathBuf::from);
+    download_path_in(home.as_deref(), file_name)
+}
+
+fn download_path_in(home: Option<&std::path::Path>, file_name: &str) -> String {
+    let downloads = home
+        .map(|h| h.join("Downloads"))
+        .unwrap_or_else(|| std::path::PathBuf::from("."));
     unique_path(&downloads, file_name)
 }
 
@@ -1101,22 +1106,11 @@ mod tests {
     }
 
     #[test]
-    fn default_download_path_uses_home_downloads_when_set() {
+    fn download_path_in_uses_home_downloads_when_set() {
         let tmp = TempDir::new().unwrap();
-
-        let prev = std::env::var("HOME").ok();
-        unsafe {
-            std::env::set_var("HOME", tmp.path());
-        }
         std::fs::create_dir_all(tmp.path().join("Downloads")).unwrap();
-        let path = default_download_path("file.pdf");
+        let path = download_path_in(Some(tmp.path()), "file.pdf");
         let expected = tmp.path().join("Downloads/file.pdf");
         assert_eq!(path, expected.to_string_lossy());
-        unsafe {
-            match prev {
-                Some(v) => std::env::set_var("HOME", v),
-                None => std::env::remove_var("HOME"),
-            }
-        }
     }
 }
